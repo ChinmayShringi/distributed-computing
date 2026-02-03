@@ -21,6 +21,7 @@ import (
 	"github.com/edgecli/edgecli/internal/allowlist"
 	"github.com/edgecli/edgecli/internal/deviceid"
 	"github.com/edgecli/edgecli/internal/exec"
+	"github.com/edgecli/edgecli/internal/jobs"
 	"github.com/edgecli/edgecli/internal/registry"
 	"github.com/edgecli/edgecli/internal/sysinfo"
 	pb "github.com/edgecli/edgecli/proto"
@@ -46,6 +47,7 @@ type OrchestratorServer struct {
 	mu           sync.RWMutex
 	runner       *exec.Runner
 	registry     *registry.Registry
+	jobManager   *jobs.Manager
 	selfDeviceID string
 	selfAddr     string
 }
@@ -74,6 +76,7 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		sessions:     make(map[string]*Session),
 		runner:       exec.NewRunner(),
 		registry:     registry.NewRegistry(),
+		jobManager:   jobs.NewManager(),
 		selfDeviceID: selfID,
 		selfAddr:     selfAddr,
 	}
@@ -416,6 +419,206 @@ func (s *OrchestratorServer) forwardCommand(ctx context.Context, targetAddr stri
 
 	log.Printf("[INFO] forwardCommand: command completed on %s exit_code=%d", targetAddr, cmdResp.ExitCode)
 	return cmdResp, nil
+}
+
+// RunTask executes a task locally on this device (worker RPC)
+func (s *OrchestratorServer) RunTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResult, error) {
+	start := time.Now()
+	log.Printf("[INFO] RunTask: task_id=%s job_id=%s kind=%s", req.TaskId, req.JobId, req.Kind)
+
+	switch req.Kind {
+	case "SYSINFO":
+		info := s.collectSysInfo()
+		return &pb.TaskResult{
+			TaskId: req.TaskId,
+			Ok:     true,
+			Output: info,
+			TimeMs: float64(time.Since(start).Milliseconds()),
+		}, nil
+
+	case "ECHO":
+		return &pb.TaskResult{
+			TaskId: req.TaskId,
+			Ok:     true,
+			Output: "echo: " + req.Input,
+			TimeMs: float64(time.Since(start).Milliseconds()),
+		}, nil
+
+	default:
+		return &pb.TaskResult{
+			TaskId: req.TaskId,
+			Ok:     false,
+			Error:  "unknown task kind: " + req.Kind,
+			TimeMs: float64(time.Since(start).Milliseconds()),
+		}, nil
+	}
+}
+
+// collectSysInfo gathers system information for this device
+func (s *OrchestratorServer) collectSysInfo() string {
+	hostname, _ := os.Hostname()
+	hostStatus := sysinfo.GetHostStatus()
+	now := time.Now().Format(time.RFC3339)
+
+	return fmt.Sprintf("Device: %s\nDevice ID: %s\nPlatform: %s/%s\nMemory: %d MB total, %d MB used\nTime: %s",
+		hostname,
+		s.selfDeviceID,
+		runtime.GOOS, runtime.GOARCH,
+		hostStatus.MemTotalMB, hostStatus.MemUsedMB,
+		now)
+}
+
+// SubmitJob accepts a job request and distributes tasks to devices
+func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) (*pb.JobInfo, error) {
+	// Verify session
+	s.mu.RLock()
+	_, exists := s.sessions[req.SessionId]
+	s.mu.RUnlock()
+
+	if !exists {
+		log.Printf("[ERROR] SubmitJob: session not found: %s", req.SessionId)
+		return nil, status.Error(codes.Unauthenticated, "session not found")
+	}
+
+	// Get devices from registry
+	devices := s.registry.List()
+	if len(devices) == 0 {
+		return nil, status.Error(codes.FailedPrecondition, "no devices available")
+	}
+
+	// Create job with tasks
+	job, err := s.jobManager.CreateJob(devices, int(req.MaxWorkers))
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create job: %v", err)
+	}
+
+	log.Printf("[INFO] SubmitJob: job_id=%s tasks=%d text=%q", job.ID, len(job.Tasks), req.Text)
+
+	// Execute tasks asynchronously
+	go s.executeJobTasks(job)
+
+	return &pb.JobInfo{
+		JobId:     job.ID,
+		CreatedAt: job.CreatedAt.Unix(),
+		Summary:   fmt.Sprintf("distributed to %d devices", len(job.Tasks)),
+	}, nil
+}
+
+// executeJobTasks runs all tasks for a job in parallel
+func (s *OrchestratorServer) executeJobTasks(job *jobs.Job) {
+	s.jobManager.SetJobRunning(job.ID)
+
+	var wg sync.WaitGroup
+	var results []string
+	var resultsMu sync.Mutex
+	var failedCount int
+
+	for _, task := range job.Tasks {
+		wg.Add(1)
+		go func(t *jobs.Task) {
+			defer wg.Done()
+
+			log.Printf("[INFO] executeJobTasks: executing task=%s on device=%s addr=%s",
+				t.ID, t.DeviceName, t.DeviceAddr)
+
+			// Create context with timeout
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Dial the device
+			conn, err := grpc.DialContext(ctx, t.DeviceAddr,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithBlock(),
+			)
+			if err != nil {
+				log.Printf("[ERROR] executeJobTasks: failed to dial %s: %v", t.DeviceAddr, err)
+				s.jobManager.UpdateTask(job.ID, t.ID, jobs.TaskFailed, "", err.Error())
+				resultsMu.Lock()
+				failedCount++
+				resultsMu.Unlock()
+				return
+			}
+			defer conn.Close()
+
+			client := pb.NewOrchestratorServiceClient(conn)
+
+			// Call RunTask on the device
+			result, err := client.RunTask(ctx, &pb.TaskRequest{
+				TaskId: t.ID,
+				JobId:  job.ID,
+				Kind:   t.Kind,
+				Input:  t.Input,
+			})
+
+			if err != nil {
+				log.Printf("[ERROR] executeJobTasks: RunTask failed on %s: %v", t.DeviceAddr, err)
+				s.jobManager.UpdateTask(job.ID, t.ID, jobs.TaskFailed, "", err.Error())
+				resultsMu.Lock()
+				failedCount++
+				resultsMu.Unlock()
+				return
+			}
+
+			if !result.Ok {
+				log.Printf("[ERROR] executeJobTasks: task failed on %s: %s", t.DeviceAddr, result.Error)
+				s.jobManager.UpdateTask(job.ID, t.ID, jobs.TaskFailed, "", result.Error)
+				resultsMu.Lock()
+				failedCount++
+				resultsMu.Unlock()
+				return
+			}
+
+			// Task succeeded
+			s.jobManager.UpdateTask(job.ID, t.ID, jobs.TaskDone, result.Output, "")
+			resultsMu.Lock()
+			results = append(results, fmt.Sprintf("=== %s (%s) ===\n%s",
+				t.DeviceName, t.DeviceID[:8], result.Output))
+			resultsMu.Unlock()
+
+			log.Printf("[INFO] executeJobTasks: task=%s completed on %s in %.2fms",
+				t.ID, t.DeviceName, result.TimeMs)
+		}(task)
+	}
+
+	wg.Wait()
+
+	// Concatenate results and mark job done
+	finalResult := strings.Join(results, "\n\n")
+	if failedCount > 0 {
+		finalResult = fmt.Sprintf("Warning: %d task(s) failed\n\n%s", failedCount, finalResult)
+	}
+	s.jobManager.SetJobDone(job.ID, finalResult)
+
+	log.Printf("[INFO] executeJobTasks: job=%s completed, %d succeeded, %d failed",
+		job.ID, len(results), failedCount)
+}
+
+// GetJob returns the status of a job
+func (s *OrchestratorServer) GetJob(ctx context.Context, req *pb.JobId) (*pb.JobStatus, error) {
+	job, ok := s.jobManager.Get(req.JobId)
+	if !ok {
+		return nil, status.Error(codes.NotFound, "job not found")
+	}
+
+	// Convert tasks to proto
+	tasks := make([]*pb.TaskStatus, len(job.Tasks))
+	for i, t := range job.Tasks {
+		tasks[i] = &pb.TaskStatus{
+			TaskId:             t.ID,
+			AssignedDeviceId:   t.DeviceID,
+			AssignedDeviceName: t.DeviceName,
+			State:              string(t.State),
+			Result:             t.Result,
+			Error:              t.Error,
+		}
+	}
+
+	return &pb.JobStatus{
+		JobId:       job.ID,
+		State:       string(job.State),
+		Tasks:       tasks,
+		FinalResult: job.FinalResult,
+	}, nil
 }
 
 func main() {

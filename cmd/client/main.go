@@ -43,6 +43,8 @@ Commands:
   status           Get device status
   route-task       Route an AI task to the best device
   routed-cmd       Execute command on best available device (routed)
+  submit-job       Submit a distributed job to all devices
+  get-job          Get the status/result of a submitted job
 
 Legacy mode (without subcommand):
   --cmd string     Command to execute locally (requires --key)
@@ -68,6 +70,12 @@ Examples:
   client --key dev routed-cmd --cmd pwd --prefer-remote
   client --key dev routed-cmd --cmd ls --force-device <device-id>
   client --key dev routed-cmd --cmd pwd --require-npu
+
+  # Submit a distributed job
+  client --key dev submit-job --text "collect status" --max-workers 2
+
+  # Get job status/result
+  client get-job --id <job-id>
 
   # Execute a command locally (legacy mode)
   client --key dev --cmd pwd
@@ -117,6 +125,10 @@ func main() {
 		handleRouteTask(ctx, client, *key, flag.Args()[1:])
 	case "routed-cmd":
 		handleRoutedCmd(ctx, client, *key, flag.Args()[1:])
+	case "submit-job":
+		handleSubmitJob(ctx, client, *key, flag.Args()[1:])
+	case "get-job":
+		handleGetJob(ctx, client, flag.Args()[1:])
 	case "":
 		// Legacy mode: execute command
 		if *cmd == "" {
@@ -401,6 +413,80 @@ func handleRoutedCmd(ctx context.Context, client pb.OrchestratorServiceClient, k
 	// Exit with command's exit code
 	if resp.Output.ExitCode != 0 {
 		os.Exit(int(resp.Output.ExitCode))
+	}
+}
+
+func handleSubmitJob(ctx context.Context, client pb.OrchestratorServiceClient, key string, args []string) {
+	// Parse submit-job specific flags
+	fs := flag.NewFlagSet("submit-job", flag.ExitOnError)
+	text := fs.String("text", "collect status", "Job description")
+	maxWorkers := fs.Int("max-workers", 0, "Max devices to use (0 = all)")
+	fs.Parse(args)
+
+	if key == "" {
+		fmt.Fprintln(os.Stderr, "Error: --key is required for submit-job")
+		os.Exit(1)
+	}
+
+	// Create session first
+	hostname, _ := os.Hostname()
+	sessionResp, err := client.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  hostname,
+		SecurityKey: key,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating session: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Submit job
+	resp, err := client.SubmitJob(ctx, &pb.JobRequest{
+		SessionId:  sessionResp.SessionId,
+		Text:       *text,
+		MaxWorkers: int32(*maxWorkers),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error submitting job: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Job submitted: %s\n", resp.JobId)
+	fmt.Printf("Summary: %s\n", resp.Summary)
+	fmt.Printf("Created at: %s\n", time.Unix(resp.CreatedAt, 0).Format(time.RFC3339))
+}
+
+func handleGetJob(ctx context.Context, client pb.OrchestratorServiceClient, args []string) {
+	// Parse get-job specific flags
+	fs := flag.NewFlagSet("get-job", flag.ExitOnError)
+	jobID := fs.String("id", "", "Job ID (required)")
+	fs.Parse(args)
+
+	if *jobID == "" {
+		fmt.Fprintln(os.Stderr, "Error: --id is required for get-job")
+		os.Exit(1)
+	}
+
+	// Get job status
+	resp, err := client.GetJob(ctx, &pb.JobId{JobId: *jobID})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting job: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Job: %s\n", resp.JobId)
+	fmt.Printf("State: %s\n", resp.State)
+	fmt.Printf("Tasks: %d\n", len(resp.Tasks))
+
+	for _, t := range resp.Tasks {
+		taskID := t.TaskId
+		if len(taskID) > 8 {
+			taskID = taskID[:8]
+		}
+		fmt.Printf("  - %s (%s): %s\n", t.AssignedDeviceName, taskID, t.State)
+	}
+
+	if resp.State == "DONE" || resp.State == "FAILED" {
+		fmt.Printf("\nResult:\n%s\n", resp.FinalResult)
 	}
 }
 

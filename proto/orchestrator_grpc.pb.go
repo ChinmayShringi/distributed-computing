@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v5.29.3
-// source: orchestrator.proto
+// source: proto/orchestrator.proto
 
 package proto
 
@@ -28,6 +28,9 @@ const (
 	OrchestratorService_RunAITask_FullMethodName            = "/edgemesh.OrchestratorService/RunAITask"
 	OrchestratorService_HealthCheck_FullMethodName          = "/edgemesh.OrchestratorService/HealthCheck"
 	OrchestratorService_ExecuteRoutedCommand_FullMethodName = "/edgemesh.OrchestratorService/ExecuteRoutedCommand"
+	OrchestratorService_SubmitJob_FullMethodName            = "/edgemesh.OrchestratorService/SubmitJob"
+	OrchestratorService_GetJob_FullMethodName               = "/edgemesh.OrchestratorService/GetJob"
+	OrchestratorService_RunTask_FullMethodName              = "/edgemesh.OrchestratorService/RunTask"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -48,6 +51,11 @@ type OrchestratorServiceClient interface {
 	HealthCheck(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*HealthStatus, error)
 	// Routed execution - forwards command to best available device
 	ExecuteRoutedCommand(ctx context.Context, in *RoutedCommandRequest, opts ...grpc.CallOption) (*RoutedCommandResponse, error)
+	// Job orchestration (push model)
+	SubmitJob(ctx context.Context, in *JobRequest, opts ...grpc.CallOption) (*JobInfo, error)
+	GetJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*JobStatus, error)
+	// Worker execution
+	RunTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResult, error)
 }
 
 type orchestratorServiceClient struct {
@@ -148,6 +156,36 @@ func (c *orchestratorServiceClient) ExecuteRoutedCommand(ctx context.Context, in
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) SubmitJob(ctx context.Context, in *JobRequest, opts ...grpc.CallOption) (*JobInfo, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JobInfo)
+	err := c.cc.Invoke(ctx, OrchestratorService_SubmitJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) GetJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*JobStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JobStatus)
+	err := c.cc.Invoke(ctx, OrchestratorService_GetJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) RunTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskResult)
+	err := c.cc.Invoke(ctx, OrchestratorService_RunTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -166,6 +204,11 @@ type OrchestratorServiceServer interface {
 	HealthCheck(context.Context, *Empty) (*HealthStatus, error)
 	// Routed execution - forwards command to best available device
 	ExecuteRoutedCommand(context.Context, *RoutedCommandRequest) (*RoutedCommandResponse, error)
+	// Job orchestration (push model)
+	SubmitJob(context.Context, *JobRequest) (*JobInfo, error)
+	GetJob(context.Context, *JobId) (*JobStatus, error)
+	// Worker execution
+	RunTask(context.Context, *TaskRequest) (*TaskResult, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -202,6 +245,15 @@ func (UnimplementedOrchestratorServiceServer) HealthCheck(context.Context, *Empt
 }
 func (UnimplementedOrchestratorServiceServer) ExecuteRoutedCommand(context.Context, *RoutedCommandRequest) (*RoutedCommandResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExecuteRoutedCommand not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) SubmitJob(context.Context, *JobRequest) (*JobInfo, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitJob not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) GetJob(context.Context, *JobId) (*JobStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetJob not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) RunTask(context.Context, *TaskRequest) (*TaskResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunTask not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -386,6 +438,60 @@ func _OrchestratorService_ExecuteRoutedCommand_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_SubmitJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).SubmitJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_SubmitJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).SubmitJob(ctx, req.(*JobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_GetJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JobId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).GetJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_GetJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).GetJob(ctx, req.(*JobId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_RunTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).RunTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_RunTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).RunTask(ctx, req.(*TaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -429,7 +535,19 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ExecuteRoutedCommand",
 			Handler:    _OrchestratorService_ExecuteRoutedCommand_Handler,
 		},
+		{
+			MethodName: "SubmitJob",
+			Handler:    _OrchestratorService_SubmitJob_Handler,
+		},
+		{
+			MethodName: "GetJob",
+			Handler:    _OrchestratorService_GetJob_Handler,
+		},
+		{
+			MethodName: "RunTask",
+			Handler:    _OrchestratorService_RunTask_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "orchestrator.proto",
+	Metadata: "proto/orchestrator.proto",
 }

@@ -82,6 +82,37 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// SubmitJobRequest is the JSON request for /api/submit-job
+type SubmitJobRequest struct {
+	Text       string `json:"text"`
+	MaxWorkers int32  `json:"max_workers"`
+}
+
+// JobInfoResponse is the JSON response for /api/submit-job
+type JobInfoResponse struct {
+	JobID     string `json:"job_id"`
+	CreatedAt int64  `json:"created_at"`
+	Summary   string `json:"summary"`
+}
+
+// TaskStatusResponse represents a task in the job status
+type TaskStatusResponse struct {
+	TaskID             string `json:"task_id"`
+	AssignedDeviceID   string `json:"assigned_device_id"`
+	AssignedDeviceName string `json:"assigned_device_name"`
+	State              string `json:"state"`
+	Result             string `json:"result"`
+	Error              string `json:"error"`
+}
+
+// JobStatusResponse is the JSON response for /api/job
+type JobStatusResponse struct {
+	JobID       string               `json:"job_id"`
+	State       string               `json:"state"`
+	Tasks       []TaskStatusResponse `json:"tasks"`
+	FinalResult string               `json:"final_result"`
+}
+
 func main() {
 	// Get configuration from environment
 	httpAddr := os.Getenv("WEB_ADDR")
@@ -127,6 +158,8 @@ func main() {
 	http.HandleFunc("/api/devices", server.handleDevices)
 	http.HandleFunc("/api/routed-cmd", server.handleRoutedCmd)
 	http.HandleFunc("/api/assistant", server.handleAssistant)
+	http.HandleFunc("/api/submit-job", server.handleSubmitJob)
+	http.HandleFunc("/api/job", server.handleGetJob)
 
 	log.Printf("[INFO] Web server listening on %s", httpAddr)
 	log.Printf("[INFO] Connected to gRPC server at %s", grpcAddr)
@@ -397,6 +430,98 @@ func (s *WebServer) executeAssistantCommand(ctx context.Context, cmd string, arg
 	}
 
 	return sb.String(), cmdResp
+}
+
+// handleSubmitJob submits a distributed job to all devices
+func (s *WebServer) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Parse request body
+	var req SubmitJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Create session
+	sessionResp, err := s.grpcClient.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "web-ui",
+		SecurityKey: s.devKey,
+	})
+	if err != nil {
+		log.Printf("[ERROR] CreateSession failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Session error: %v", err))
+		return
+	}
+
+	// Submit job
+	jobResp, err := s.grpcClient.SubmitJob(ctx, &pb.JobRequest{
+		SessionId:  sessionResp.SessionId,
+		Text:       req.Text,
+		MaxWorkers: req.MaxWorkers,
+	})
+	if err != nil {
+		log.Printf("[ERROR] SubmitJob failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Job error: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, JobInfoResponse{
+		JobID:     jobResp.JobId,
+		CreatedAt: jobResp.CreatedAt,
+		Summary:   jobResp.Summary,
+	})
+}
+
+// handleGetJob returns the status of a job
+func (s *WebServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.URL.Query().Get("id")
+	if jobID == "" {
+		s.writeError(w, http.StatusBadRequest, "id parameter is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Get job status
+	jobResp, err := s.grpcClient.GetJob(ctx, &pb.JobId{JobId: jobID})
+	if err != nil {
+		log.Printf("[ERROR] GetJob failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Job error: %v", err))
+		return
+	}
+
+	// Convert tasks
+	tasks := make([]TaskStatusResponse, len(jobResp.Tasks))
+	for i, t := range jobResp.Tasks {
+		tasks[i] = TaskStatusResponse{
+			TaskID:             t.TaskId,
+			AssignedDeviceID:   t.AssignedDeviceId,
+			AssignedDeviceName: t.AssignedDeviceName,
+			State:              t.State,
+			Result:             t.Result,
+			Error:              t.Error,
+		}
+	}
+
+	s.writeJSON(w, http.StatusOK, JobStatusResponse{
+		JobID:       jobResp.JobId,
+		State:       jobResp.State,
+		Tasks:       tasks,
+		FinalResult: jobResp.FinalResult,
+	})
 }
 
 // writeJSON writes a JSON response

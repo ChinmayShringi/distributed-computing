@@ -308,6 +308,30 @@
         <div class="error hidden" id="cmd-error"></div>
     </div>
 
+    <!-- Distributed Job Section -->
+    <div class="card">
+        <h2>Distributed Job</h2>
+        <div class="form-row">
+            <label for="job-text">Job Description</label>
+            <input type="text" id="job-text" placeholder="collect status" value="collect status">
+        </div>
+        <div class="form-row">
+            <label for="max-workers">Max Workers (0 = all devices)</label>
+            <input type="number" id="max-workers" value="0" min="0" style="width: 120px;">
+        </div>
+        <button onclick="submitJob()" id="submit-job-btn">Submit Job</button>
+
+        <div class="output-section hidden" id="job-status">
+            <div class="output-meta">
+                <strong>Job ID:</strong> <span id="job-id"></span> |
+                <strong>State:</strong> <span id="job-state"></span>
+                <button onclick="refreshJobStatus()" id="refresh-job-btn" class="secondary" style="margin-left: 10px; padding: 4px 8px; font-size: 0.8rem;">Refresh</button>
+            </div>
+            <pre id="job-output"></pre>
+        </div>
+        <div class="error hidden" id="job-error"></div>
+    </div>
+
     <!-- Assistant Section -->
     <div class="card">
         <h2>Assistant</h2>
@@ -516,6 +540,105 @@ Try:
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Current job ID for polling
+        let currentJobId = null;
+
+        // Submit a distributed job
+        async function submitJob() {
+            const btn = document.getElementById('submit-job-btn');
+            const status = document.getElementById('job-status');
+            const jobIdSpan = document.getElementById('job-id');
+            const jobStateSpan = document.getElementById('job-state');
+            const output = document.getElementById('job-output');
+            const error = document.getElementById('job-error');
+
+            const text = document.getElementById('job-text').value.trim() || 'collect status';
+            const maxWorkers = parseInt(document.getElementById('max-workers').value) || 0;
+
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/submit-job', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        max_workers: maxWorkers
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Job submission failed');
+                }
+
+                currentJobId = data.job_id;
+                jobIdSpan.textContent = data.job_id.substring(0, 12) + '...';
+                jobStateSpan.textContent = 'SUBMITTED';
+                output.textContent = data.summary;
+                status.classList.remove('hidden');
+
+                // Start polling for status
+                pollJobStatus();
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Submit Job';
+            }
+        }
+
+        // Poll job status until done
+        async function pollJobStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/job?id=${currentJobId}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to get job status');
+                }
+
+                const jobStateSpan = document.getElementById('job-state');
+                const output = document.getElementById('job-output');
+
+                jobStateSpan.textContent = data.state;
+
+                if (data.state === 'DONE' || data.state === 'FAILED') {
+                    output.textContent = data.final_result || '(no result)';
+                } else if (data.state === 'RUNNING') {
+                    // Show task progress
+                    let progressText = `Tasks: ${data.tasks.length}\n`;
+                    data.tasks.forEach(t => {
+                        const taskId = t.task_id.substring(0, 8);
+                        progressText += `  - ${t.assigned_device_name} (${taskId}): ${t.state}\n`;
+                    });
+                    output.textContent = progressText;
+
+                    // Continue polling
+                    setTimeout(pollJobStatus, 500);
+                } else {
+                    // QUEUED - continue polling
+                    setTimeout(pollJobStatus, 500);
+                }
+            } catch (err) {
+                document.getElementById('job-error').textContent = err.message;
+                document.getElementById('job-error').classList.remove('hidden');
+            }
+        }
+
+        // Manual refresh job status
+        function refreshJobStatus() {
+            if (currentJobId) {
+                pollJobStatus();
+            }
         }
 
         // Auto-refresh devices on load
