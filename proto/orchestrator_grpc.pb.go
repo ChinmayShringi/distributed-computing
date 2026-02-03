@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v5.29.3
-// source: proto/orchestrator.proto
+// source: orchestrator.proto
 
 package proto
 
@@ -31,6 +31,9 @@ const (
 	OrchestratorService_SubmitJob_FullMethodName            = "/edgemesh.OrchestratorService/SubmitJob"
 	OrchestratorService_GetJob_FullMethodName               = "/edgemesh.OrchestratorService/GetJob"
 	OrchestratorService_RunTask_FullMethodName              = "/edgemesh.OrchestratorService/RunTask"
+	OrchestratorService_StartWebRTC_FullMethodName          = "/edgemesh.OrchestratorService/StartWebRTC"
+	OrchestratorService_CompleteWebRTC_FullMethodName       = "/edgemesh.OrchestratorService/CompleteWebRTC"
+	OrchestratorService_StopWebRTC_FullMethodName           = "/edgemesh.OrchestratorService/StopWebRTC"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -56,6 +59,10 @@ type OrchestratorServiceClient interface {
 	GetJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*JobStatus, error)
 	// Worker execution
 	RunTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResult, error)
+	// WebRTC screen streaming
+	StartWebRTC(ctx context.Context, in *WebRTCConfig, opts ...grpc.CallOption) (*WebRTCOffer, error)
+	CompleteWebRTC(ctx context.Context, in *WebRTCAnswer, opts ...grpc.CallOption) (*Empty, error)
+	StopWebRTC(ctx context.Context, in *WebRTCStop, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type orchestratorServiceClient struct {
@@ -186,6 +193,36 @@ func (c *orchestratorServiceClient) RunTask(ctx context.Context, in *TaskRequest
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) StartWebRTC(ctx context.Context, in *WebRTCConfig, opts ...grpc.CallOption) (*WebRTCOffer, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WebRTCOffer)
+	err := c.cc.Invoke(ctx, OrchestratorService_StartWebRTC_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) CompleteWebRTC(ctx context.Context, in *WebRTCAnswer, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, OrchestratorService_CompleteWebRTC_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) StopWebRTC(ctx context.Context, in *WebRTCStop, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, OrchestratorService_StopWebRTC_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -209,6 +246,10 @@ type OrchestratorServiceServer interface {
 	GetJob(context.Context, *JobId) (*JobStatus, error)
 	// Worker execution
 	RunTask(context.Context, *TaskRequest) (*TaskResult, error)
+	// WebRTC screen streaming
+	StartWebRTC(context.Context, *WebRTCConfig) (*WebRTCOffer, error)
+	CompleteWebRTC(context.Context, *WebRTCAnswer) (*Empty, error)
+	StopWebRTC(context.Context, *WebRTCStop) (*Empty, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -254,6 +295,15 @@ func (UnimplementedOrchestratorServiceServer) GetJob(context.Context, *JobId) (*
 }
 func (UnimplementedOrchestratorServiceServer) RunTask(context.Context, *TaskRequest) (*TaskResult, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunTask not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) StartWebRTC(context.Context, *WebRTCConfig) (*WebRTCOffer, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartWebRTC not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) CompleteWebRTC(context.Context, *WebRTCAnswer) (*Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteWebRTC not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) StopWebRTC(context.Context, *WebRTCStop) (*Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method StopWebRTC not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -492,6 +542,60 @@ func _OrchestratorService_RunTask_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_StartWebRTC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WebRTCConfig)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).StartWebRTC(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_StartWebRTC_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).StartWebRTC(ctx, req.(*WebRTCConfig))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_CompleteWebRTC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WebRTCAnswer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).CompleteWebRTC(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_CompleteWebRTC_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).CompleteWebRTC(ctx, req.(*WebRTCAnswer))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_StopWebRTC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WebRTCStop)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).StopWebRTC(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_StopWebRTC_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).StopWebRTC(ctx, req.(*WebRTCStop))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -547,7 +651,19 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "RunTask",
 			Handler:    _OrchestratorService_RunTask_Handler,
 		},
+		{
+			MethodName: "StartWebRTC",
+			Handler:    _OrchestratorService_StartWebRTC_Handler,
+		},
+		{
+			MethodName: "CompleteWebRTC",
+			Handler:    _OrchestratorService_CompleteWebRTC_Handler,
+		},
+		{
+			MethodName: "StopWebRTC",
+			Handler:    _OrchestratorService_StopWebRTC_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/orchestrator.proto",
+	Metadata: "orchestrator.proto",
 }

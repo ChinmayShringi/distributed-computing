@@ -24,6 +24,7 @@ import (
 	"github.com/edgecli/edgecli/internal/jobs"
 	"github.com/edgecli/edgecli/internal/registry"
 	"github.com/edgecli/edgecli/internal/sysinfo"
+	"github.com/edgecli/edgecli/internal/webrtcstream"
 	pb "github.com/edgecli/edgecli/proto"
 )
 
@@ -43,13 +44,14 @@ type Session struct {
 // OrchestratorServer implements the OrchestratorService gRPC interface
 type OrchestratorServer struct {
 	pb.UnimplementedOrchestratorServiceServer
-	sessions     map[string]*Session
-	mu           sync.RWMutex
-	runner       *exec.Runner
-	registry     *registry.Registry
-	jobManager   *jobs.Manager
-	selfDeviceID string
-	selfAddr     string
+	sessions      map[string]*Session
+	mu            sync.RWMutex
+	runner        *exec.Runner
+	registry      *registry.Registry
+	jobManager    *jobs.Manager
+	webrtcManager *webrtcstream.Manager
+	selfDeviceID  string
+	selfAddr      string
 }
 
 // NewOrchestratorServer creates a new server instance
@@ -73,12 +75,13 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 	}
 
 	return &OrchestratorServer{
-		sessions:     make(map[string]*Session),
-		runner:       exec.NewRunner(),
-		registry:     registry.NewRegistry(),
-		jobManager:   jobs.NewManager(),
-		selfDeviceID: selfID,
-		selfAddr:     selfAddr,
+		sessions:      make(map[string]*Session),
+		runner:        exec.NewRunner(),
+		registry:      registry.NewRegistry(),
+		jobManager:    jobs.NewManager(),
+		webrtcManager: webrtcstream.NewManager(),
+		selfDeviceID:  selfID,
+		selfAddr:      selfAddr,
 	}
 }
 
@@ -666,6 +669,55 @@ func (s *OrchestratorServer) GetJob(ctx context.Context, req *pb.JobId) (*pb.Job
 		CurrentGroup: int32(job.CurrentGroup),
 		TotalGroups:  int32(job.TotalGroups),
 	}, nil
+}
+
+// StartWebRTC creates a new WebRTC peer connection and returns an offer SDP
+func (s *OrchestratorServer) StartWebRTC(ctx context.Context, req *pb.WebRTCConfig) (*pb.WebRTCOffer, error) {
+	log.Printf("[INFO] StartWebRTC: session=%s fps=%d quality=%d monitor=%d",
+		req.SessionId, req.TargetFps, req.JpegQuality, req.MonitorIndex)
+
+	streamID, offerSDP, err := s.webrtcManager.Start(
+		req.SessionId,
+		int(req.TargetFps),
+		int(req.JpegQuality),
+		int(req.MonitorIndex),
+	)
+	if err != nil {
+		log.Printf("[ERROR] StartWebRTC failed: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to start WebRTC: %v", err)
+	}
+
+	log.Printf("[INFO] StartWebRTC: created stream %s", streamID)
+	return &pb.WebRTCOffer{
+		StreamId: streamID,
+		Sdp:      offerSDP,
+	}, nil
+}
+
+// CompleteWebRTC sets the remote description (answer) for a stream
+func (s *OrchestratorServer) CompleteWebRTC(ctx context.Context, req *pb.WebRTCAnswer) (*pb.Empty, error) {
+	log.Printf("[INFO] CompleteWebRTC: stream=%s", req.StreamId)
+
+	if err := s.webrtcManager.Complete(req.StreamId, req.Sdp); err != nil {
+		log.Printf("[ERROR] CompleteWebRTC failed: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to complete WebRTC: %v", err)
+	}
+
+	log.Printf("[INFO] CompleteWebRTC: stream %s connected", req.StreamId)
+	return &pb.Empty{}, nil
+}
+
+// StopWebRTC closes a stream and cleans up resources
+func (s *OrchestratorServer) StopWebRTC(ctx context.Context, req *pb.WebRTCStop) (*pb.Empty, error) {
+	log.Printf("[INFO] StopWebRTC: stream=%s", req.StreamId)
+
+	if err := s.webrtcManager.Stop(req.StreamId); err != nil {
+		log.Printf("[ERROR] StopWebRTC failed: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to stop WebRTC: %v", err)
+	}
+
+	log.Printf("[INFO] StopWebRTC: stream %s stopped", req.StreamId)
+	return &pb.Empty{}, nil
 }
 
 func main() {

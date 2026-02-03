@@ -212,6 +212,48 @@
         .loading {
             opacity: 0.6;
         }
+
+        /* Stream section styles */
+        #stream-img {
+            background: #1a1a1a;
+            min-height: 200px;
+            max-width: 100%;
+            border: 1px solid #333;
+            display: block;
+        }
+
+        .stream-info {
+            padding: 8px;
+            background: #f5f5f5;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            border-radius: 4px;
+        }
+
+        .stream-status {
+            font-size: 0.9rem;
+            color: #007AFF;
+            margin: 8px 0;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .inline-inputs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .inline-inputs .form-row {
+            flex: 1;
+        }
+
+        .inline-inputs input {
+            width: 100%;
+        }
     </style>
 </head>
 <body>
@@ -287,6 +329,50 @@
         <div class="error hidden" id="job-error"></div>
     </div>
 
+    <!-- Remote Stream Section -->
+    <div class="card">
+        <h2>Remote Stream</h2>
+        <div class="form-row">
+            <label for="stream-policy">Routing Policy</label>
+            <select id="stream-policy" onchange="toggleStreamForceDevice()">
+                <option value="BEST_AVAILABLE">Best Available</option>
+                <option value="PREFER_REMOTE">Prefer Remote</option>
+                <option value="FORCE_DEVICE_ID">Force Device</option>
+            </select>
+        </div>
+        <div class="form-row hidden" id="stream-force-device-row">
+            <label for="stream-force-device-id">Device</label>
+            <select id="stream-force-device-id"></select>
+        </div>
+        <div class="inline-inputs">
+            <div class="form-row">
+                <label for="stream-fps">FPS</label>
+                <input type="number" id="stream-fps" value="8" min="1" max="30">
+            </div>
+            <div class="form-row">
+                <label for="stream-quality">Quality</label>
+                <input type="number" id="stream-quality" value="60" min="10" max="100">
+            </div>
+            <div class="form-row">
+                <label for="stream-monitor">Monitor</label>
+                <input type="number" id="stream-monitor" value="0" min="0" max="3">
+            </div>
+        </div>
+        <div class="btn-row">
+            <button id="stream-start-btn" onclick="startStream()">Start Stream</button>
+            <button id="stream-stop-btn" onclick="stopStream()" disabled class="secondary">Stop Stream</button>
+        </div>
+
+        <div class="stream-status" id="stream-status"></div>
+
+        <div class="output-section hidden" id="stream-container">
+            <div class="stream-info" id="stream-info"></div>
+            <img id="stream-img" alt="Remote Screen">
+        </div>
+
+        <div class="error hidden" id="stream-error"></div>
+    </div>
+
     <!-- Assistant Section -->
     <div class="card">
         <h2>Assistant</h2>
@@ -329,9 +415,10 @@ Try:
                     throw new Error(data.error || 'Failed to fetch devices');
                 }
 
-                // Store devices globally and populate dropdown
+                // Store devices globally and populate dropdowns
                 availableDevices = data;
                 populateDeviceDropdown();
+                populateStreamDeviceDropdown();
 
                 if (data.length === 0) {
                     list.innerHTML = '<div class="device-info">No devices registered</div>';
@@ -615,9 +702,207 @@ Try:
             }
         }
 
+        // ===== Remote Stream (WebRTC) =====
+        let streamPC = null;
+        let streamInfo = null;
+
+        function toggleStreamForceDevice() {
+            const policy = document.getElementById('stream-policy').value;
+            const row = document.getElementById('stream-force-device-row');
+            row.classList.toggle('hidden', policy !== 'FORCE_DEVICE_ID');
+        }
+
+        function populateStreamDeviceDropdown() {
+            const dropdown = document.getElementById('stream-force-device-id');
+            dropdown.innerHTML = '<option value="">Select a device...</option>';
+            availableDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device_id;
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})`;
+                dropdown.appendChild(option);
+            });
+        }
+
+        async function startStream() {
+            const startBtn = document.getElementById('stream-start-btn');
+            const stopBtn = document.getElementById('stream-stop-btn');
+            const status = document.getElementById('stream-status');
+            const error = document.getElementById('stream-error');
+            const container = document.getElementById('stream-container');
+            const info = document.getElementById('stream-info');
+            const img = document.getElementById('stream-img');
+
+            const policy = document.getElementById('stream-policy').value;
+            const forceDeviceId = document.getElementById('stream-force-device-id').value;
+            const fps = parseInt(document.getElementById('stream-fps').value) || 8;
+            const quality = parseInt(document.getElementById('stream-quality').value) || 60;
+            const monitorIndex = parseInt(document.getElementById('stream-monitor').value) || 0;
+
+            startBtn.disabled = true;
+            startBtn.textContent = 'Starting...';
+            error.classList.add('hidden');
+            status.textContent = 'Requesting stream...';
+
+            try {
+                // Step 1: Request stream from server
+                const startResp = await fetch('/api/stream/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        policy: policy,
+                        force_device_id: forceDeviceId,
+                        fps: fps,
+                        quality: quality,
+                        monitor_index: monitorIndex
+                    })
+                });
+
+                const startData = await startResp.json();
+                if (!startResp.ok) {
+                    throw new Error(startData.error || 'Failed to start stream');
+                }
+
+                streamInfo = startData;
+                status.textContent = 'Creating WebRTC connection...';
+
+                // Step 2: Create RTCPeerConnection
+                streamPC = new RTCPeerConnection({ iceServers: [] });
+
+                // Handle incoming data channel
+                streamPC.ondatachannel = (event) => {
+                    const dc = event.channel;
+                    dc.binaryType = 'arraybuffer';
+
+                    let prevUrl = null;
+                    dc.onmessage = (msg) => {
+                        // Revoke previous URL to prevent memory leak
+                        if (prevUrl) {
+                            URL.revokeObjectURL(prevUrl);
+                        }
+                        const blob = new Blob([msg.data], { type: 'image/jpeg' });
+                        const url = URL.createObjectURL(blob);
+                        img.src = url;
+                        prevUrl = url;
+                    };
+
+                    dc.onclose = () => {
+                        status.textContent = 'Stream closed';
+                    };
+                };
+
+                // Step 3: Set remote description (offer)
+                await streamPC.setRemoteDescription({
+                    type: 'offer',
+                    sdp: startData.offer_sdp
+                });
+
+                // Step 4: Create answer
+                const answer = await streamPC.createAnswer();
+                await streamPC.setLocalDescription(answer);
+
+                // Step 5: Wait for ICE gathering complete (non-trickle)
+                status.textContent = 'Gathering ICE candidates...';
+                await new Promise((resolve, reject) => {
+                    if (streamPC.iceGatheringState === 'complete') {
+                        resolve();
+                        return;
+                    }
+                    const timeout = setTimeout(() => {
+                        reject(new Error('ICE gathering timeout'));
+                    }, 5000);
+                    streamPC.addEventListener('icegatheringstatechange', () => {
+                        if (streamPC.iceGatheringState === 'complete') {
+                            clearTimeout(timeout);
+                            resolve();
+                        }
+                    });
+                });
+
+                // Step 6: Send answer to server
+                status.textContent = 'Sending answer...';
+                const answerResp = await fetch('/api/stream/answer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_device_addr: startData.selected_device_addr,
+                        stream_id: startData.stream_id,
+                        answer_sdp: streamPC.localDescription.sdp
+                    })
+                });
+
+                const answerData = await answerResp.json();
+                if (!answerResp.ok) {
+                    throw new Error(answerData.error || 'Failed to complete stream');
+                }
+
+                // Success
+                status.textContent = 'Streaming...';
+                info.innerHTML = `<strong>Device:</strong> ${escapeHtml(startData.selected_device_name)} | <strong>Stream ID:</strong> ${startData.stream_id.substring(0, 8)}...`;
+                container.classList.remove('hidden');
+                stopBtn.disabled = false;
+                startBtn.textContent = 'Start Stream';
+
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+                status.textContent = '';
+                startBtn.disabled = false;
+                startBtn.textContent = 'Start Stream';
+
+                if (streamPC) {
+                    streamPC.close();
+                    streamPC = null;
+                }
+                streamInfo = null;
+            }
+        }
+
+        async function stopStream() {
+            const startBtn = document.getElementById('stream-start-btn');
+            const stopBtn = document.getElementById('stream-stop-btn');
+            const status = document.getElementById('stream-status');
+            const container = document.getElementById('stream-container');
+            const img = document.getElementById('stream-img');
+
+            if (!streamInfo) {
+                return;
+            }
+
+            stopBtn.disabled = true;
+            stopBtn.textContent = 'Stopping...';
+
+            try {
+                await fetch('/api/stream/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_device_addr: streamInfo.selected_device_addr,
+                        stream_id: streamInfo.stream_id
+                    })
+                });
+            } catch (err) {
+                console.error('Stop stream error:', err);
+            }
+
+            // Clean up
+            if (streamPC) {
+                streamPC.close();
+                streamPC = null;
+            }
+            streamInfo = null;
+
+            img.src = '';
+            container.classList.add('hidden');
+            status.textContent = 'Stream stopped';
+            stopBtn.textContent = 'Stop Stream';
+            startBtn.disabled = false;
+        }
+
         // Auto-refresh devices on load
         document.addEventListener('DOMContentLoaded', () => {
-            refreshDevices();
+            refreshDevices().then(() => {
+                populateStreamDeviceDropdown();
+            });
         });
     </script>
 </body>

@@ -510,6 +510,84 @@ Response:
    - Run command with "Prefer Remote" policy
    - Watch it execute on Laptop B
 
+## Remote Streaming (v1)
+
+Stream any device's screen to the web UI using WebRTC DataChannel (JPEG frames).
+
+### Setup
+
+1. **Start gRPC server on each machine:**
+   ```bash
+   # On machine A (coordinator)
+   make server
+
+   # On machine B (Windows/Mac/Linux)
+   go run ./cmd/server
+   ```
+
+2. **Register remote device:**
+   ```bash
+   go run ./cmd/client register --name "windows-pc" --self-addr "192.168.1.100:50051" --platform "windows" --arch "amd64"
+   ```
+
+3. **Start web UI:**
+   ```bash
+   make web
+   ```
+
+4. **Open http://localhost:8080** on any device (phone, tablet, etc.)
+
+5. **In "Remote Stream" section:**
+   - Select "Prefer Remote" policy
+   - Click "Start Stream"
+   - Observe remote screen updating
+
+### Stream Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| FPS | 8 | Target frames per second |
+| Quality | 60 | JPEG quality (10-100) |
+| Monitor | 0 | Display index for multi-monitor |
+
+### REST API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/stream/start` | POST | Start WebRTC stream from selected device |
+| `/api/stream/answer` | POST | Complete WebRTC handshake with answer SDP |
+| `/api/stream/stop` | POST | Stop active stream |
+
+#### POST /api/stream/start
+
+Request:
+```json
+{
+  "policy": "PREFER_REMOTE",
+  "force_device_id": "",
+  "fps": 8,
+  "quality": 60,
+  "monitor_index": 0
+}
+```
+
+Response:
+```json
+{
+  "selected_device_id": "abc123...",
+  "selected_device_name": "windows-pc",
+  "selected_device_addr": "192.168.1.100:50051",
+  "stream_id": "def456...",
+  "offer_sdp": "v=0\r\n..."
+}
+```
+
+### Limitations
+
+- **LAN only** - No STUN/TURN servers configured
+- **Non-trickle ICE** - May fail on complex network topologies
+- **JPEG frames over DataChannel** - Not optimized for bandwidth (upgrade to video track planned)
+
 ## Development
 
 ```bash

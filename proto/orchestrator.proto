@@ -30,6 +30,11 @@ service OrchestratorService {
 
   // Worker execution
   rpc RunTask (TaskRequest) returns (TaskResult);
+
+  // WebRTC screen streaming
+  rpc StartWebRTC (WebRTCConfig) returns (WebRTCOffer);
+  rpc CompleteWebRTC (WebRTCAnswer) returns (Empty);
+  rpc StopWebRTC (WebRTCStop) returns (Empty);
 }
 
 message Empty {}
@@ -217,4 +222,27 @@ message TaskResult {
   string output = 3;
   string error = 4;
   double time_ms = 5;
+}
+
+// WebRTC streaming messages
+
+message WebRTCConfig {
+  string session_id = 1;
+  int32 target_fps = 2;           // default 8 if 0
+  int32 jpeg_quality = 3;         // default 60 if 0
+  int32 monitor_index = 4;        // default 0
+}
+
+message WebRTCOffer {
+  string stream_id = 1;
+  string sdp = 2;                 // offer SDP including ICE candidates (non-trickle)
+}
+
+message WebRTCAnswer {
+  string stream_id = 1;
+  string sdp = 2;                 // answer SDP including ICE candidates (non-trickle)
+}
+
+message WebRTCStop {
+  string stream_id = 1;
 }

@@ -115,6 +115,37 @@ type JobStatusResponse struct {
 	TotalGroups  int32                `json:"total_groups"`
 }
 
+// StreamStartRequest is the JSON request for /api/stream/start
+type StreamStartRequest struct {
+	Policy        string `json:"policy"`          // BEST_AVAILABLE, PREFER_REMOTE, FORCE_DEVICE_ID
+	ForceDeviceID string `json:"force_device_id"` // used if FORCE_DEVICE_ID
+	FPS           int32  `json:"fps"`             // default 8
+	Quality       int32  `json:"quality"`         // default 60
+	MonitorIndex  int32  `json:"monitor_index"`   // default 0
+}
+
+// StreamStartResponse is the JSON response for /api/stream/start
+type StreamStartResponse struct {
+	SelectedDeviceID   string `json:"selected_device_id"`
+	SelectedDeviceName string `json:"selected_device_name"`
+	SelectedDeviceAddr string `json:"selected_device_addr"`
+	StreamID           string `json:"stream_id"`
+	OfferSDP           string `json:"offer_sdp"`
+}
+
+// StreamAnswerRequest is the JSON request for /api/stream/answer
+type StreamAnswerRequest struct {
+	SelectedDeviceAddr string `json:"selected_device_addr"`
+	StreamID           string `json:"stream_id"`
+	AnswerSDP          string `json:"answer_sdp"`
+}
+
+// StreamStopRequest is the JSON request for /api/stream/stop
+type StreamStopRequest struct {
+	SelectedDeviceAddr string `json:"selected_device_addr"`
+	StreamID           string `json:"stream_id"`
+}
+
 func main() {
 	// Get configuration from environment
 	httpAddr := os.Getenv("WEB_ADDR")
@@ -162,6 +193,9 @@ func main() {
 	http.HandleFunc("/api/assistant", server.handleAssistant)
 	http.HandleFunc("/api/submit-job", server.handleSubmitJob)
 	http.HandleFunc("/api/job", server.handleGetJob)
+	http.HandleFunc("/api/stream/start", server.handleStreamStart)
+	http.HandleFunc("/api/stream/answer", server.handleStreamAnswer)
+	http.HandleFunc("/api/stream/stop", server.handleStreamStop)
 
 	log.Printf("[INFO] Web server listening on %s", httpAddr)
 	log.Printf("[INFO] Connected to gRPC server at %s", grpcAddr)
@@ -526,6 +560,242 @@ func (s *WebServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		CurrentGroup: jobResp.CurrentGroup,
 		TotalGroups:  jobResp.TotalGroups,
 	})
+}
+
+// handleStreamStart initiates a WebRTC stream from a selected device
+func (s *WebServer) handleStreamStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req StreamStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Create session
+	sessionResp, err := s.grpcClient.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "web-stream",
+		SecurityKey: s.devKey,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStart: CreateSession failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Session error: %v", err))
+		return
+	}
+
+	// List devices and select based on policy
+	devicesResp, err := s.grpcClient.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStart: ListDevices failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("ListDevices error: %v", err))
+		return
+	}
+
+	if len(devicesResp.Devices) == 0 {
+		s.writeError(w, http.StatusNotFound, "No devices available")
+		return
+	}
+
+	// Select device based on policy
+	var selectedDevice *pb.DeviceInfo
+	switch strings.ToUpper(req.Policy) {
+	case "FORCE_DEVICE_ID":
+		for _, d := range devicesResp.Devices {
+			if d.DeviceId == req.ForceDeviceID {
+				selectedDevice = d
+				break
+			}
+		}
+		if selectedDevice == nil {
+			s.writeError(w, http.StatusNotFound, fmt.Sprintf("Device not found: %s", req.ForceDeviceID))
+			return
+		}
+	case "PREFER_REMOTE":
+		// Prefer non-local (first device with different address)
+		for _, d := range devicesResp.Devices {
+			if d.GrpcAddr != "" && d.GrpcAddr != "localhost:50051" && d.GrpcAddr != "127.0.0.1:50051" {
+				selectedDevice = d
+				break
+			}
+		}
+		if selectedDevice == nil {
+			selectedDevice = devicesResp.Devices[0] // Fallback to first
+		}
+	default: // BEST_AVAILABLE
+		// Prefer NPU > GPU > CPU
+		for _, d := range devicesResp.Devices {
+			if d.HasNpu {
+				selectedDevice = d
+				break
+			}
+		}
+		if selectedDevice == nil {
+			for _, d := range devicesResp.Devices {
+				if d.HasGpu {
+					selectedDevice = d
+					break
+				}
+			}
+		}
+		if selectedDevice == nil {
+			selectedDevice = devicesResp.Devices[0]
+		}
+	}
+
+	log.Printf("[INFO] handleStreamStart: selected device %s (%s)", selectedDevice.DeviceName, selectedDevice.GrpcAddr)
+
+	// Dial the selected device directly
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, selectedDevice.GrpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStart: failed to dial device %s: %v", selectedDevice.GrpcAddr, err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	// Call StartWebRTC on the device
+	webrtcResp, err := deviceClient.StartWebRTC(ctx, &pb.WebRTCConfig{
+		SessionId:    sessionResp.SessionId,
+		TargetFps:    req.FPS,
+		JpegQuality:  req.Quality,
+		MonitorIndex: req.MonitorIndex,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStart: StartWebRTC failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("StartWebRTC error: %v", err))
+		return
+	}
+
+	log.Printf("[INFO] handleStreamStart: stream %s started on %s", webrtcResp.StreamId, selectedDevice.DeviceName)
+
+	s.writeJSON(w, http.StatusOK, StreamStartResponse{
+		SelectedDeviceID:   selectedDevice.DeviceId,
+		SelectedDeviceName: selectedDevice.DeviceName,
+		SelectedDeviceAddr: selectedDevice.GrpcAddr,
+		StreamID:           webrtcResp.StreamId,
+		OfferSDP:           webrtcResp.Sdp,
+	})
+}
+
+// handleStreamAnswer completes the WebRTC handshake with the answer SDP
+func (s *WebServer) handleStreamAnswer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req StreamAnswerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.SelectedDeviceAddr == "" || req.StreamID == "" || req.AnswerSDP == "" {
+		s.writeError(w, http.StatusBadRequest, "selected_device_addr, stream_id, and answer_sdp are required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Dial the device
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, req.SelectedDeviceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleStreamAnswer: failed to dial %s: %v", req.SelectedDeviceAddr, err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	// Call CompleteWebRTC
+	_, err = deviceClient.CompleteWebRTC(ctx, &pb.WebRTCAnswer{
+		StreamId: req.StreamID,
+		Sdp:      req.AnswerSDP,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamAnswer: CompleteWebRTC failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("CompleteWebRTC error: %v", err))
+		return
+	}
+
+	log.Printf("[INFO] handleStreamAnswer: stream %s connected", req.StreamID)
+
+	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleStreamStop stops an active WebRTC stream
+func (s *WebServer) handleStreamStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req StreamStopRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.SelectedDeviceAddr == "" || req.StreamID == "" {
+		s.writeError(w, http.StatusBadRequest, "selected_device_addr and stream_id are required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Dial the device
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, req.SelectedDeviceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStop: failed to dial %s: %v", req.SelectedDeviceAddr, err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	// Call StopWebRTC
+	_, err = deviceClient.StopWebRTC(ctx, &pb.WebRTCStop{
+		StreamId: req.StreamID,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStop: StopWebRTC failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("StopWebRTC error: %v", err))
+		return
+	}
+
+	log.Printf("[INFO] handleStreamStop: stream %s stopped", req.StreamID)
+
+	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // writeJSON writes a JSON response

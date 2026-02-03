@@ -39,8 +39,16 @@ echo -e "${GREEN}✓ Binary copied to $WINDOWS_PATH/${NC}"
 
 # Step 4: Start server on Windows
 echo -e "\n${YELLOW}[4/5] Starting server on Windows...${NC}"
+# Create a wrapper script (avoiding trailing spaces with Windows echo)
 sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
-  "cmd /c \"set GRPC_ADDR=0.0.0.0:$GRPC_PORT&& start /B $WINDOWS_PATH/server-windows.exe\"" &
+  "echo @echo off> $WINDOWS_PATH/start-server.bat"
+sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
+  "echo set GRPC_ADDR=0.0.0.0:$GRPC_PORT>> $WINDOWS_PATH/start-server.bat"
+sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
+  "echo $WINDOWS_PATH/server-windows.exe>> $WINDOWS_PATH/start-server.bat"
+# Run via task scheduler for proper detachment
+sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
+  'schtasks /delete /tn "EdgeCLI-Server" /f 2>nul & schtasks /create /tn "EdgeCLI-Server" /tr "C:\Users\sshuser.Batman\start-server.bat" /sc once /st 00:00 /f >nul && schtasks /run /tn "EdgeCLI-Server" >nul'
 sleep 3
 echo -e "${GREEN}✓ Server started${NC}"
 
