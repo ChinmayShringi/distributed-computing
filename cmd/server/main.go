@@ -486,39 +486,78 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 		return nil, status.Error(codes.FailedPrecondition, "no devices available")
 	}
 
-	// Create job with tasks
-	job, err := s.jobManager.CreateJob(devices, int(req.MaxWorkers))
+	// Create job with tasks (plan and reduce will use defaults if nil)
+	job, err := s.jobManager.CreateJob(devices, int(req.MaxWorkers), req.Plan, req.Reduce)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create job: %v", err)
 	}
 
-	log.Printf("[INFO] SubmitJob: job_id=%s tasks=%d text=%q", job.ID, len(job.Tasks), req.Text)
+	log.Printf("[INFO] SubmitJob: job_id=%s tasks=%d groups=%d text=%q",
+		job.ID, len(job.Tasks), job.TotalGroups, req.Text)
 
-	// Execute tasks asynchronously
-	go s.executeJobTasks(job)
+	// Execute groups sequentially (tasks within groups run in parallel)
+	go s.executeJobGroups(job)
 
 	return &pb.JobInfo{
 		JobId:     job.ID,
 		CreatedAt: job.CreatedAt.Unix(),
-		Summary:   fmt.Sprintf("distributed to %d devices", len(job.Tasks)),
+		Summary:   fmt.Sprintf("distributed to %d devices in %d group(s)", len(job.Tasks), job.TotalGroups),
 	}, nil
 }
 
-// executeJobTasks runs all tasks for a job in parallel
-func (s *OrchestratorServer) executeJobTasks(job *jobs.Job) {
+// executeJobGroups executes task groups sequentially (tasks within groups run in parallel)
+func (s *OrchestratorServer) executeJobGroups(job *jobs.Job) {
 	s.jobManager.SetJobRunning(job.ID)
 
+	var allResults []string
+	var totalFailed int
+
+	// Execute groups sequentially
+	for groupIdx := 0; groupIdx < job.TotalGroups; groupIdx++ {
+		log.Printf("[INFO] executeJobGroups: executing group %d/%d for job %s",
+			groupIdx+1, job.TotalGroups, job.ID)
+
+		s.jobManager.SetCurrentGroup(job.ID, groupIdx)
+
+		// Get tasks for this group
+		groupTasks := s.jobManager.GetTasksForGroup(job.ID, groupIdx)
+
+		// Execute all tasks in this group in parallel
+		groupResults, failedCount := s.executeTaskGroup(job, groupTasks)
+		allResults = append(allResults, groupResults...)
+		totalFailed += failedCount
+
+		// Check if group failed - stop execution if it did
+		if s.jobManager.IsGroupFailed(job.ID, groupIdx) {
+			log.Printf("[WARN] executeJobGroups: group %d failed, stopping job %s", groupIdx, job.ID)
+			break
+		}
+	}
+
+	// Apply reduce to combine results
+	finalResult := s.applyReduce(job.ReduceSpec, allResults)
+	if totalFailed > 0 {
+		finalResult = fmt.Sprintf("Warning: %d task(s) failed\n\n%s", totalFailed, finalResult)
+	}
+	s.jobManager.SetJobDone(job.ID, finalResult)
+
+	log.Printf("[INFO] executeJobGroups: job=%s completed, %d succeeded, %d failed",
+		job.ID, len(allResults), totalFailed)
+}
+
+// executeTaskGroup runs all tasks in a group in parallel
+func (s *OrchestratorServer) executeTaskGroup(job *jobs.Job, tasks []*jobs.Task) ([]string, int) {
 	var wg sync.WaitGroup
 	var results []string
 	var resultsMu sync.Mutex
 	var failedCount int
 
-	for _, task := range job.Tasks {
+	for _, task := range tasks {
 		wg.Add(1)
 		go func(t *jobs.Task) {
 			defer wg.Done()
 
-			log.Printf("[INFO] executeJobTasks: executing task=%s on device=%s addr=%s",
+			log.Printf("[INFO] executeTaskGroup: executing task=%s on device=%s addr=%s",
 				t.ID, t.DeviceName, t.DeviceAddr)
 
 			// Create context with timeout
@@ -531,7 +570,7 @@ func (s *OrchestratorServer) executeJobTasks(job *jobs.Job) {
 				grpc.WithBlock(),
 			)
 			if err != nil {
-				log.Printf("[ERROR] executeJobTasks: failed to dial %s: %v", t.DeviceAddr, err)
+				log.Printf("[ERROR] executeTaskGroup: failed to dial %s: %v", t.DeviceAddr, err)
 				s.jobManager.UpdateTask(job.ID, t.ID, jobs.TaskFailed, "", err.Error())
 				resultsMu.Lock()
 				failedCount++
@@ -551,7 +590,7 @@ func (s *OrchestratorServer) executeJobTasks(job *jobs.Job) {
 			})
 
 			if err != nil {
-				log.Printf("[ERROR] executeJobTasks: RunTask failed on %s: %v", t.DeviceAddr, err)
+				log.Printf("[ERROR] executeTaskGroup: RunTask failed on %s: %v", t.DeviceAddr, err)
 				s.jobManager.UpdateTask(job.ID, t.ID, jobs.TaskFailed, "", err.Error())
 				resultsMu.Lock()
 				failedCount++
@@ -560,7 +599,7 @@ func (s *OrchestratorServer) executeJobTasks(job *jobs.Job) {
 			}
 
 			if !result.Ok {
-				log.Printf("[ERROR] executeJobTasks: task failed on %s: %s", t.DeviceAddr, result.Error)
+				log.Printf("[ERROR] executeTaskGroup: task failed on %s: %s", t.DeviceAddr, result.Error)
 				s.jobManager.UpdateTask(job.ID, t.ID, jobs.TaskFailed, "", result.Error)
 				resultsMu.Lock()
 				failedCount++
@@ -575,22 +614,28 @@ func (s *OrchestratorServer) executeJobTasks(job *jobs.Job) {
 				t.DeviceName, t.DeviceID[:8], result.Output))
 			resultsMu.Unlock()
 
-			log.Printf("[INFO] executeJobTasks: task=%s completed on %s in %.2fms",
+			log.Printf("[INFO] executeTaskGroup: task=%s completed on %s in %.2fms",
 				t.ID, t.DeviceName, result.TimeMs)
 		}(task)
 	}
 
 	wg.Wait()
+	return results, failedCount
+}
 
-	// Concatenate results and mark job done
-	finalResult := strings.Join(results, "\n\n")
-	if failedCount > 0 {
-		finalResult = fmt.Sprintf("Warning: %d task(s) failed\n\n%s", failedCount, finalResult)
+// applyReduce combines results based on the reduce specification
+func (s *OrchestratorServer) applyReduce(spec *jobs.ReduceSpec, results []string) string {
+	if spec == nil {
+		spec = &jobs.ReduceSpec{Kind: "CONCAT"}
 	}
-	s.jobManager.SetJobDone(job.ID, finalResult)
 
-	log.Printf("[INFO] executeJobTasks: job=%s completed, %d succeeded, %d failed",
-		job.ID, len(results), failedCount)
+	switch spec.Kind {
+	case "CONCAT":
+		return strings.Join(results, "\n\n")
+	default:
+		// Default to CONCAT for unknown reduce kinds
+		return strings.Join(results, "\n\n")
+	}
 }
 
 // GetJob returns the status of a job
@@ -614,10 +659,12 @@ func (s *OrchestratorServer) GetJob(ctx context.Context, req *pb.JobId) (*pb.Job
 	}
 
 	return &pb.JobStatus{
-		JobId:       job.ID,
-		State:       string(job.State),
-		Tasks:       tasks,
-		FinalResult: job.FinalResult,
+		JobId:        job.ID,
+		State:        string(job.State),
+		Tasks:        tasks,
+		FinalResult:  job.FinalResult,
+		CurrentGroup: int32(job.CurrentGroup),
+		TotalGroups:  int32(job.TotalGroups),
 	}, nil
 }
 

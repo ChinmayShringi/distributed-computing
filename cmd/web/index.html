@@ -17,31 +17,8 @@
             padding: 16px;
             max-width: 800px;
             margin: 0 auto;
-            background: #f5f5f5;
-            color: #333;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            body {
-                background: #1a1a1a;
-                color: #eee;
-            }
-            .card {
-                background: #2a2a2a;
-                border-color: #444;
-            }
-            input, select, textarea {
-                background: #333;
-                color: #eee;
-                border-color: #555;
-            }
-            .device-card {
-                background: #333;
-                border-color: #555;
-            }
-            pre {
-                background: #333;
-            }
+            background: white;
+            color: black;
         }
 
         h1 {
@@ -104,11 +81,7 @@
             font-size: 0.9rem;
             font-weight: 500;
             margin-bottom: 4px;
-            color: #666;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            label { color: #aaa; }
+            color: #333;
         }
 
         .form-row {
@@ -135,11 +108,7 @@
 
         .device-info {
             font-size: 0.85rem;
-            color: #666;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            .device-info { color: #aaa; }
+            color: #555;
         }
 
         .device-caps {
@@ -155,10 +124,6 @@
             border-radius: 4px;
             font-size: 0.75rem;
             text-transform: uppercase;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            .cap-badge { background: #444; color: #ddd; }
         }
 
         .cap-badge.gpu { background: #4CAF50; color: white; }
@@ -182,12 +147,8 @@
 
         .output-meta {
             font-size: 0.8rem;
-            color: #666;
+            color: #555;
             margin-bottom: 8px;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            .output-meta { color: #aaa; }
         }
 
         .chat-log {
@@ -200,18 +161,10 @@
             background: #fafafa;
         }
 
-        @media (prefers-color-scheme: dark) {
-            .chat-log { background: #333; border-color: #555; }
-        }
-
         .chat-message {
             margin-bottom: 12px;
             padding-bottom: 12px;
             border-bottom: 1px solid #eee;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            .chat-message { border-color: #444; }
         }
 
         .chat-message:last-child {
@@ -296,8 +249,10 @@
             </select>
         </div>
         <div class="form-row hidden" id="force-device-row">
-            <label for="force-device-id">Device ID</label>
-            <input type="text" id="force-device-id" placeholder="Enter device ID">
+            <label for="force-device-id">Select Device</label>
+            <select id="force-device-id">
+                <option value="">Select a device...</option>
+            </select>
         </div>
         <button onclick="runCommand()" id="run-btn">Run Command</button>
 
@@ -354,6 +309,9 @@ Try:
     </div>
 
     <script>
+        // Global storage for available devices
+        let availableDevices = [];
+
         // Refresh devices list
         async function refreshDevices() {
             const btn = document.getElementById('refresh-btn');
@@ -370,6 +328,10 @@ Try:
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to fetch devices');
                 }
+
+                // Store devices globally and populate dropdown
+                availableDevices = data;
+                populateDeviceDropdown();
 
                 if (data.length === 0) {
                     list.innerHTML = '<div class="device-info">No devices registered</div>';
@@ -398,6 +360,18 @@ Try:
                 btn.textContent = 'Refresh';
                 list.classList.remove('loading');
             }
+        }
+
+        // Populate device dropdown for Force Device ID
+        function populateDeviceDropdown() {
+            const dropdown = document.getElementById('force-device-id');
+            dropdown.innerHTML = '<option value="">Select a device...</option>';
+            availableDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device_id;
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})`;
+                dropdown.appendChild(option);
+            });
         }
 
         // Toggle force device ID field

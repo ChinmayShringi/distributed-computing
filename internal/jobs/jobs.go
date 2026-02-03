@@ -42,15 +42,24 @@ type Task struct {
 	State      TaskState
 	Result     string
 	Error      string
+	GroupIndex int // which group this task belongs to
+}
+
+// ReduceSpec specifies how to combine results
+type ReduceSpec struct {
+	Kind string // "CONCAT" for now
 }
 
 // Job represents a distributed job with multiple tasks
 type Job struct {
-	ID          string
-	CreatedAt   time.Time
-	State       JobState
-	Tasks       []*Task
-	FinalResult string
+	ID           string
+	CreatedAt    time.Time
+	State        JobState
+	Tasks        []*Task
+	FinalResult  string
+	CurrentGroup int         // which group is currently executing
+	TotalGroups  int         // total number of groups
+	ReduceSpec   *ReduceSpec // how to combine results
 }
 
 // Manager manages jobs and their tasks in-memory
@@ -67,17 +76,26 @@ func NewManager() *Manager {
 }
 
 // CreateJob creates a new job with tasks distributed across devices
-// For v0, creates one SYSINFO task per device
-func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int) (*Job, error) {
+// If no plan provided, auto-generates a default plan with one SYSINFO task per device
+func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int, plan *pb.Plan, reduce *pb.ReduceSpec) (*Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	jobID := uuid.New().String()
+
+	// Default reduce to CONCAT if not specified
+	reduceSpec := &ReduceSpec{Kind: "CONCAT"}
+	if reduce != nil && reduce.Kind != "" {
+		reduceSpec.Kind = reduce.Kind
+	}
+
 	job := &Job{
-		ID:        jobID,
-		CreatedAt: time.Now(),
-		State:     JobQueued,
-		Tasks:     make([]*Task, 0),
+		ID:           jobID,
+		CreatedAt:    time.Now(),
+		State:        JobQueued,
+		Tasks:        make([]*Task, 0),
+		CurrentGroup: 0,
+		ReduceSpec:   reduceSpec,
 	}
 
 	// Select devices (limit by maxWorkers if specified)
@@ -86,23 +104,82 @@ func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int) (*Job, err
 		selectedDevices = devices[:maxWorkers]
 	}
 
-	// Create one SYSINFO task per device
-	for _, device := range selectedDevices {
-		task := &Task{
-			ID:         uuid.New().String(),
-			JobID:      jobID,
-			Kind:       "SYSINFO",
-			Input:      "collect_status",
-			DeviceID:   device.DeviceId,
-			DeviceName: device.DeviceName,
-			DeviceAddr: device.GrpcAddr,
-			State:      TaskQueued,
+	// Build device lookup map
+	deviceMap := make(map[string]*pb.DeviceInfo)
+	for _, d := range devices {
+		deviceMap[d.DeviceId] = d
+	}
+
+	// If no plan provided, generate default plan
+	if plan == nil || len(plan.Groups) == 0 {
+		plan = m.generateDefaultPlan(selectedDevices)
+	}
+
+	job.TotalGroups = len(plan.Groups)
+
+	// Convert plan to tasks
+	for _, group := range plan.Groups {
+		for _, taskSpec := range group.Tasks {
+			// Find target device
+			var device *pb.DeviceInfo
+			if taskSpec.TargetDeviceId != "" {
+				device = deviceMap[taskSpec.TargetDeviceId]
+			}
+			if device == nil && len(selectedDevices) > 0 {
+				// Assign to first available device if not specified
+				device = selectedDevices[0]
+			}
+
+			deviceName := ""
+			deviceAddr := ""
+			deviceID := ""
+			if device != nil {
+				deviceName = device.DeviceName
+				deviceAddr = device.GrpcAddr
+				deviceID = device.DeviceId
+			}
+
+			taskID := taskSpec.TaskId
+			if taskID == "" {
+				taskID = uuid.New().String()
+			}
+
+			task := &Task{
+				ID:         taskID,
+				JobID:      jobID,
+				Kind:       taskSpec.Kind,
+				Input:      taskSpec.Input,
+				DeviceID:   deviceID,
+				DeviceName: deviceName,
+				DeviceAddr: deviceAddr,
+				State:      TaskQueued,
+				GroupIndex: int(group.Index),
+			}
+			job.Tasks = append(job.Tasks, task)
 		}
-		job.Tasks = append(job.Tasks, task)
 	}
 
 	m.jobs[jobID] = job
 	return job, nil
+}
+
+// generateDefaultPlan creates a default plan with one SYSINFO task per device
+func (m *Manager) generateDefaultPlan(devices []*pb.DeviceInfo) *pb.Plan {
+	tasks := make([]*pb.TaskSpec, len(devices))
+	for i, d := range devices {
+		tasks[i] = &pb.TaskSpec{
+			TaskId:         uuid.New().String(),
+			Kind:           "SYSINFO",
+			Input:          "collect_status",
+			TargetDeviceId: d.DeviceId,
+		}
+	}
+
+	return &pb.Plan{
+		Groups: []*pb.TaskGroup{
+			{Index: 0, Tasks: tasks},
+		},
+	}
 }
 
 // Get retrieves a job by ID
@@ -164,4 +241,90 @@ func (m *Manager) SetJobFailed(jobID, errMsg string) {
 		job.State = JobFailed
 		job.FinalResult = "Job failed: " + errMsg
 	}
+}
+
+// SetCurrentGroup updates the current group being executed
+func (m *Manager) SetCurrentGroup(jobID string, groupIndex int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if job, ok := m.jobs[jobID]; ok {
+		job.CurrentGroup = groupIndex
+	}
+}
+
+// GetTasksForGroup returns all tasks in a specific group
+func (m *Manager) GetTasksForGroup(jobID string, groupIndex int) []*Task {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return nil
+	}
+
+	var tasks []*Task
+	for _, task := range job.Tasks {
+		if task.GroupIndex == groupIndex {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+// IsGroupComplete checks if all tasks in a group are done or failed
+func (m *Manager) IsGroupComplete(jobID string, groupIndex int) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return false
+	}
+
+	for _, task := range job.Tasks {
+		if task.GroupIndex == groupIndex {
+			if task.State != TaskDone && task.State != TaskFailed {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// IsGroupFailed checks if any task in a group failed
+func (m *Manager) IsGroupFailed(jobID string, groupIndex int) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return false
+	}
+
+	for _, task := range job.Tasks {
+		if task.GroupIndex == groupIndex && task.State == TaskFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// GetGroupResults returns the results of all completed tasks in a group
+func (m *Manager) GetGroupResults(jobID string, groupIndex int) []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return nil
+	}
+
+	var results []string
+	for _, task := range job.Tasks {
+		if task.GroupIndex == groupIndex && task.State == TaskDone && task.Result != "" {
+			results = append(results, task.Result)
+		}
+	}
+	return results
 }

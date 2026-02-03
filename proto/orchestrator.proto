@@ -155,6 +155,29 @@ message JobRequest {
   string session_id = 1;
   string text = 2;           // user request description
   int32 max_workers = 3;     // 0 = use all available devices
+  Plan plan = 4;             // optional: explicit execution plan
+  ReduceSpec reduce = 5;     // optional: how to combine results
+}
+
+// Planning structures
+message Plan {
+  repeated TaskGroup groups = 1;  // groups execute sequentially
+}
+
+message TaskGroup {
+  int32 index = 1;               // execution order (0 = first)
+  repeated TaskSpec tasks = 2;   // tasks in group run in parallel
+}
+
+message TaskSpec {
+  string task_id = 1;
+  string kind = 2;               // "SYSINFO", "ECHO", etc.
+  string input = 3;
+  string target_device_id = 4;   // empty = let orchestrator assign
+}
+
+message ReduceSpec {
+  string kind = 1;               // "CONCAT" for now
 }
 
 message JobInfo {
@@ -168,6 +191,8 @@ message JobStatus {
   string state = 2;          // QUEUED, RUNNING, DONE, FAILED
   repeated TaskStatus tasks = 3;
   string final_result = 4;   // concatenated results when DONE
+  int32 current_group = 5;   // which group is currently executing
+  int32 total_groups = 6;    // total number of groups in plan
 }
 
 message TaskStatus {

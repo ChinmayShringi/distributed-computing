@@ -107,10 +107,12 @@ type TaskStatusResponse struct {
 
 // JobStatusResponse is the JSON response for /api/job
 type JobStatusResponse struct {
-	JobID       string               `json:"job_id"`
-	State       string               `json:"state"`
-	Tasks       []TaskStatusResponse `json:"tasks"`
-	FinalResult string               `json:"final_result"`
+	JobID        string               `json:"job_id"`
+	State        string               `json:"state"`
+	Tasks        []TaskStatusResponse `json:"tasks"`
+	FinalResult  string               `json:"final_result"`
+	CurrentGroup int32                `json:"current_group"`
+	TotalGroups  int32                `json:"total_groups"`
 }
 
 func main() {
@@ -517,10 +519,12 @@ func (s *WebServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, JobStatusResponse{
-		JobID:       jobResp.JobId,
-		State:       jobResp.State,
-		Tasks:       tasks,
-		FinalResult: jobResp.FinalResult,
+		JobID:        jobResp.JobId,
+		State:        jobResp.State,
+		Tasks:        tasks,
+		FinalResult:  jobResp.FinalResult,
+		CurrentGroup: jobResp.CurrentGroup,
+		TotalGroups:  jobResp.TotalGroups,
 	})
 }
 
