@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EdgeCLI Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.5;
+            padding: 16px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: #1a1a1a;
+                color: #eee;
+            }
+            .card {
+                background: #2a2a2a;
+                border-color: #444;
+            }
+            input, select, textarea {
+                background: #333;
+                color: #eee;
+                border-color: #555;
+            }
+            .device-card {
+                background: #333;
+                border-color: #555;
+            }
+            pre {
+                background: #333;
+            }
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        button {
+            background: #007AFF;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #666;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+            margin-bottom: 8px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: #666;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            label { color: #aaa; }
+        }
+
+        .form-row {
+            margin-bottom: 12px;
+        }
+
+        .device-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .device-card {
+            background: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .device-name {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .device-info {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .device-info { color: #aaa; }
+        }
+
+        .device-caps {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .cap-badge {
+            background: #e0e0e0;
+            color: #333;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .cap-badge { background: #444; color: #ddd; }
+        }
+
+        .cap-badge.gpu { background: #4CAF50; color: white; }
+        .cap-badge.npu { background: #9C27B0; color: white; }
+
+        pre {
+            background: #f0f0f0;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 0.85rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .output-section {
+            margin-top: 12px;
+        }
+
+        .output-meta {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .output-meta { color: #aaa; }
+        }
+
+        .chat-log {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 12px;
+            background: #fafafa;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-log { background: #333; border-color: #555; }
+        }
+
+        .chat-message {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-message { border-color: #444; }
+        }
+
+        .chat-message:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .chat-user {
+            font-weight: 600;
+            color: #007AFF;
+        }
+
+        .chat-assistant {
+            font-weight: 600;
+            color: #34C759;
+        }
+
+        .chat-content {
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-row input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .error {
+            color: #FF3B30;
+            font-size: 0.9rem;
+            margin-top: 8px;
+        }
+
+        .loading {
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <h1>EdgeCLI Demo</h1>
+
+    <!-- Devices Section -->
+    <div class="card">
+        <h2>
+            Devices
+            <button onclick="refreshDevices()" id="refresh-btn">Refresh</button>
+        </h2>
+        <div id="device-list" class="device-list">
+            <div class="device-info">Click Refresh to load devices</div>
+        </div>
+    </div>
+
+    <!-- Routed Command Section -->
+    <div class="card">
+        <h2>Routed Command</h2>
+        <div class="form-row">
+            <label for="cmd">Command</label>
+            <input type="text" id="cmd" placeholder="pwd, ls, or cat" value="pwd">
+        </div>
+        <div class="form-row">
+            <label for="args">Arguments (comma-separated)</label>
+            <input type="text" id="args" placeholder="e.g., -la or ./shared/test.txt">
+        </div>
+        <div class="form-row">
+            <label for="policy">Routing Policy</label>
+            <select id="policy" onchange="toggleForceDevice()">
+                <option value="BEST_AVAILABLE">Best Available (NPU > GPU > CPU)</option>
+                <option value="PREFER_REMOTE">Prefer Remote</option>
+                <option value="REQUIRE_NPU">Require NPU</option>
+                <option value="FORCE_DEVICE_ID">Force Device ID</option>
+            </select>
+        </div>
+        <div class="form-row hidden" id="force-device-row">
+            <label for="force-device-id">Device ID</label>
+            <input type="text" id="force-device-id" placeholder="Enter device ID">
+        </div>
+        <button onclick="runCommand()" id="run-btn">Run Command</button>
+
+        <div class="output-section hidden" id="cmd-output">
+            <div class="output-meta" id="cmd-meta"></div>
+            <pre id="cmd-result"></pre>
+        </div>
+        <div class="error hidden" id="cmd-error"></div>
+    </div>
+
+    <!-- Assistant Section -->
+    <div class="card">
+        <h2>Assistant</h2>
+        <div class="chat-log" id="chat-log">
+            <div class="chat-message">
+                <span class="chat-assistant">Assistant:</span>
+                <div class="chat-content">Hello! I can help you run commands on your devices.
+
+Try:
+- "list devices" - show all registered devices
+- "pwd" - print working directory
+- "ls" - list files
+- "cat ./shared/&lt;file&gt;" - show file contents</div>
+            </div>
+        </div>
+        <div class="input-row">
+            <input type="text" id="assistant-input" placeholder="Type a command..." onkeypress="handleEnter(event)">
+            <button onclick="sendAssistant()" id="send-btn">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // Refresh devices list
+        async function refreshDevices() {
+            const btn = document.getElementById('refresh-btn');
+            const list = document.getElementById('device-list');
+
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            list.classList.add('loading');
+
+            try {
+                const response = await fetch('/api/devices');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch devices');
+                }
+
+                if (data.length === 0) {
+                    list.innerHTML = '<div class="device-info">No devices registered</div>';
+                } else {
+                    list.innerHTML = data.map(device => `
+                        <div class="device-card">
+                            <div class="device-name">${escapeHtml(device.device_name)}</div>
+                            <div class="device-info">
+                                ${escapeHtml(device.platform)}/${escapeHtml(device.arch)} - ${escapeHtml(device.grpc_addr)}
+                            </div>
+                            <div class="device-info" style="font-size: 0.75rem; color: #999;">
+                                ID: ${escapeHtml(device.device_id.substring(0, 12))}...
+                            </div>
+                            <div class="device-caps">
+                                ${device.capabilities.map(cap =>
+                                    `<span class="cap-badge ${cap}">${cap}</span>`
+                                ).join('')}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                list.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Refresh';
+                list.classList.remove('loading');
+            }
+        }
+
+        // Toggle force device ID field
+        function toggleForceDevice() {
+            const policy = document.getElementById('policy').value;
+            const row = document.getElementById('force-device-row');
+            row.classList.toggle('hidden', policy !== 'FORCE_DEVICE_ID');
+        }
+
+        // Run routed command
+        async function runCommand() {
+            const btn = document.getElementById('run-btn');
+            const output = document.getElementById('cmd-output');
+            const meta = document.getElementById('cmd-meta');
+            const result = document.getElementById('cmd-result');
+            const error = document.getElementById('cmd-error');
+
+            const cmd = document.getElementById('cmd').value.trim();
+            const argsStr = document.getElementById('args').value.trim();
+            const policy = document.getElementById('policy').value;
+            const forceDeviceId = document.getElementById('force-device-id').value.trim();
+
+            if (!cmd) {
+                error.textContent = 'Command is required';
+                error.classList.remove('hidden');
+                return;
+            }
+
+            const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
+
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            output.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/routed-cmd', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmd: cmd,
+                        args: args,
+                        policy: policy,
+                        force_device_id: forceDeviceId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Command failed');
+                }
+
+                meta.innerHTML = `
+                    <strong>Device:</strong> ${escapeHtml(data.selected_device_name)}
+                    (${data.executed_locally ? 'local' : 'remote'}) |
+                    <strong>Time:</strong> ${data.total_time_ms.toFixed(2)} ms |
+                    <strong>Exit:</strong> ${data.exit_code}
+                `;
+
+                let resultText = '';
+                if (data.stdout) resultText += data.stdout;
+                if (data.stderr) resultText += '\n[stderr]\n' + data.stderr;
+                if (!resultText) resultText = '(no output)';
+
+                result.textContent = resultText;
+                output.classList.remove('hidden');
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run Command';
+            }
+        }
+
+        // Send assistant message
+        async function sendAssistant() {
+            const btn = document.getElementById('send-btn');
+            const input = document.getElementById('assistant-input');
+            const log = document.getElementById('chat-log');
+
+            const text = input.value.trim();
+            if (!text) return;
+
+            // Add user message
+            log.innerHTML += `
+                <div class="chat-message">
+                    <span class="chat-user">You:</span>
+                    <div class="chat-content">${escapeHtml(text)}</div>
+                </div>
+            `;
+
+            input.value = '';
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                const response = await fetch('/api/assistant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Assistant error');
+                }
+
+                log.innerHTML += `
+                    <div class="chat-message">
+                        <span class="chat-assistant">Assistant:</span>
+                        <div class="chat-content">${escapeHtml(data.reply)}</div>
+                    </div>
+                `;
+            } catch (err) {
+                log.innerHTML += `
+                    <div class="chat-message">
+                        <span class="chat-assistant">Assistant:</span>
+                        <div class="chat-content" style="color: #FF3B30;">Error: ${escapeHtml(err.message)}</div>
+                    </div>
+                `;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send';
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+
+        // Handle Enter key in assistant input
+        function handleEnter(event) {
+            if (event.key === 'Enter') {
+                sendAssistant();
+            }
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Auto-refresh devices on load
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshDevices();
+        });
+    </script>
+</body>
+</html>

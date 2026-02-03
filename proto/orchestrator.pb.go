@@ -21,6 +21,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type RoutingPolicy_Mode int32
+
+const (
+	RoutingPolicy_BEST_AVAILABLE  RoutingPolicy_Mode = 0 // prefer NPU, then GPU, then CPU
+	RoutingPolicy_REQUIRE_NPU     RoutingPolicy_Mode = 1 // fail if no NPU device
+	RoutingPolicy_PREFER_REMOTE   RoutingPolicy_Mode = 2 // prefer not-self if possible
+	RoutingPolicy_FORCE_DEVICE_ID RoutingPolicy_Mode = 3 // require specific device_id
+)
+
+// Enum value maps for RoutingPolicy_Mode.
+var (
+	RoutingPolicy_Mode_name = map[int32]string{
+		0: "BEST_AVAILABLE",
+		1: "REQUIRE_NPU",
+		2: "PREFER_REMOTE",
+		3: "FORCE_DEVICE_ID",
+	}
+	RoutingPolicy_Mode_value = map[string]int32{
+		"BEST_AVAILABLE":  0,
+		"REQUIRE_NPU":     1,
+		"PREFER_REMOTE":   2,
+		"FORCE_DEVICE_ID": 3,
+	}
+)
+
+func (x RoutingPolicy_Mode) Enum() *RoutingPolicy_Mode {
+	p := new(RoutingPolicy_Mode)
+	*p = x
+	return p
+}
+
+func (x RoutingPolicy_Mode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RoutingPolicy_Mode) Descriptor() protoreflect.EnumDescriptor {
+	return file_orchestrator_proto_enumTypes[0].Descriptor()
+}
+
+func (RoutingPolicy_Mode) Type() protoreflect.EnumType {
+	return &file_orchestrator_proto_enumTypes[0]
+}
+
+func (x RoutingPolicy_Mode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RoutingPolicy_Mode.Descriptor instead.
+func (RoutingPolicy_Mode) EnumDescriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{14, 0}
+}
+
 type Empty struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -769,6 +821,270 @@ func (x *AITaskResponse) GetResult() string {
 	return ""
 }
 
+type HealthStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`        // server's device ID (may be empty if not configured)
+	ServerTime    int64                  `protobuf:"varint,2,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"` // unix seconds
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                          // "ok"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealthStatus) Reset() {
+	*x = HealthStatus{}
+	mi := &file_orchestrator_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthStatus) ProtoMessage() {}
+
+func (x *HealthStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
+func (*HealthStatus) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *HealthStatus) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *HealthStatus) GetServerTime() int64 {
+	if x != nil {
+		return x.ServerTime
+	}
+	return 0
+}
+
+func (x *HealthStatus) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type RoutingPolicy struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mode          RoutingPolicy_Mode     `protobuf:"varint,1,opt,name=mode,proto3,enum=edgemesh.RoutingPolicy_Mode" json:"mode,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"` // used if FORCE_DEVICE_ID
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RoutingPolicy) Reset() {
+	*x = RoutingPolicy{}
+	mi := &file_orchestrator_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoutingPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoutingPolicy) ProtoMessage() {}
+
+func (x *RoutingPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoutingPolicy.ProtoReflect.Descriptor instead.
+func (*RoutingPolicy) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RoutingPolicy) GetMode() RoutingPolicy_Mode {
+	if x != nil {
+		return x.Mode
+	}
+	return RoutingPolicy_BEST_AVAILABLE
+}
+
+func (x *RoutingPolicy) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+type RoutedCommandRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Policy        *RoutingPolicy         `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
+	Command       string                 `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"`
+	Args          []string               `protobuf:"bytes,4,rep,name=args,proto3" json:"args,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RoutedCommandRequest) Reset() {
+	*x = RoutedCommandRequest{}
+	mi := &file_orchestrator_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoutedCommandRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoutedCommandRequest) ProtoMessage() {}
+
+func (x *RoutedCommandRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoutedCommandRequest.ProtoReflect.Descriptor instead.
+func (*RoutedCommandRequest) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RoutedCommandRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *RoutedCommandRequest) GetPolicy() *RoutingPolicy {
+	if x != nil {
+		return x.Policy
+	}
+	return nil
+}
+
+func (x *RoutedCommandRequest) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *RoutedCommandRequest) GetArgs() []string {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
+type RoutedCommandResponse struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Output             *CommandResponse       `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"`
+	SelectedDeviceId   string                 `protobuf:"bytes,2,opt,name=selected_device_id,json=selectedDeviceId,proto3" json:"selected_device_id,omitempty"`
+	SelectedDeviceName string                 `protobuf:"bytes,3,opt,name=selected_device_name,json=selectedDeviceName,proto3" json:"selected_device_name,omitempty"`
+	SelectedDeviceAddr string                 `protobuf:"bytes,4,opt,name=selected_device_addr,json=selectedDeviceAddr,proto3" json:"selected_device_addr,omitempty"`
+	TotalTimeMs        float64                `protobuf:"fixed64,5,opt,name=total_time_ms,json=totalTimeMs,proto3" json:"total_time_ms,omitempty"`          // includes forwarding overhead
+	ExecutedLocally    bool                   `protobuf:"varint,6,opt,name=executed_locally,json=executedLocally,proto3" json:"executed_locally,omitempty"` // true if ran on the coordinator itself
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *RoutedCommandResponse) Reset() {
+	*x = RoutedCommandResponse{}
+	mi := &file_orchestrator_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoutedCommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoutedCommandResponse) ProtoMessage() {}
+
+func (x *RoutedCommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoutedCommandResponse.ProtoReflect.Descriptor instead.
+func (*RoutedCommandResponse) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RoutedCommandResponse) GetOutput() *CommandResponse {
+	if x != nil {
+		return x.Output
+	}
+	return nil
+}
+
+func (x *RoutedCommandResponse) GetSelectedDeviceId() string {
+	if x != nil {
+		return x.SelectedDeviceId
+	}
+	return ""
+}
+
+func (x *RoutedCommandResponse) GetSelectedDeviceName() string {
+	if x != nil {
+		return x.SelectedDeviceName
+	}
+	return ""
+}
+
+func (x *RoutedCommandResponse) GetSelectedDeviceAddr() string {
+	if x != nil {
+		return x.SelectedDeviceAddr
+	}
+	return ""
+}
+
+func (x *RoutedCommandResponse) GetTotalTimeMs() float64 {
+	if x != nil {
+		return x.TotalTimeMs
+	}
+	return 0
+}
+
+func (x *RoutedCommandResponse) GetExecutedLocally() bool {
+	if x != nil {
+		return x.ExecutedLocally
+	}
+	return false
+}
+
 var File_orchestrator_proto protoreflect.FileDescriptor
 
 const file_orchestrator_proto_rawDesc = "" +
@@ -828,7 +1144,33 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x12selected_device_id\x18\x01 \x01(\tR\x10selectedDeviceId\x120\n" +
 	"\x14selected_device_addr\x18\x02 \x01(\tR\x12selectedDeviceAddr\x12\"\n" +
 	"\rwould_use_npu\x18\x03 \x01(\bR\vwouldUseNpu\x12\x16\n" +
-	"\x06result\x18\x04 \x01(\tR\x06result2\xd8\x03\n" +
+	"\x06result\x18\x04 \x01(\tR\x06result\"f\n" +
+	"\fHealthStatus\x12\x1b\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1f\n" +
+	"\vserver_time\x18\x02 \x01(\x03R\n" +
+	"serverTime\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\xb3\x01\n" +
+	"\rRoutingPolicy\x120\n" +
+	"\x04mode\x18\x01 \x01(\x0e2\x1c.edgemesh.RoutingPolicy.ModeR\x04mode\x12\x1b\n" +
+	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\"S\n" +
+	"\x04Mode\x12\x12\n" +
+	"\x0eBEST_AVAILABLE\x10\x00\x12\x0f\n" +
+	"\vREQUIRE_NPU\x10\x01\x12\x11\n" +
+	"\rPREFER_REMOTE\x10\x02\x12\x13\n" +
+	"\x0fFORCE_DEVICE_ID\x10\x03\"\x94\x01\n" +
+	"\x14RoutedCommandRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12/\n" +
+	"\x06policy\x18\x02 \x01(\v2\x17.edgemesh.RoutingPolicyR\x06policy\x12\x18\n" +
+	"\acommand\x18\x03 \x01(\tR\acommand\x12\x12\n" +
+	"\x04args\x18\x04 \x03(\tR\x04args\"\xab\x02\n" +
+	"\x15RoutedCommandResponse\x121\n" +
+	"\x06output\x18\x01 \x01(\v2\x19.edgemesh.CommandResponseR\x06output\x12,\n" +
+	"\x12selected_device_id\x18\x02 \x01(\tR\x10selectedDeviceId\x120\n" +
+	"\x14selected_device_name\x18\x03 \x01(\tR\x12selectedDeviceName\x120\n" +
+	"\x14selected_device_addr\x18\x04 \x01(\tR\x12selectedDeviceAddr\x12\"\n" +
+	"\rtotal_time_ms\x18\x05 \x01(\x01R\vtotalTimeMs\x12)\n" +
+	"\x10executed_locally\x18\x06 \x01(\bR\x0fexecutedLocally2\xe9\x04\n" +
 	"\x13OrchestratorService\x12=\n" +
 	"\rCreateSession\x12\x15.edgemesh.AuthRequest\x1a\x15.edgemesh.SessionInfo\x123\n" +
 	"\tHeartbeat\x12\x15.edgemesh.SessionInfo\x1a\x0f.edgemesh.Empty\x12E\n" +
@@ -836,7 +1178,9 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x0eRegisterDevice\x12\x14.edgemesh.DeviceInfo\x1a\x13.edgemesh.DeviceAck\x12J\n" +
 	"\vListDevices\x12\x1c.edgemesh.ListDevicesRequest\x1a\x1d.edgemesh.ListDevicesResponse\x12=\n" +
 	"\x0fGetDeviceStatus\x12\x12.edgemesh.DeviceId\x1a\x16.edgemesh.DeviceStatus\x12>\n" +
-	"\tRunAITask\x12\x17.edgemesh.AITaskRequest\x1a\x18.edgemesh.AITaskResponseB\"Z github.com/edgecli/edgecli/protob\x06proto3"
+	"\tRunAITask\x12\x17.edgemesh.AITaskRequest\x1a\x18.edgemesh.AITaskResponse\x126\n" +
+	"\vHealthCheck\x12\x0f.edgemesh.Empty\x1a\x16.edgemesh.HealthStatus\x12W\n" +
+	"\x14ExecuteRoutedCommand\x12\x1e.edgemesh.RoutedCommandRequest\x1a\x1f.edgemesh.RoutedCommandResponseB\"Z github.com/edgecli/edgecli/protob\x06proto3"
 
 var (
 	file_orchestrator_proto_rawDescOnce sync.Once
@@ -850,43 +1194,56 @@ func file_orchestrator_proto_rawDescGZIP() []byte {
 	return file_orchestrator_proto_rawDescData
 }
 
-var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_orchestrator_proto_goTypes = []any{
-	(*Empty)(nil),               // 0: edgemesh.Empty
-	(*AuthRequest)(nil),         // 1: edgemesh.AuthRequest
-	(*SessionInfo)(nil),         // 2: edgemesh.SessionInfo
-	(*CommandRequest)(nil),      // 3: edgemesh.CommandRequest
-	(*CommandResponse)(nil),     // 4: edgemesh.CommandResponse
-	(*DeviceId)(nil),            // 5: edgemesh.DeviceId
-	(*DeviceInfo)(nil),          // 6: edgemesh.DeviceInfo
-	(*DeviceAck)(nil),           // 7: edgemesh.DeviceAck
-	(*DeviceStatus)(nil),        // 8: edgemesh.DeviceStatus
-	(*ListDevicesRequest)(nil),  // 9: edgemesh.ListDevicesRequest
-	(*ListDevicesResponse)(nil), // 10: edgemesh.ListDevicesResponse
-	(*AITaskRequest)(nil),       // 11: edgemesh.AITaskRequest
-	(*AITaskResponse)(nil),      // 12: edgemesh.AITaskResponse
+	(RoutingPolicy_Mode)(0),       // 0: edgemesh.RoutingPolicy.Mode
+	(*Empty)(nil),                 // 1: edgemesh.Empty
+	(*AuthRequest)(nil),           // 2: edgemesh.AuthRequest
+	(*SessionInfo)(nil),           // 3: edgemesh.SessionInfo
+	(*CommandRequest)(nil),        // 4: edgemesh.CommandRequest
+	(*CommandResponse)(nil),       // 5: edgemesh.CommandResponse
+	(*DeviceId)(nil),              // 6: edgemesh.DeviceId
+	(*DeviceInfo)(nil),            // 7: edgemesh.DeviceInfo
+	(*DeviceAck)(nil),             // 8: edgemesh.DeviceAck
+	(*DeviceStatus)(nil),          // 9: edgemesh.DeviceStatus
+	(*ListDevicesRequest)(nil),    // 10: edgemesh.ListDevicesRequest
+	(*ListDevicesResponse)(nil),   // 11: edgemesh.ListDevicesResponse
+	(*AITaskRequest)(nil),         // 12: edgemesh.AITaskRequest
+	(*AITaskResponse)(nil),        // 13: edgemesh.AITaskResponse
+	(*HealthStatus)(nil),          // 14: edgemesh.HealthStatus
+	(*RoutingPolicy)(nil),         // 15: edgemesh.RoutingPolicy
+	(*RoutedCommandRequest)(nil),  // 16: edgemesh.RoutedCommandRequest
+	(*RoutedCommandResponse)(nil), // 17: edgemesh.RoutedCommandResponse
 }
 var file_orchestrator_proto_depIdxs = []int32{
-	6,  // 0: edgemesh.ListDevicesResponse.devices:type_name -> edgemesh.DeviceInfo
-	1,  // 1: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
-	2,  // 2: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
-	3,  // 3: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
-	6,  // 4: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
-	9,  // 5: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
-	5,  // 6: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
-	11, // 7: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
-	2,  // 8: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
-	0,  // 9: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
-	4,  // 10: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
-	7,  // 11: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
-	10, // 12: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
-	8,  // 13: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
-	12, // 14: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
-	8,  // [8:15] is the sub-list for method output_type
-	1,  // [1:8] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	7,  // 0: edgemesh.ListDevicesResponse.devices:type_name -> edgemesh.DeviceInfo
+	0,  // 1: edgemesh.RoutingPolicy.mode:type_name -> edgemesh.RoutingPolicy.Mode
+	15, // 2: edgemesh.RoutedCommandRequest.policy:type_name -> edgemesh.RoutingPolicy
+	5,  // 3: edgemesh.RoutedCommandResponse.output:type_name -> edgemesh.CommandResponse
+	2,  // 4: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
+	3,  // 5: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
+	4,  // 6: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
+	7,  // 7: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
+	10, // 8: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
+	6,  // 9: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
+	12, // 10: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
+	1,  // 11: edgemesh.OrchestratorService.HealthCheck:input_type -> edgemesh.Empty
+	16, // 12: edgemesh.OrchestratorService.ExecuteRoutedCommand:input_type -> edgemesh.RoutedCommandRequest
+	3,  // 13: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
+	1,  // 14: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
+	5,  // 15: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
+	8,  // 16: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
+	11, // 17: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
+	9,  // 18: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
+	13, // 19: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
+	14, // 20: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
+	17, // 21: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
+	13, // [13:22] is the sub-list for method output_type
+	4,  // [4:13] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_orchestrator_proto_init() }
@@ -899,13 +1256,14 @@ func file_orchestrator_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orchestrator_proto_rawDesc), len(file_orchestrator_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   13,
+			NumEnums:      1,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_orchestrator_proto_goTypes,
 		DependencyIndexes: file_orchestrator_proto_depIdxs,
+		EnumInfos:         file_orchestrator_proto_enumTypes,
 		MessageInfos:      file_orchestrator_proto_msgTypes,
 	}.Build()
 	File_orchestrator_proto = out.File

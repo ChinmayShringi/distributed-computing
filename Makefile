@@ -8,7 +8,7 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X github.com/edgecli/edgecli/cmd/edgecli/commands.Version=$(VERSION) \
 	-X github.com/edgecli/edgecli/cmd/edgecli/commands.Commit=$(COMMIT)"
 
-.PHONY: all build install clean test lint fmt help proto
+.PHONY: all build install clean test lint fmt help proto server web
 
 all: build
 
@@ -92,6 +92,22 @@ bump-version:
 ## show-version: Show current version
 show-version:
 	@echo "Current version: $$(cat VERSION)"
+
+## server: Run the gRPC server
+server:
+	go run ./cmd/server
+
+## web: Run the web UI server (requires gRPC server running)
+web:
+	go run ./cmd/web
+
+## build-server: Build the gRPC server binary
+build-server:
+	go build -o dist/edgecli-server ./cmd/server
+
+## build-web: Build the web UI server binary
+build-web:
+	go build -o dist/edgecli-web ./cmd/web
 
 ## help: Show this help
 help:

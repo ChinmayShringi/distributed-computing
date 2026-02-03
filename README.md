@@ -304,6 +304,212 @@ go run ./cmd/client --key dev route-task --task summarize --input "hello"
 go run ./cmd/client --key dev --cmd pwd
 ```
 
+## Routed Command Execution
+
+Execute commands on the best available device with automatic routing.
+
+### Basic Usage
+
+```bash
+# Execute command with automatic device selection
+go run ./cmd/client --key dev routed-cmd --cmd ls
+
+# Execute with arguments
+go run ./cmd/client --key dev routed-cmd --cmd cat --arg ./shared/test.txt
+```
+
+### Routing Policies
+
+```bash
+# BEST_AVAILABLE (default) - prefer NPU > GPU > CPU
+go run ./cmd/client --key dev routed-cmd --cmd pwd
+
+# PREFER_REMOTE - prefer non-local device if available
+go run ./cmd/client --key dev routed-cmd --cmd ls --prefer-remote
+
+# REQUIRE_NPU - fail if no NPU device registered
+go run ./cmd/client --key dev routed-cmd --cmd pwd --require-npu
+
+# FORCE_DEVICE_ID - run on specific device
+go run ./cmd/client --key dev routed-cmd --cmd ls --force-device <device-id>
+```
+
+### Output Format
+
+```
+Routed Execution:
+  Selected Device: my-laptop (abc123...)
+  Device Address: 127.0.0.1:50051
+  Executed Locally: true
+  Total Time: 12.34 ms
+  Exit Code: 0
+---
+<command output here>
+```
+
+### Demo A: Single Machine (Local Execution)
+
+```bash
+# Terminal 1: Start server
+go run ./cmd/server
+# Output:
+# [INFO] Self-registered as device: id=abc123... name=my-laptop addr=127.0.0.1:50051
+# [INFO] Orchestrator server listening on :50051
+
+# Terminal 2: Execute routed command
+go run ./cmd/client --key dev routed-cmd --cmd pwd
+# Output:
+# Routed Execution:
+#   Selected Device: my-laptop (abc123...)
+#   Device Address: 127.0.0.1:50051
+#   Executed Locally: true
+#   Total Time: 5.23 ms
+#   Exit Code: 0
+# ---
+# /path/to/working/directory
+```
+
+### Demo B: Two Machines (Remote Execution)
+
+**Laptop A (Coordinator):**
+```bash
+# Start server listening on all interfaces
+GRPC_ADDR=0.0.0.0:50051 go run ./cmd/server
+```
+
+**Laptop B (Worker):**
+```bash
+# Start server
+GRPC_ADDR=0.0.0.0:50051 go run ./cmd/server
+
+# Register with coordinator on Laptop A
+go run ./cmd/client --addr 192.168.1.10:50051 register --name laptop-b --self-addr 192.168.1.20:50051
+```
+
+**Any Client:**
+```bash
+# List devices (shows both laptops)
+go run ./cmd/client --addr 192.168.1.10:50051 list-devices
+
+# Execute with prefer-remote (runs on Laptop B)
+go run ./cmd/client --addr 192.168.1.10:50051 --key dev routed-cmd --cmd pwd --prefer-remote
+# Output:
+# Routed Execution:
+#   Selected Device: laptop-b (def456...)
+#   Device Address: 192.168.1.20:50051
+#   Executed Locally: false
+#   Total Time: 45.67 ms
+#   Exit Code: 0
+# ---
+# /path/on/laptop-b
+```
+
+## Web UI Demo
+
+EdgeCLI includes a minimal web UI for demo purposes, accessible from any browser including mobile devices.
+
+### Prerequisites
+
+- gRPC server running on localhost:50051
+
+### Start Web Server
+
+```bash
+# Terminal 1: Start gRPC server
+make server
+# or: go run ./cmd/server
+
+# Terminal 2: Start web server
+make web
+# or: go run ./cmd/web
+```
+
+### Access
+
+Open http://localhost:8080 in your browser (or use LAN IP on phone: http://<your-ip>:8080)
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WEB_ADDR` | `:8080` | HTTP server address |
+| `GRPC_ADDR` | `localhost:50051` | gRPC server to connect to |
+| `DEV_KEY` | `dev` | Security key for gRPC sessions |
+
+### REST API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Serve web UI (index.html) |
+| `/api/devices` | GET | List all registered devices |
+| `/api/routed-cmd` | POST | Execute command on best device |
+| `/api/assistant` | POST | Natural language command interface |
+
+#### POST /api/routed-cmd
+
+Request:
+```json
+{
+  "cmd": "ls",
+  "args": ["-la"],
+  "policy": "BEST_AVAILABLE",
+  "force_device_id": ""
+}
+```
+
+Response:
+```json
+{
+  "selected_device_name": "my-laptop",
+  "selected_device_id": "abc123...",
+  "selected_device_addr": "127.0.0.1:50051",
+  "executed_locally": true,
+  "total_time_ms": 12.5,
+  "exit_code": 0,
+  "stdout": "...",
+  "stderr": ""
+}
+```
+
+#### POST /api/assistant
+
+Request:
+```json
+{ "text": "list devices" }
+```
+
+Response:
+```json
+{
+  "reply": "Found 2 devices:\n1. my-laptop (darwin/arm64) ...",
+  "raw": [...]
+}
+```
+
+### Multi-Device Web Demo
+
+1. **Start coordinator on Laptop A:**
+   ```bash
+   GRPC_ADDR=0.0.0.0:50051 go run ./cmd/server
+   ```
+
+2. **Start worker on Laptop B:**
+   ```bash
+   GRPC_ADDR=0.0.0.0:50051 go run ./cmd/server
+   go run ./cmd/client --addr <A-IP>:50051 register --name laptop-b --self-addr <B-IP>:50051
+   ```
+
+3. **Start web server (on any machine):**
+   ```bash
+   GRPC_ADDR=<A-IP>:50051 go run ./cmd/web
+   ```
+
+4. **Open on phone:**
+   - Navigate to `http://<web-server-ip>:8080`
+   - Click "Refresh" to see both devices
+   - Run command with "Prefer Remote" policy
+   - Watch it execute on Laptop B
+
 ## Development
 
 ```bash
@@ -327,19 +533,29 @@ make build-all
 
 ```
 edgecli/
-├── cmd/edgecli/           # CLI entry point
-│   └── commands/          # Cobra commands
+├── cmd/
+│   ├── edgecli/           # CLI entry point
+│   │   └── commands/      # Cobra commands
+│   ├── server/            # gRPC orchestrator server
+│   ├── client/            # gRPC CLI client
+│   └── web/               # Web UI server
+│       └── index.html     # Embedded web UI
 ├── internal/
+│   ├── allowlist/         # Command allowlist for safe execution
 │   ├── approval/          # Tool approval workflows
 │   ├── chat/              # Execution budget management
 │   ├── config/            # Configuration management
+│   ├── deviceid/          # Device ID persistence
 │   ├── elevate/           # Privilege elevation
 │   ├── exec/              # Command execution
 │   ├── mode/              # Safe/dangerous mode
 │   ├── osdetect/          # Platform detection
 │   ├── redact/            # Secret redaction
+│   ├── registry/          # Device registry for orchestration
+│   ├── sysinfo/           # System info sampling
 │   ├── tools/             # Tool registry framework
 │   └── ui/                # Terminal UI rendering
+├── proto/                 # gRPC proto definitions
 ├── Makefile               # Build configuration
 └── go.mod                 # Go module definition
 ```

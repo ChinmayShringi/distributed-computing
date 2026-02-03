@@ -2,6 +2,7 @@
 package registry
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -159,4 +160,173 @@ func (r *Registry) SelectBestDevice() (*pb.DeviceInfo, bool) {
 	}
 
 	return nil, false
+}
+
+// SelectionResult contains the result of device selection
+type SelectionResult struct {
+	Device          *pb.DeviceInfo
+	ExecutedLocally bool
+	Error           error
+}
+
+// SelectDevice selects a device based on the routing policy
+// selfDeviceID is the device ID of the coordinator server
+func (r *Registry) SelectDevice(policy *pb.RoutingPolicy, selfDeviceID string) *SelectionResult {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if policy == nil {
+		policy = &pb.RoutingPolicy{Mode: pb.RoutingPolicy_BEST_AVAILABLE}
+	}
+
+	switch policy.Mode {
+	case pb.RoutingPolicy_FORCE_DEVICE_ID:
+		return r.selectForceDevice(policy.DeviceId, selfDeviceID)
+
+	case pb.RoutingPolicy_REQUIRE_NPU:
+		return r.selectRequireNPU(selfDeviceID)
+
+	case pb.RoutingPolicy_PREFER_REMOTE:
+		return r.selectPreferRemote(selfDeviceID)
+
+	case pb.RoutingPolicy_BEST_AVAILABLE:
+		fallthrough
+	default:
+		return r.selectBestAvailable(selfDeviceID)
+	}
+}
+
+// selectForceDevice selects a specific device by ID
+func (r *Registry) selectForceDevice(deviceID, selfDeviceID string) *SelectionResult {
+	if deviceID == "" {
+		return &SelectionResult{
+			Error: fmt.Errorf("device_id is required for FORCE_DEVICE_ID policy"),
+		}
+	}
+
+	entry, ok := r.devices[deviceID]
+	if !ok {
+		return &SelectionResult{
+			Error: fmt.Errorf("device %s not found in registry", deviceID),
+		}
+	}
+
+	return &SelectionResult{
+		Device:          entry.Info,
+		ExecutedLocally: deviceID == selfDeviceID,
+	}
+}
+
+// selectRequireNPU selects a device with NPU capability
+func (r *Registry) selectRequireNPU(selfDeviceID string) *SelectionResult {
+	for _, entry := range r.devices {
+		if entry.Info.HasNpu {
+			return &SelectionResult{
+				Device:          entry.Info,
+				ExecutedLocally: entry.Info.DeviceId == selfDeviceID,
+			}
+		}
+	}
+
+	return &SelectionResult{
+		Error: fmt.Errorf("no device with NPU capability found"),
+	}
+}
+
+// selectPreferRemote prefers a non-self device if available
+func (r *Registry) selectPreferRemote(selfDeviceID string) *SelectionResult {
+	var selfDevice *pb.DeviceInfo
+	var remoteNPU, remoteGPU, remoteCPU *pb.DeviceInfo
+
+	for _, entry := range r.devices {
+		if entry.Info.DeviceId == selfDeviceID {
+			selfDevice = entry.Info
+			continue
+		}
+		// Prefer remote devices with best capability
+		if entry.Info.HasNpu && remoteNPU == nil {
+			remoteNPU = entry.Info
+		}
+		if entry.Info.HasGpu && remoteGPU == nil {
+			remoteGPU = entry.Info
+		}
+		if entry.Info.HasCpu && remoteCPU == nil {
+			remoteCPU = entry.Info
+		}
+	}
+
+	// Return best remote device
+	if remoteNPU != nil {
+		return &SelectionResult{Device: remoteNPU, ExecutedLocally: false}
+	}
+	if remoteGPU != nil {
+		return &SelectionResult{Device: remoteGPU, ExecutedLocally: false}
+	}
+	if remoteCPU != nil {
+		return &SelectionResult{Device: remoteCPU, ExecutedLocally: false}
+	}
+
+	// Fallback to self if no remote devices
+	if selfDevice != nil {
+		return &SelectionResult{Device: selfDevice, ExecutedLocally: true}
+	}
+
+	return &SelectionResult{
+		Error: fmt.Errorf("no devices available"),
+	}
+}
+
+// selectBestAvailable selects the best device regardless of location
+func (r *Registry) selectBestAvailable(selfDeviceID string) *SelectionResult {
+	if len(r.devices) == 0 {
+		return &SelectionResult{
+			Error: fmt.Errorf("no devices available"),
+		}
+	}
+
+	var npuDevice, gpuDevice, cpuDevice *pb.DeviceInfo
+
+	for _, entry := range r.devices {
+		if entry.Info.HasNpu && npuDevice == nil {
+			npuDevice = entry.Info
+		}
+		if entry.Info.HasGpu && gpuDevice == nil {
+			gpuDevice = entry.Info
+		}
+		if entry.Info.HasCpu && cpuDevice == nil {
+			cpuDevice = entry.Info
+		}
+	}
+
+	// Return by priority
+	if npuDevice != nil {
+		return &SelectionResult{
+			Device:          npuDevice,
+			ExecutedLocally: npuDevice.DeviceId == selfDeviceID,
+		}
+	}
+	if gpuDevice != nil {
+		return &SelectionResult{
+			Device:          gpuDevice,
+			ExecutedLocally: gpuDevice.DeviceId == selfDeviceID,
+		}
+	}
+	if cpuDevice != nil {
+		return &SelectionResult{
+			Device:          cpuDevice,
+			ExecutedLocally: cpuDevice.DeviceId == selfDeviceID,
+		}
+	}
+
+	// Fallback to first device
+	for _, entry := range r.devices {
+		return &SelectionResult{
+			Device:          entry.Info,
+			ExecutedLocally: entry.Info.DeviceId == selfDeviceID,
+		}
+	}
+
+	return &SelectionResult{
+		Error: fmt.Errorf("no devices available"),
+	}
 }

@@ -8,12 +8,14 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
 	"github.com/edgecli/edgecli/internal/allowlist"
@@ -24,7 +26,10 @@ import (
 	pb "github.com/edgecli/edgecli/proto"
 )
 
-const defaultAddr = ":50051"
+const (
+	defaultAddr       = ":50051"
+	remoteDialTimeout = 2 * time.Second
+)
 
 // Session represents an authenticated client session
 type Session struct {
@@ -47,11 +52,22 @@ type OrchestratorServer struct {
 
 // NewOrchestratorServer creates a new server instance
 func NewOrchestratorServer(addr string) *OrchestratorServer {
-	// Get or create device ID for this server
-	selfID, err := deviceid.GetOrCreate()
-	if err != nil {
-		log.Printf("[WARN] Could not get device ID: %v", err)
-		selfID = uuid.New().String()
+	// Get device ID from env or generate/persist one
+	selfID := os.Getenv("DEVICE_ID")
+	if selfID == "" {
+		var err error
+		selfID, err = deviceid.GetOrCreate()
+		if err != nil {
+			log.Printf("[WARN] Could not get device ID: %v", err)
+			selfID = uuid.New().String()
+		}
+	}
+
+	// Normalize selfAddr for local demo
+	// If addr is like ":50051", convert to "127.0.0.1:50051" for local dialing
+	selfAddr := addr
+	if strings.HasPrefix(addr, ":") {
+		selfAddr = "127.0.0.1" + addr
 	}
 
 	return &OrchestratorServer{
@@ -59,8 +75,16 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		runner:       exec.NewRunner(),
 		registry:     registry.NewRegistry(),
 		selfDeviceID: selfID,
-		selfAddr:     addr,
+		selfAddr:     selfAddr,
 	}
+}
+
+// registerSelf registers this server as a device in its own registry
+func (s *OrchestratorServer) registerSelf() {
+	selfInfo := s.getSelfDeviceInfo()
+	s.registry.Upsert(selfInfo)
+	log.Printf("[INFO] Self-registered as device: id=%s name=%s addr=%s",
+		selfInfo.DeviceId, selfInfo.DeviceName, selfInfo.GrpcAddr)
 }
 
 // CreateSession authenticates a client and creates a new session
@@ -274,6 +298,126 @@ func (s *OrchestratorServer) getSelfDeviceInfo() *pb.DeviceInfo {
 	}
 }
 
+// HealthCheck returns the server's health status
+func (s *OrchestratorServer) HealthCheck(ctx context.Context, req *pb.Empty) (*pb.HealthStatus, error) {
+	return &pb.HealthStatus{
+		DeviceId:   s.selfDeviceID,
+		ServerTime: time.Now().Unix(),
+		Message:    "ok",
+	}, nil
+}
+
+// ExecuteRoutedCommand executes a command on the best available device
+func (s *OrchestratorServer) ExecuteRoutedCommand(ctx context.Context, req *pb.RoutedCommandRequest) (*pb.RoutedCommandResponse, error) {
+	startTime := time.Now()
+
+	// Verify session
+	s.mu.RLock()
+	_, exists := s.sessions[req.SessionId]
+	s.mu.RUnlock()
+
+	if !exists {
+		log.Printf("[ERROR] ExecuteRoutedCommand: session not found: %s", req.SessionId)
+		return nil, status.Error(codes.Unauthenticated, "session not found")
+	}
+
+	// Select target device based on policy
+	result := s.registry.SelectDevice(req.Policy, s.selfDeviceID)
+	if result.Error != nil {
+		log.Printf("[ERROR] ExecuteRoutedCommand: device selection failed: %v", result.Error)
+		return nil, status.Error(codes.FailedPrecondition, result.Error.Error())
+	}
+
+	device := result.Device
+	log.Printf("[INFO] ExecuteRoutedCommand: selected device=%s name=%s addr=%s local=%v",
+		device.DeviceId, device.DeviceName, device.GrpcAddr, result.ExecutedLocally)
+
+	var cmdResp *pb.CommandResponse
+	var err error
+
+	if result.ExecutedLocally {
+		// Execute locally
+		cmdResp, err = s.ExecuteCommand(ctx, &pb.CommandRequest{
+			SessionId: req.SessionId,
+			Command:   req.Command,
+			Args:      req.Args,
+		})
+	} else {
+		// Forward to remote device
+		cmdResp, err = s.forwardCommand(ctx, device.GrpcAddr, req)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	totalTime := time.Since(startTime).Seconds() * 1000 // Convert to ms
+
+	return &pb.RoutedCommandResponse{
+		Output:             cmdResp,
+		SelectedDeviceId:   device.DeviceId,
+		SelectedDeviceName: device.DeviceName,
+		SelectedDeviceAddr: device.GrpcAddr,
+		TotalTimeMs:        totalTime,
+		ExecutedLocally:    result.ExecutedLocally,
+	}, nil
+}
+
+// forwardCommand forwards a command to a remote device
+func (s *OrchestratorServer) forwardCommand(ctx context.Context, targetAddr string, req *pb.RoutedCommandRequest) (*pb.CommandResponse, error) {
+	// Create context with timeout for dialing
+	dialCtx, cancel := context.WithTimeout(ctx, remoteDialTimeout)
+	defer cancel()
+
+	// Dial remote server
+	conn, err := grpc.DialContext(dialCtx, targetAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] forwardCommand: failed to dial %s: %v", targetAddr, err)
+		return nil, status.Errorf(codes.Unavailable, "failed to connect to remote device at %s: %v", targetAddr, err)
+	}
+	defer conn.Close()
+
+	client := pb.NewOrchestratorServiceClient(conn)
+
+	// Optional: health check first
+	healthCtx, healthCancel := context.WithTimeout(ctx, time.Second)
+	defer healthCancel()
+	healthResp, err := client.HealthCheck(healthCtx, &pb.Empty{})
+	if err != nil {
+		log.Printf("[WARN] forwardCommand: health check failed for %s: %v", targetAddr, err)
+		// Continue anyway, the actual command will fail if server is truly down
+	} else {
+		log.Printf("[DEBUG] forwardCommand: health check ok for %s (device=%s)", targetAddr, healthResp.DeviceId)
+	}
+
+	// Create a session on the remote server
+	sessionResp, err := client.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "coordinator-forward",
+		SecurityKey: "internal-routing", // Internal key for forwarded requests
+	})
+	if err != nil {
+		log.Printf("[ERROR] forwardCommand: failed to create session on %s: %v", targetAddr, err)
+		return nil, status.Errorf(codes.Internal, "failed to create session on remote device: %v", err)
+	}
+
+	// Execute command on remote
+	cmdResp, err := client.ExecuteCommand(ctx, &pb.CommandRequest{
+		SessionId: sessionResp.SessionId,
+		Command:   req.Command,
+		Args:      req.Args,
+	})
+	if err != nil {
+		log.Printf("[ERROR] forwardCommand: command execution failed on %s: %v", targetAddr, err)
+		return nil, status.Errorf(codes.Internal, "command execution failed on remote device: %v", err)
+	}
+
+	log.Printf("[INFO] forwardCommand: command completed on %s exit_code=%d", targetAddr, cmdResp.ExitCode)
+	return cmdResp, nil
+}
+
 func main() {
 	// Get address from environment or use default
 	addr := os.Getenv("GRPC_ADDR")
@@ -290,10 +434,15 @@ func main() {
 	// Create gRPC server
 	grpcServer := grpc.NewServer()
 	orchestrator := NewOrchestratorServer(addr)
+
+	// Auto-register self so list-devices always shows this server
+	orchestrator.registerSelf()
+
 	pb.RegisterOrchestratorServiceServer(grpcServer, orchestrator)
 
 	log.Printf("[INFO] Orchestrator server listening on %s", addr)
 	log.Printf("[INFO] Server device ID: %s", orchestrator.selfDeviceID)
+	log.Printf("[INFO] Server gRPC address: %s", orchestrator.selfAddr)
 	log.Printf("[INFO] Allowed commands: %v", allowlist.ListAllowed())
 
 	// Serve

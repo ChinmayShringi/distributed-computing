@@ -19,13 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OrchestratorService_CreateSession_FullMethodName   = "/edgemesh.OrchestratorService/CreateSession"
-	OrchestratorService_Heartbeat_FullMethodName       = "/edgemesh.OrchestratorService/Heartbeat"
-	OrchestratorService_ExecuteCommand_FullMethodName  = "/edgemesh.OrchestratorService/ExecuteCommand"
-	OrchestratorService_RegisterDevice_FullMethodName  = "/edgemesh.OrchestratorService/RegisterDevice"
-	OrchestratorService_ListDevices_FullMethodName     = "/edgemesh.OrchestratorService/ListDevices"
-	OrchestratorService_GetDeviceStatus_FullMethodName = "/edgemesh.OrchestratorService/GetDeviceStatus"
-	OrchestratorService_RunAITask_FullMethodName       = "/edgemesh.OrchestratorService/RunAITask"
+	OrchestratorService_CreateSession_FullMethodName        = "/edgemesh.OrchestratorService/CreateSession"
+	OrchestratorService_Heartbeat_FullMethodName            = "/edgemesh.OrchestratorService/Heartbeat"
+	OrchestratorService_ExecuteCommand_FullMethodName       = "/edgemesh.OrchestratorService/ExecuteCommand"
+	OrchestratorService_RegisterDevice_FullMethodName       = "/edgemesh.OrchestratorService/RegisterDevice"
+	OrchestratorService_ListDevices_FullMethodName          = "/edgemesh.OrchestratorService/ListDevices"
+	OrchestratorService_GetDeviceStatus_FullMethodName      = "/edgemesh.OrchestratorService/GetDeviceStatus"
+	OrchestratorService_RunAITask_FullMethodName            = "/edgemesh.OrchestratorService/RunAITask"
+	OrchestratorService_HealthCheck_FullMethodName          = "/edgemesh.OrchestratorService/HealthCheck"
+	OrchestratorService_ExecuteRoutedCommand_FullMethodName = "/edgemesh.OrchestratorService/ExecuteRoutedCommand"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -42,6 +44,10 @@ type OrchestratorServiceClient interface {
 	GetDeviceStatus(ctx context.Context, in *DeviceId, opts ...grpc.CallOption) (*DeviceStatus, error)
 	// AI task routing
 	RunAITask(ctx context.Context, in *AITaskRequest, opts ...grpc.CallOption) (*AITaskResponse, error)
+	// Connectivity check
+	HealthCheck(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*HealthStatus, error)
+	// Routed execution - forwards command to best available device
+	ExecuteRoutedCommand(ctx context.Context, in *RoutedCommandRequest, opts ...grpc.CallOption) (*RoutedCommandResponse, error)
 }
 
 type orchestratorServiceClient struct {
@@ -122,6 +128,26 @@ func (c *orchestratorServiceClient) RunAITask(ctx context.Context, in *AITaskReq
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) HealthCheck(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*HealthStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HealthStatus)
+	err := c.cc.Invoke(ctx, OrchestratorService_HealthCheck_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) ExecuteRoutedCommand(ctx context.Context, in *RoutedCommandRequest, opts ...grpc.CallOption) (*RoutedCommandResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RoutedCommandResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_ExecuteRoutedCommand_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -136,6 +162,10 @@ type OrchestratorServiceServer interface {
 	GetDeviceStatus(context.Context, *DeviceId) (*DeviceStatus, error)
 	// AI task routing
 	RunAITask(context.Context, *AITaskRequest) (*AITaskResponse, error)
+	// Connectivity check
+	HealthCheck(context.Context, *Empty) (*HealthStatus, error)
+	// Routed execution - forwards command to best available device
+	ExecuteRoutedCommand(context.Context, *RoutedCommandRequest) (*RoutedCommandResponse, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -166,6 +196,12 @@ func (UnimplementedOrchestratorServiceServer) GetDeviceStatus(context.Context, *
 }
 func (UnimplementedOrchestratorServiceServer) RunAITask(context.Context, *AITaskRequest) (*AITaskResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunAITask not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) HealthCheck(context.Context, *Empty) (*HealthStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method HealthCheck not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) ExecuteRoutedCommand(context.Context, *RoutedCommandRequest) (*RoutedCommandResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteRoutedCommand not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -314,6 +350,42 @@ func _OrchestratorService_RunAITask_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_HealthCheck_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).HealthCheck(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_HealthCheck_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).HealthCheck(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_ExecuteRoutedCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoutedCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).ExecuteRoutedCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_ExecuteRoutedCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).ExecuteRoutedCommand(ctx, req.(*RoutedCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -348,6 +420,14 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunAITask",
 			Handler:    _OrchestratorService_RunAITask_Handler,
+		},
+		{
+			MethodName: "HealthCheck",
+			Handler:    _OrchestratorService_HealthCheck_Handler,
+		},
+		{
+			MethodName: "ExecuteRoutedCommand",
+			Handler:    _OrchestratorService_ExecuteRoutedCommand_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

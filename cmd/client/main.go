@@ -3,10 +3,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -40,9 +42,10 @@ Commands:
   list-devices     List all registered devices
   status           Get device status
   route-task       Route an AI task to the best device
+  routed-cmd       Execute command on best available device (routed)
 
 Legacy mode (without subcommand):
-  --cmd string     Command to execute (requires --key)
+  --cmd string     Command to execute locally (requires --key)
   --arg string     Command arguments (repeatable)
 
 Examples:
@@ -58,7 +61,15 @@ Examples:
   # Route an AI task
   client --key dev route-task --task summarize --input "hello world"
 
-  # Execute a command (legacy mode)
+  # Execute routed command (auto-selects best device)
+  client --key dev routed-cmd --cmd ls
+
+  # Execute routed command with policy
+  client --key dev routed-cmd --cmd pwd --prefer-remote
+  client --key dev routed-cmd --cmd ls --force-device <device-id>
+  client --key dev routed-cmd --cmd pwd --require-npu
+
+  # Execute a command locally (legacy mode)
   client --key dev --cmd pwd
 `)
 }
@@ -104,6 +115,8 @@ func main() {
 		handleStatus(ctx, client, flag.Args()[1:])
 	case "route-task":
 		handleRouteTask(ctx, client, *key, flag.Args()[1:])
+	case "routed-cmd":
+		handleRoutedCmd(ctx, client, *key, flag.Args()[1:])
 	case "":
 		// Legacy mode: execute command
 		if *cmd == "" {
@@ -124,6 +137,9 @@ func handleRegister(ctx context.Context, client pb.OrchestratorServiceClient, ar
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	name := fs.String("name", "", "Device name (required)")
 	selfAddr := fs.String("self-addr", "", "This device's gRPC address (required)")
+	deviceID := fs.String("id", "", "Device ID (auto-generated if not provided)")
+	platform := fs.String("platform", "", "Platform (auto-detected if not provided)")
+	arch := fs.String("arch", "", "Architecture (auto-detected if not provided)")
 	hasGPU := fs.Bool("gpu", false, "Device has GPU")
 	hasNPU := fs.Bool("npu", false, "Device has NPU")
 	fs.Parse(args)
@@ -137,19 +153,41 @@ func handleRegister(ctx context.Context, client pb.OrchestratorServiceClient, ar
 		os.Exit(1)
 	}
 
-	// Get or create device ID
-	devID, err := deviceid.GetOrCreate()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting device ID: %v\n", err)
-		os.Exit(1)
+	// Determine device ID
+	var devID string
+	if *deviceID != "" {
+		// Use provided ID
+		devID = *deviceID
+	} else if isLocalAddress(*selfAddr) {
+		// Local device: use persistent ID
+		var err error
+		devID, err = deviceid.GetOrCreate()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting device ID: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Remote device: generate new UUID
+		devID = generateUUID()
+		fmt.Printf("Generated new device ID for remote device: %s\n", devID)
+	}
+
+	// Determine platform and arch
+	plat := *platform
+	if plat == "" {
+		plat = runtime.GOOS
+	}
+	archStr := *arch
+	if archStr == "" {
+		archStr = runtime.GOARCH
 	}
 
 	// Build device info
 	info := &pb.DeviceInfo{
 		DeviceId:   devID,
 		DeviceName: *name,
-		Platform:   runtime.GOOS,
-		Arch:       runtime.GOARCH,
+		Platform:   plat,
+		Arch:       archStr,
 		HasCpu:     true,
 		HasGpu:     *hasGPU,
 		HasNpu:     *hasNPU,
@@ -285,6 +323,87 @@ func handleRouteTask(ctx context.Context, client pb.OrchestratorServiceClient, k
 	fmt.Printf("  Result: %s\n", resp.Result)
 }
 
+func handleRoutedCmd(ctx context.Context, client pb.OrchestratorServiceClient, key string, args []string) {
+	// Parse routed-cmd specific flags
+	fs := flag.NewFlagSet("routed-cmd", flag.ExitOnError)
+	cmd := fs.String("cmd", "", "Command to execute (required)")
+	preferRemote := fs.Bool("prefer-remote", false, "Prefer remote device if available")
+	requireNPU := fs.Bool("require-npu", false, "Require device with NPU")
+	forceDevice := fs.String("force-device", "", "Force execution on specific device ID")
+	var cmdArgs arrayFlags
+	fs.Var(&cmdArgs, "arg", "Command arguments (repeatable)")
+	fs.Parse(args)
+
+	if *cmd == "" {
+		fmt.Fprintln(os.Stderr, "Error: --cmd is required for routed-cmd")
+		os.Exit(1)
+	}
+
+	if key == "" {
+		fmt.Fprintln(os.Stderr, "Error: --key is required for routed-cmd")
+		os.Exit(1)
+	}
+
+	// Build routing policy
+	policy := &pb.RoutingPolicy{
+		Mode: pb.RoutingPolicy_BEST_AVAILABLE,
+	}
+
+	if *forceDevice != "" {
+		policy.Mode = pb.RoutingPolicy_FORCE_DEVICE_ID
+		policy.DeviceId = *forceDevice
+	} else if *requireNPU {
+		policy.Mode = pb.RoutingPolicy_REQUIRE_NPU
+	} else if *preferRemote {
+		policy.Mode = pb.RoutingPolicy_PREFER_REMOTE
+	}
+
+	// Create session first
+	hostname, _ := os.Hostname()
+	sessionResp, err := client.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  hostname,
+		SecurityKey: key,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating session: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Execute routed command
+	resp, err := client.ExecuteRoutedCommand(ctx, &pb.RoutedCommandRequest{
+		SessionId: sessionResp.SessionId,
+		Policy:    policy,
+		Command:   *cmd,
+		Args:      cmdArgs,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error executing routed command: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print routing info
+	fmt.Printf("Routed Execution:\n")
+	fmt.Printf("  Selected Device: %s (%s)\n", resp.SelectedDeviceName, truncateID(resp.SelectedDeviceId))
+	fmt.Printf("  Device Address: %s\n", resp.SelectedDeviceAddr)
+	fmt.Printf("  Executed Locally: %v\n", resp.ExecutedLocally)
+	fmt.Printf("  Total Time: %.2f ms\n", resp.TotalTimeMs)
+	fmt.Printf("  Exit Code: %d\n", resp.Output.ExitCode)
+	fmt.Println("---")
+
+	// Print command output
+	if resp.Output.Stdout != "" {
+		fmt.Print(resp.Output.Stdout)
+	}
+	if resp.Output.Stderr != "" {
+		fmt.Fprint(os.Stderr, resp.Output.Stderr)
+	}
+
+	// Exit with command's exit code
+	if resp.Output.ExitCode != 0 {
+		os.Exit(int(resp.Output.ExitCode))
+	}
+}
+
 func handleExecuteCommand(ctx context.Context, client pb.OrchestratorServiceClient, key, device, cmd string, args []string) {
 	if key == "" {
 		fmt.Fprintln(os.Stderr, "Error: --key is required")
@@ -343,4 +462,44 @@ func truncateID(id string) string {
 		return id[:8] + "..."
 	}
 	return id
+}
+
+// isLocalAddress checks if an address refers to the local machine
+func isLocalAddress(addr string) bool {
+	// Extract host from addr (host:port format)
+	host := addr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		host = addr[:idx]
+	}
+
+	// Check for common local addresses
+	localHosts := []string{
+		"localhost",
+		"127.0.0.1",
+		"::1",
+		"0.0.0.0",
+	}
+
+	for _, local := range localHosts {
+		if host == local {
+			return true
+		}
+	}
+
+	return false
+}
+
+// generateUUID generates a new UUID v4
+func generateUUID() string {
+	// Simple UUID v4 generation
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Fallback to timestamp-based ID
+		return fmt.Sprintf("dev-%d", time.Now().UnixNano())
+	}
+	// Set version (4) and variant (2)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }

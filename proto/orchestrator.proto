@@ -17,6 +17,19 @@ service OrchestratorService {
 
   // AI task routing
   rpc RunAITask (AITaskRequest) returns (AITaskResponse);
+
+  // Connectivity check
+  rpc HealthCheck (Empty) returns (HealthStatus);
+
+  // Routed execution - forwards command to best available device
+  rpc ExecuteRoutedCommand (RoutedCommandRequest) returns (RoutedCommandResponse);
+
+  // Job orchestration (push model)
+  rpc SubmitJob (JobRequest) returns (JobInfo);
+  rpc GetJob (JobId) returns (JobStatus);
+
+  // Worker execution
+  rpc RunTask (TaskRequest) returns (TaskResult);
 }
 
 message Empty {}
@@ -93,4 +106,90 @@ message AITaskResponse {
   string selected_device_addr = 2;
   bool would_use_npu = 3;
   string result = 4;  // stub result: "ROUTED: <task> to <device_name>"
+}
+
+// Health check messages
+
+message HealthStatus {
+  string device_id = 1;    // server's device ID (may be empty if not configured)
+  int64 server_time = 2;   // unix seconds
+  string message = 3;      // "ok"
+}
+
+// Routed execution messages
+
+message RoutingPolicy {
+  enum Mode {
+    BEST_AVAILABLE = 0;    // prefer NPU, then GPU, then CPU
+    REQUIRE_NPU = 1;       // fail if no NPU device
+    PREFER_REMOTE = 2;     // prefer not-self if possible
+    FORCE_DEVICE_ID = 3;   // require specific device_id
+  }
+  Mode mode = 1;
+  string device_id = 2;    // used if FORCE_DEVICE_ID
+}
+
+message RoutedCommandRequest {
+  string session_id = 1;
+  RoutingPolicy policy = 2;
+  string command = 3;
+  repeated string args = 4;
+}
+
+message RoutedCommandResponse {
+  CommandResponse output = 1;
+  string selected_device_id = 2;
+  string selected_device_name = 3;
+  string selected_device_addr = 4;
+  double total_time_ms = 5;       // includes forwarding overhead
+  bool executed_locally = 6;      // true if ran on the coordinator itself
+}
+
+// Job orchestration messages
+
+message JobId {
+  string job_id = 1;
+}
+
+message JobRequest {
+  string session_id = 1;
+  string text = 2;           // user request description
+  int32 max_workers = 3;     // 0 = use all available devices
+}
+
+message JobInfo {
+  string job_id = 1;
+  int64 created_at = 2;
+  string summary = 3;        // e.g. "distributed to N devices"
+}
+
+message JobStatus {
+  string job_id = 1;
+  string state = 2;          // QUEUED, RUNNING, DONE, FAILED
+  repeated TaskStatus tasks = 3;
+  string final_result = 4;   // concatenated results when DONE
+}
+
+message TaskStatus {
+  string task_id = 1;
+  string assigned_device_id = 2;
+  string assigned_device_name = 3;
+  string state = 4;          // QUEUED, RUNNING, DONE, FAILED
+  string result = 5;
+  string error = 6;
+}
+
+message TaskRequest {
+  string task_id = 1;
+  string job_id = 2;
+  string kind = 3;           // "ECHO" or "SYSINFO"
+  string input = 4;
+}
+
+message TaskResult {
+  string task_id = 1;
+  bool ok = 2;
+  string output = 3;
+  string error = 4;
+  double time_ms = 5;
 }
