@@ -45,6 +45,7 @@ type DeviceResponse struct {
 	Capabilities     []string `json:"capabilities"`
 	GRPCAddr         string   `json:"grpc_addr"`
 	CanScreenCapture bool     `json:"can_screen_capture"`
+	HttpAddr         string   `json:"http_addr"`
 }
 
 // RoutedCmdRequest is the JSON request for /api/routed-cmd
@@ -96,6 +97,20 @@ type PreviewPlanResponse struct {
 	Rationale string      `json:"rationale"`
 	Plan      interface{} `json:"plan"`
 	Reduce    interface{} `json:"reduce"`
+}
+
+// DownloadRequest is the JSON request for /api/request-download
+type DownloadRequest struct {
+	DeviceID string `json:"device_id"`
+	Path     string `json:"path"`
+}
+
+// DownloadResponse is the JSON response for /api/request-download
+type DownloadResponse struct {
+	DownloadURL   string `json:"download_url"`
+	Filename      string `json:"filename"`
+	SizeBytes     int64  `json:"size_bytes"`
+	ExpiresUnixMs int64  `json:"expires_unix_ms"`
 }
 
 // SubmitJobRequest is the JSON request for /api/submit-job
@@ -213,6 +228,7 @@ func main() {
 	http.HandleFunc("/api/stream/start", server.handleStreamStart)
 	http.HandleFunc("/api/stream/answer", server.handleStreamAnswer)
 	http.HandleFunc("/api/stream/stop", server.handleStreamStop)
+	http.HandleFunc("/api/request-download", server.handleRequestDownload)
 
 	log.Printf("[INFO] Web server listening on %s", httpAddr)
 	log.Printf("[INFO] Connected to gRPC server at %s", grpcAddr)
@@ -277,6 +293,7 @@ func (s *WebServer) handleDevices(w http.ResponseWriter, r *http.Request) {
 			Capabilities:     caps,
 			GRPCAddr:         d.GrpcAddr,
 			CanScreenCapture: d.CanScreenCapture,
+			HttpAddr:         d.HttpAddr,
 		})
 	}
 
@@ -910,4 +927,94 @@ func (s *WebServer) writeJSON(w http.ResponseWriter, status int, data interface{
 // writeError writes a JSON error response
 func (s *WebServer) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, ErrorResponse{Error: message})
+}
+
+// handleRequestDownload creates a download ticket on a target device and returns a direct URL
+func (s *WebServer) handleRequestDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req DownloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.DeviceID == "" {
+		s.writeError(w, http.StatusBadRequest, "device_id is required")
+		return
+	}
+	if req.Path == "" {
+		s.writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Find the device in the coordinator's registry
+	devicesResp, err := s.grpcClient.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		log.Printf("[ERROR] handleRequestDownload: ListDevices failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("ListDevices error: %v", err))
+		return
+	}
+
+	var targetDevice *pb.DeviceInfo
+	for _, d := range devicesResp.Devices {
+		if d.DeviceId == req.DeviceID {
+			targetDevice = d
+			break
+		}
+	}
+	if targetDevice == nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("Device not found: %s", req.DeviceID))
+		return
+	}
+	if targetDevice.HttpAddr == "" {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Device %s has no HTTP address configured", targetDevice.DeviceName))
+		return
+	}
+
+	// Dial the device's gRPC directly
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, targetDevice.GrpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleRequestDownload: failed to dial device %s: %v", targetDevice.GrpcAddr, err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	// Call CreateDownloadTicket on the device
+	ticketResp, err := deviceClient.CreateDownloadTicket(ctx, &pb.DownloadTicketRequest{
+		Path: req.Path,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleRequestDownload: CreateDownloadTicket failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ticket error: %v", err))
+		return
+	}
+
+	// Build the direct download URL
+	downloadURL := fmt.Sprintf("http://%s/bulk/download/%s", targetDevice.HttpAddr, ticketResp.Token)
+
+	log.Printf("[INFO] handleRequestDownload: ticket for %s on %s, url=%s",
+		req.Path, targetDevice.DeviceName, downloadURL)
+
+	s.writeJSON(w, http.StatusOK, DownloadResponse{
+		DownloadURL:   downloadURL,
+		Filename:      ticketResp.Filename,
+		SizeBytes:     ticketResp.SizeBytes,
+		ExpiresUnixMs: ticketResp.ExpiresUnixMs,
+	})
 }

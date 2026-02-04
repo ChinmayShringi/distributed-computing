@@ -381,6 +381,26 @@
         <div class="error hidden" id="stream-error"></div>
     </div>
 
+    <!-- File Download Section -->
+    <div class="card">
+        <h2>File Download</h2>
+        <div class="form-row">
+            <label for="download-device">Device</label>
+            <select id="download-device">
+                <option value="">Select a device...</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="download-path">File path (relative to shared/)</label>
+            <input type="text" id="download-path" placeholder="test.txt" value="test.txt">
+        </div>
+        <button onclick="requestDownload()" id="download-btn">Download</button>
+        <div class="output-section hidden" id="download-output">
+            <div class="output-meta" id="download-meta"></div>
+        </div>
+        <div class="error hidden" id="download-error"></div>
+    </div>
+
     <!-- Assistant Section -->
     <div class="card">
         <h2>Assistant</h2>
@@ -427,6 +447,7 @@ Try:
                 availableDevices = data;
                 populateDeviceDropdown();
                 populateStreamDeviceDropdown();
+                populateDownloadDeviceDropdown();
 
                 if (data.length === 0) {
                     list.innerHTML = '<div class="device-info">No devices registered</div>';
@@ -775,8 +796,7 @@ Try:
             availableDevices.forEach(device => {
                 const option = document.createElement('option');
                 option.value = device.device_id;
-                const capLabel = device.can_screen_capture ? '' : ' [no screen capture]';
-                option.textContent = `${device.device_name} (${device.platform}/${device.arch})${capLabel}`;
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})`;
                 dropdown.appendChild(option);
             });
         }
@@ -795,16 +815,6 @@ Try:
             const fps = parseInt(document.getElementById('stream-fps').value) || 8;
             const quality = parseInt(document.getElementById('stream-quality').value) || 60;
             const monitorIndex = parseInt(document.getElementById('stream-monitor').value) || 0;
-
-            // Check screen capture capability for forced device
-            if (policy === 'FORCE_DEVICE_ID' && forceDeviceId) {
-                const device = availableDevices.find(d => d.device_id === forceDeviceId);
-                if (device && !device.can_screen_capture) {
-                    error.textContent = `Device "${device.device_name}" does not support screen capture`;
-                    error.classList.remove('hidden');
-                    return;
-                }
-            }
 
             startBtn.disabled = true;
             startBtn.textContent = 'Starting...';
@@ -836,10 +846,30 @@ Try:
                 // Step 2: Create RTCPeerConnection
                 streamPC = new RTCPeerConnection({ iceServers: [] });
 
+                // Debug: log connection state changes
+                streamPC.oniceconnectionstatechange = () => {
+                    const state = streamPC.iceConnectionState;
+                    console.log('[WebRTC] ICE connection state:', state);
+                    status.textContent = `ICE: ${state}`;
+                    if (state === 'failed') {
+                        error.textContent = 'ICE connection failed — UDP may be blocked between browser and device';
+                        error.classList.remove('hidden');
+                    }
+                };
+                streamPC.onconnectionstatechange = () => {
+                    console.log('[WebRTC] Connection state:', streamPC.connectionState);
+                };
+
                 // Handle incoming data channel
                 streamPC.ondatachannel = (event) => {
                     const dc = event.channel;
                     dc.binaryType = 'arraybuffer';
+                    console.log('[WebRTC] DataChannel received:', dc.label, 'state:', dc.readyState);
+
+                    dc.onopen = () => {
+                        console.log('[WebRTC] DataChannel opened');
+                        status.textContent = 'Streaming...';
+                    };
 
                     let prevUrl = null;
                     dc.onmessage = (msg) => {
@@ -966,10 +996,80 @@ Try:
             startBtn.disabled = false;
         }
 
+        // Populate download device dropdown
+        function populateDownloadDeviceDropdown() {
+            const dropdown = document.getElementById('download-device');
+            dropdown.innerHTML = '<option value="">Select a device...</option>';
+            availableDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device_id;
+                const httpLabel = device.http_addr ? '' : ' [no HTTP]';
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})${httpLabel}`;
+                dropdown.appendChild(option);
+            });
+        }
+
+        // Request file download
+        async function requestDownload() {
+            const btn = document.getElementById('download-btn');
+            const output = document.getElementById('download-output');
+            const meta = document.getElementById('download-meta');
+            const error = document.getElementById('download-error');
+
+            const deviceId = document.getElementById('download-device').value;
+            const path = document.getElementById('download-path').value.trim();
+
+            if (!deviceId) {
+                error.textContent = 'Please select a device';
+                error.classList.remove('hidden');
+                return;
+            }
+            if (!path) {
+                error.textContent = 'File path is required';
+                error.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Requesting...';
+            output.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/request-download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId, path: path })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Download request failed');
+                }
+
+                const sizeKB = (data.size_bytes / 1024).toFixed(1);
+                const expiresIn = Math.max(0, Math.round((data.expires_unix_ms - Date.now()) / 1000));
+                meta.innerHTML = `<strong>File:</strong> ${escapeHtml(data.filename)} | <strong>Size:</strong> ${sizeKB} KB | <strong>Expires in:</strong> ${expiresIn}s`;
+                output.classList.remove('hidden');
+
+                // Trigger browser download via direct navigation
+                window.location = data.download_url;
+
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Download';
+            }
+        }
+
         // Auto-refresh devices on load
         document.addEventListener('DOMContentLoaded', () => {
             refreshDevices().then(() => {
                 populateStreamDeviceDropdown();
+                populateDownloadDeviceDropdown();
             });
         });
     </script>

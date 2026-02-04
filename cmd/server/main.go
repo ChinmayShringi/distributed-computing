@@ -4,10 +4,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,13 +31,17 @@ import (
 	"github.com/edgecli/edgecli/internal/jobs"
 	"github.com/edgecli/edgecli/internal/registry"
 	"github.com/edgecli/edgecli/internal/sysinfo"
+	"github.com/edgecli/edgecli/internal/transfer"
 	"github.com/edgecli/edgecli/internal/webrtcstream"
 	pb "github.com/edgecli/edgecli/proto"
 )
 
 const (
-	defaultAddr       = ":50051"
-	remoteDialTimeout = 2 * time.Second
+	defaultAddr         = ":50051"
+	defaultBulkHTTPAddr = ":8081"
+	defaultSharedDir    = "./shared"
+	defaultBulkTTL      = 60
+	remoteDialTimeout   = 2 * time.Second
 )
 
 // Session represents an authenticated client session
@@ -56,6 +64,9 @@ type OrchestratorServer struct {
 	brain         *brain.Brain
 	selfDeviceID  string
 	selfAddr      string
+	ticketManager *transfer.Manager
+	sharedRoot    string
+	bulkHTTPAddr  string
 }
 
 // NewOrchestratorServer creates a new server instance
@@ -78,6 +89,30 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		selfAddr = "127.0.0.1" + addr
 	}
 
+	// Shared root directory
+	sharedDir := os.Getenv("SHARED_DIR")
+	if sharedDir == "" {
+		sharedDir = defaultSharedDir
+	}
+	sharedRootAbs, err := filepath.Abs(sharedDir)
+	if err != nil {
+		log.Fatalf("[FATAL] Cannot resolve shared dir: %v", err)
+	}
+
+	// Bulk TTL
+	bulkTTL := defaultBulkTTL
+	if ttlStr := os.Getenv("BULK_TTL_SECONDS"); ttlStr != "" {
+		if parsed, parseErr := strconv.Atoi(ttlStr); parseErr == nil && parsed > 0 {
+			bulkTTL = parsed
+		}
+	}
+
+	// Bulk HTTP address
+	bulkHTTPAddr := os.Getenv("BULK_HTTP_ADDR")
+	if bulkHTTPAddr == "" {
+		bulkHTTPAddr = defaultBulkHTTPAddr
+	}
+
 	return &OrchestratorServer{
 		sessions:      make(map[string]*Session),
 		runner:        exec.NewRunner(),
@@ -87,6 +122,9 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		brain:         brain.New(),
 		selfDeviceID:  selfID,
 		selfAddr:      selfAddr,
+		ticketManager: transfer.NewManager(time.Duration(bulkTTL) * time.Second),
+		sharedRoot:    sharedRootAbs,
+		bulkHTTPAddr:  bulkHTTPAddr,
 	}
 }
 
@@ -94,8 +132,8 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 func (s *OrchestratorServer) registerSelf() {
 	selfInfo := s.getSelfDeviceInfo()
 	s.registry.Upsert(selfInfo)
-	log.Printf("[INFO] Self-registered as device: id=%s name=%s addr=%s",
-		selfInfo.DeviceId, selfInfo.DeviceName, selfInfo.GrpcAddr)
+	log.Printf("[INFO] Self-registered as device: id=%s name=%s grpc=%s http=%s",
+		selfInfo.DeviceId, selfInfo.DeviceName, selfInfo.GrpcAddr, selfInfo.HttpAddr)
 }
 
 // CreateSession authenticates a client and creates a new session
@@ -307,7 +345,21 @@ func (s *OrchestratorServer) getSelfDeviceInfo() *pb.DeviceInfo {
 		HasNpu:           false,
 		GrpcAddr:         s.selfAddr,
 		CanScreenCapture: detectScreenCapture(),
+		HttpAddr:         s.deriveBulkHTTPAddr(),
 	}
+}
+
+// deriveBulkHTTPAddr combines the host from selfAddr with the port from bulkHTTPAddr.
+func (s *OrchestratorServer) deriveBulkHTTPAddr() string {
+	host := s.selfAddr
+	if idx := strings.LastIndex(s.selfAddr, ":"); idx != -1 {
+		host = s.selfAddr[:idx]
+	}
+	port := s.bulkHTTPAddr
+	if idx := strings.LastIndex(s.bulkHTTPAddr, ":"); idx != -1 {
+		port = s.bulkHTTPAddr[idx+1:]
+	}
+	return host + ":" + port
 }
 
 // detectScreenCapture tests whether this machine can capture the screen
@@ -816,6 +868,116 @@ func (s *OrchestratorServer) StopWebRTC(ctx context.Context, req *pb.WebRTCStop)
 	return &pb.Empty{}, nil
 }
 
+// CreateDownloadTicket validates a file path and issues a one-time download token
+func (s *OrchestratorServer) CreateDownloadTicket(ctx context.Context, req *pb.DownloadTicketRequest) (*pb.DownloadTicketResponse, error) {
+	path := req.Path
+	if path == "" {
+		return nil, status.Error(codes.InvalidArgument, "path is required")
+	}
+
+	// Resolve path: absolute paths used directly, relative paths resolved under sharedRoot
+	var fullPath string
+	if filepath.IsAbs(path) {
+		fullPath = filepath.Clean(path)
+	} else {
+		if strings.Contains(path, "..") {
+			return nil, status.Error(codes.InvalidArgument, "path must not contain '..'")
+		}
+		cleaned := filepath.Clean(path)
+		fullPath = filepath.Join(s.sharedRoot, cleaned)
+	}
+
+	// Verify file exists and is regular
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, status.Errorf(codes.NotFound, "file not found: %s", fullPath)
+		}
+		return nil, status.Errorf(codes.Internal, "stat error: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, status.Error(codes.InvalidArgument, "path is not a regular file")
+	}
+
+	// Mint ticket
+	ticket, err := s.ticketManager.Create(fullPath, info.Name(), info.Size())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create ticket: %v", err)
+	}
+
+	log.Printf("[INFO] CreateDownloadTicket: path=%s size=%d token=%s...%s expires=%v",
+		fullPath, info.Size(), ticket.Token[:4], ticket.Token[len(ticket.Token)-4:],
+		ticket.ExpiresAt.Format(time.RFC3339))
+
+	return &pb.DownloadTicketResponse{
+		Token:         ticket.Token,
+		Filename:      ticket.Filename,
+		SizeBytes:     ticket.SizeBytes,
+		ExpiresUnixMs: ticket.ExpiresAt.UnixMilli(),
+	}, nil
+}
+
+// handleBulkDownload serves file bytes for a valid, unexpired token
+func (s *OrchestratorServer) handleBulkDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract token from URL: /bulk/download/<token>
+	const prefix = "/bulk/download/"
+	if !strings.HasPrefix(r.URL.Path, prefix) {
+		http.NotFound(w, r)
+		return
+	}
+	token := strings.TrimPrefix(r.URL.Path, prefix)
+	if token == "" {
+		http.Error(w, "missing token", http.StatusBadRequest)
+		return
+	}
+
+	// Consume ticket (atomic: check + delete)
+	ticket := s.ticketManager.Consume(token)
+	if ticket == nil {
+		http.Error(w, "invalid or expired token", http.StatusForbidden)
+		return
+	}
+
+	// Open file
+	f, err := os.Open(ticket.FilePath)
+	if err != nil {
+		log.Printf("[ERROR] handleBulkDownload: failed to open %s: %v", ticket.FilePath, err)
+		http.Error(w, "file not accessible", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	// Set headers for download
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, ticket.Filename))
+	w.Header().Set("Content-Length", strconv.FormatInt(ticket.SizeBytes, 10))
+
+	// Stream file bytes
+	written, err := io.Copy(w, f)
+	if err != nil {
+		log.Printf("[ERROR] handleBulkDownload: stream error after %d bytes: %v", written, err)
+		return
+	}
+
+	log.Printf("[INFO] handleBulkDownload: served %s (%d bytes)", ticket.Filename, written)
+}
+
+// startBulkHTTP starts the HTTP server for bulk file downloads
+func (s *OrchestratorServer) startBulkHTTP() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/bulk/download/", s.handleBulkDownload)
+
+	log.Printf("[INFO] Bulk HTTP server listening on %s", s.bulkHTTPAddr)
+	if err := http.ListenAndServe(s.bulkHTTPAddr, mux); err != nil {
+		log.Fatalf("[FATAL] Bulk HTTP server failed: %v", err)
+	}
+}
+
 func main() {
 	// Get address from environment or use default
 	addr := os.Getenv("GRPC_ADDR")
@@ -841,10 +1003,15 @@ func main() {
 	log.Printf("[INFO] Orchestrator server listening on %s", addr)
 	log.Printf("[INFO] Server device ID: %s", orchestrator.selfDeviceID)
 	log.Printf("[INFO] Server gRPC address: %s", orchestrator.selfAddr)
+	log.Printf("[INFO] Bulk HTTP address: %s", orchestrator.deriveBulkHTTPAddr())
+	log.Printf("[INFO] Shared directory: %s", orchestrator.sharedRoot)
 	log.Printf("[INFO] Allowed commands: %v", allowlist.ListAllowed())
 	log.Printf("[INFO] Windows AI Brain available: %v", orchestrator.brain.IsAvailable())
 
-	// Serve
+	// Start bulk HTTP server in a goroutine
+	go orchestrator.startBulkHTTP()
+
+	// Serve gRPC
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}

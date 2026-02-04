@@ -35,6 +35,7 @@ const (
 	OrchestratorService_StartWebRTC_FullMethodName          = "/edgemesh.OrchestratorService/StartWebRTC"
 	OrchestratorService_CompleteWebRTC_FullMethodName       = "/edgemesh.OrchestratorService/CompleteWebRTC"
 	OrchestratorService_StopWebRTC_FullMethodName           = "/edgemesh.OrchestratorService/StopWebRTC"
+	OrchestratorService_CreateDownloadTicket_FullMethodName = "/edgemesh.OrchestratorService/CreateDownloadTicket"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -66,6 +67,8 @@ type OrchestratorServiceClient interface {
 	StartWebRTC(ctx context.Context, in *WebRTCConfig, opts ...grpc.CallOption) (*WebRTCOffer, error)
 	CompleteWebRTC(ctx context.Context, in *WebRTCAnswer, opts ...grpc.CallOption) (*Empty, error)
 	StopWebRTC(ctx context.Context, in *WebRTCStop, opts ...grpc.CallOption) (*Empty, error)
+	// File download ticket
+	CreateDownloadTicket(ctx context.Context, in *DownloadTicketRequest, opts ...grpc.CallOption) (*DownloadTicketResponse, error)
 }
 
 type orchestratorServiceClient struct {
@@ -236,6 +239,16 @@ func (c *orchestratorServiceClient) StopWebRTC(ctx context.Context, in *WebRTCSt
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) CreateDownloadTicket(ctx context.Context, in *DownloadTicketRequest, opts ...grpc.CallOption) (*DownloadTicketResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DownloadTicketResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_CreateDownloadTicket_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -265,6 +278,8 @@ type OrchestratorServiceServer interface {
 	StartWebRTC(context.Context, *WebRTCConfig) (*WebRTCOffer, error)
 	CompleteWebRTC(context.Context, *WebRTCAnswer) (*Empty, error)
 	StopWebRTC(context.Context, *WebRTCStop) (*Empty, error)
+	// File download ticket
+	CreateDownloadTicket(context.Context, *DownloadTicketRequest) (*DownloadTicketResponse, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -322,6 +337,9 @@ func (UnimplementedOrchestratorServiceServer) CompleteWebRTC(context.Context, *W
 }
 func (UnimplementedOrchestratorServiceServer) StopWebRTC(context.Context, *WebRTCStop) (*Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopWebRTC not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) CreateDownloadTicket(context.Context, *DownloadTicketRequest) (*DownloadTicketResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateDownloadTicket not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -632,6 +650,24 @@ func _OrchestratorService_StopWebRTC_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_CreateDownloadTicket_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DownloadTicketRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).CreateDownloadTicket(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_CreateDownloadTicket_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).CreateDownloadTicket(ctx, req.(*DownloadTicketRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -702,6 +738,10 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StopWebRTC",
 			Handler:    _OrchestratorService_StopWebRTC_Handler,
+		},
+		{
+			MethodName: "CreateDownloadTicket",
+			Handler:    _OrchestratorService_CreateDownloadTicket_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

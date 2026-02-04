@@ -38,6 +38,9 @@ service OrchestratorService {
   rpc StartWebRTC (WebRTCConfig) returns (WebRTCOffer);
   rpc CompleteWebRTC (WebRTCAnswer) returns (Empty);
   rpc StopWebRTC (WebRTCStop) returns (Empty);
+
+  // File download ticket
+  rpc CreateDownloadTicket (DownloadTicketRequest) returns (DownloadTicketResponse);
 }
 
 message Empty {}
@@ -81,6 +84,7 @@ message DeviceInfo {
   bool has_npu = 7;        // false for now, will be true on Snapdragon later
   string grpc_addr = 8;    // where this device can be reached, e.g. "10.0.0.5:50051"
   bool can_screen_capture = 9;  // true if device can capture screen (tested at startup)
+  string http_addr = 10;  // bulk HTTP server address, e.g. "10.0.0.5:8081"
 }
 
 message DeviceAck {
@@ -265,4 +269,17 @@ message PlanPreviewResponse {
   string rationale = 3;
   Plan plan = 4;
   ReduceSpec reduce = 5;
+}
+
+// File download messages
+
+message DownloadTicketRequest {
+  string path = 1;  // relative path under shared root, e.g. "test.txt"
+}
+
+message DownloadTicketResponse {
+  string token = 1;              // one-time-use download token
+  string filename = 2;           // basename of the file
+  int64 size_bytes = 3;          // file size
+  int64 expires_unix_ms = 4;     // absolute expiry (ms since epoch)
 }

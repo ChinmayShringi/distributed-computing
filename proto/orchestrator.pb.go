@@ -396,6 +396,7 @@ type DeviceInfo struct {
 	HasNpu           bool                   `protobuf:"varint,7,opt,name=has_npu,json=hasNpu,proto3" json:"has_npu,omitempty"`                                 // false for now, will be true on Snapdragon later
 	GrpcAddr         string                 `protobuf:"bytes,8,opt,name=grpc_addr,json=grpcAddr,proto3" json:"grpc_addr,omitempty"`                            // where this device can be reached, e.g. "10.0.0.5:50051"
 	CanScreenCapture bool                   `protobuf:"varint,9,opt,name=can_screen_capture,json=canScreenCapture,proto3" json:"can_screen_capture,omitempty"` // true if device can capture screen (tested at startup)
+	HttpAddr         string                 `protobuf:"bytes,10,opt,name=http_addr,json=httpAddr,proto3" json:"http_addr,omitempty"`                           // bulk HTTP server address, e.g. "10.0.0.5:8081"
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -491,6 +492,13 @@ func (x *DeviceInfo) GetCanScreenCapture() bool {
 		return x.CanScreenCapture
 	}
 	return false
+}
+
+func (x *DeviceInfo) GetHttpAddr() string {
+	if x != nil {
+		return x.HttpAddr
+	}
+	return ""
 }
 
 type DeviceAck struct {
@@ -2146,6 +2154,118 @@ func (x *PlanPreviewResponse) GetReduce() *ReduceSpec {
 	return nil
 }
 
+type DownloadTicketRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"` // relative path under shared root, e.g. "test.txt"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadTicketRequest) Reset() {
+	*x = DownloadTicketRequest{}
+	mi := &file_orchestrator_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadTicketRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadTicketRequest) ProtoMessage() {}
+
+func (x *DownloadTicketRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadTicketRequest.ProtoReflect.Descriptor instead.
+func (*DownloadTicketRequest) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *DownloadTicketRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type DownloadTicketResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`                                         // one-time-use download token
+	Filename      string                 `protobuf:"bytes,2,opt,name=filename,proto3" json:"filename,omitempty"`                                   // basename of the file
+	SizeBytes     int64                  `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`               // file size
+	ExpiresUnixMs int64                  `protobuf:"varint,4,opt,name=expires_unix_ms,json=expiresUnixMs,proto3" json:"expires_unix_ms,omitempty"` // absolute expiry (ms since epoch)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadTicketResponse) Reset() {
+	*x = DownloadTicketResponse{}
+	mi := &file_orchestrator_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadTicketResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadTicketResponse) ProtoMessage() {}
+
+func (x *DownloadTicketResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadTicketResponse.ProtoReflect.Descriptor instead.
+func (*DownloadTicketResponse) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *DownloadTicketResponse) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *DownloadTicketResponse) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *DownloadTicketResponse) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *DownloadTicketResponse) GetExpiresUnixMs() int64 {
+	if x != nil {
+		return x.ExpiresUnixMs
+	}
+	return 0
+}
+
 var File_orchestrator_proto protoreflect.FileDescriptor
 
 const file_orchestrator_proto_rawDesc = "" +
@@ -2171,7 +2291,7 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x06stdout\x18\x02 \x01(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x03 \x01(\tR\x06stderr\"'\n" +
 	"\bDeviceId\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\"\x90\x02\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\"\xad\x02\n" +
 	"\n" +
 	"DeviceInfo\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1f\n" +
@@ -2183,7 +2303,9 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\ahas_gpu\x18\x06 \x01(\bR\x06hasGpu\x12\x17\n" +
 	"\ahas_npu\x18\a \x01(\bR\x06hasNpu\x12\x1b\n" +
 	"\tgrpc_addr\x18\b \x01(\tR\bgrpcAddr\x12,\n" +
-	"\x12can_screen_capture\x18\t \x01(\bR\x10canScreenCapture\"@\n" +
+	"\x12can_screen_capture\x18\t \x01(\bR\x10canScreenCapture\x12\x1b\n" +
+	"\thttp_addr\x18\n" +
+	" \x01(\tR\bhttpAddr\"@\n" +
 	"\tDeviceAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12#\n" +
 	"\rregistered_at\x18\x02 \x01(\x03R\fregisteredAt\"\xa5\x01\n" +
@@ -2316,7 +2438,15 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x05notes\x18\x02 \x01(\tR\x05notes\x12\x1c\n" +
 	"\trationale\x18\x03 \x01(\tR\trationale\x12\"\n" +
 	"\x04plan\x18\x04 \x01(\v2\x0e.edgemesh.PlanR\x04plan\x12,\n" +
-	"\x06reduce\x18\x05 \x01(\v2\x14.edgemesh.ReduceSpecR\x06reduce2\x81\b\n" +
+	"\x06reduce\x18\x05 \x01(\v2\x14.edgemesh.ReduceSpecR\x06reduce\"+\n" +
+	"\x15DownloadTicketRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"\x91\x01\n" +
+	"\x16DownloadTicketResponse\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
+	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x03 \x01(\x03R\tsizeBytes\x12&\n" +
+	"\x0fexpires_unix_ms\x18\x04 \x01(\x03R\rexpiresUnixMs2\xdc\b\n" +
 	"\x13OrchestratorService\x12=\n" +
 	"\rCreateSession\x12\x15.edgemesh.AuthRequest\x1a\x15.edgemesh.SessionInfo\x123\n" +
 	"\tHeartbeat\x12\x15.edgemesh.SessionInfo\x1a\x0f.edgemesh.Empty\x12E\n" +
@@ -2334,7 +2464,8 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\vStartWebRTC\x12\x16.edgemesh.WebRTCConfig\x1a\x15.edgemesh.WebRTCOffer\x129\n" +
 	"\x0eCompleteWebRTC\x12\x16.edgemesh.WebRTCAnswer\x1a\x0f.edgemesh.Empty\x123\n" +
 	"\n" +
-	"StopWebRTC\x12\x14.edgemesh.WebRTCStop\x1a\x0f.edgemesh.EmptyB\"Z github.com/edgecli/edgecli/protob\x06proto3"
+	"StopWebRTC\x12\x14.edgemesh.WebRTCStop\x1a\x0f.edgemesh.Empty\x12Y\n" +
+	"\x14CreateDownloadTicket\x12\x1f.edgemesh.DownloadTicketRequest\x1a .edgemesh.DownloadTicketResponseB\"Z github.com/edgecli/edgecli/protob\x06proto3"
 
 var (
 	file_orchestrator_proto_rawDescOnce sync.Once
@@ -2349,43 +2480,45 @@ func file_orchestrator_proto_rawDescGZIP() []byte {
 }
 
 var file_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_orchestrator_proto_goTypes = []any{
-	(RoutingPolicy_Mode)(0),       // 0: edgemesh.RoutingPolicy.Mode
-	(*Empty)(nil),                 // 1: edgemesh.Empty
-	(*AuthRequest)(nil),           // 2: edgemesh.AuthRequest
-	(*SessionInfo)(nil),           // 3: edgemesh.SessionInfo
-	(*CommandRequest)(nil),        // 4: edgemesh.CommandRequest
-	(*CommandResponse)(nil),       // 5: edgemesh.CommandResponse
-	(*DeviceId)(nil),              // 6: edgemesh.DeviceId
-	(*DeviceInfo)(nil),            // 7: edgemesh.DeviceInfo
-	(*DeviceAck)(nil),             // 8: edgemesh.DeviceAck
-	(*DeviceStatus)(nil),          // 9: edgemesh.DeviceStatus
-	(*ListDevicesRequest)(nil),    // 10: edgemesh.ListDevicesRequest
-	(*ListDevicesResponse)(nil),   // 11: edgemesh.ListDevicesResponse
-	(*AITaskRequest)(nil),         // 12: edgemesh.AITaskRequest
-	(*AITaskResponse)(nil),        // 13: edgemesh.AITaskResponse
-	(*HealthStatus)(nil),          // 14: edgemesh.HealthStatus
-	(*RoutingPolicy)(nil),         // 15: edgemesh.RoutingPolicy
-	(*RoutedCommandRequest)(nil),  // 16: edgemesh.RoutedCommandRequest
-	(*RoutedCommandResponse)(nil), // 17: edgemesh.RoutedCommandResponse
-	(*JobId)(nil),                 // 18: edgemesh.JobId
-	(*JobRequest)(nil),            // 19: edgemesh.JobRequest
-	(*Plan)(nil),                  // 20: edgemesh.Plan
-	(*TaskGroup)(nil),             // 21: edgemesh.TaskGroup
-	(*TaskSpec)(nil),              // 22: edgemesh.TaskSpec
-	(*ReduceSpec)(nil),            // 23: edgemesh.ReduceSpec
-	(*JobInfo)(nil),               // 24: edgemesh.JobInfo
-	(*JobStatus)(nil),             // 25: edgemesh.JobStatus
-	(*TaskStatus)(nil),            // 26: edgemesh.TaskStatus
-	(*TaskRequest)(nil),           // 27: edgemesh.TaskRequest
-	(*TaskResult)(nil),            // 28: edgemesh.TaskResult
-	(*WebRTCConfig)(nil),          // 29: edgemesh.WebRTCConfig
-	(*WebRTCOffer)(nil),           // 30: edgemesh.WebRTCOffer
-	(*WebRTCAnswer)(nil),          // 31: edgemesh.WebRTCAnswer
-	(*WebRTCStop)(nil),            // 32: edgemesh.WebRTCStop
-	(*PlanPreviewRequest)(nil),    // 33: edgemesh.PlanPreviewRequest
-	(*PlanPreviewResponse)(nil),   // 34: edgemesh.PlanPreviewResponse
+	(RoutingPolicy_Mode)(0),        // 0: edgemesh.RoutingPolicy.Mode
+	(*Empty)(nil),                  // 1: edgemesh.Empty
+	(*AuthRequest)(nil),            // 2: edgemesh.AuthRequest
+	(*SessionInfo)(nil),            // 3: edgemesh.SessionInfo
+	(*CommandRequest)(nil),         // 4: edgemesh.CommandRequest
+	(*CommandResponse)(nil),        // 5: edgemesh.CommandResponse
+	(*DeviceId)(nil),               // 6: edgemesh.DeviceId
+	(*DeviceInfo)(nil),             // 7: edgemesh.DeviceInfo
+	(*DeviceAck)(nil),              // 8: edgemesh.DeviceAck
+	(*DeviceStatus)(nil),           // 9: edgemesh.DeviceStatus
+	(*ListDevicesRequest)(nil),     // 10: edgemesh.ListDevicesRequest
+	(*ListDevicesResponse)(nil),    // 11: edgemesh.ListDevicesResponse
+	(*AITaskRequest)(nil),          // 12: edgemesh.AITaskRequest
+	(*AITaskResponse)(nil),         // 13: edgemesh.AITaskResponse
+	(*HealthStatus)(nil),           // 14: edgemesh.HealthStatus
+	(*RoutingPolicy)(nil),          // 15: edgemesh.RoutingPolicy
+	(*RoutedCommandRequest)(nil),   // 16: edgemesh.RoutedCommandRequest
+	(*RoutedCommandResponse)(nil),  // 17: edgemesh.RoutedCommandResponse
+	(*JobId)(nil),                  // 18: edgemesh.JobId
+	(*JobRequest)(nil),             // 19: edgemesh.JobRequest
+	(*Plan)(nil),                   // 20: edgemesh.Plan
+	(*TaskGroup)(nil),              // 21: edgemesh.TaskGroup
+	(*TaskSpec)(nil),               // 22: edgemesh.TaskSpec
+	(*ReduceSpec)(nil),             // 23: edgemesh.ReduceSpec
+	(*JobInfo)(nil),                // 24: edgemesh.JobInfo
+	(*JobStatus)(nil),              // 25: edgemesh.JobStatus
+	(*TaskStatus)(nil),             // 26: edgemesh.TaskStatus
+	(*TaskRequest)(nil),            // 27: edgemesh.TaskRequest
+	(*TaskResult)(nil),             // 28: edgemesh.TaskResult
+	(*WebRTCConfig)(nil),           // 29: edgemesh.WebRTCConfig
+	(*WebRTCOffer)(nil),            // 30: edgemesh.WebRTCOffer
+	(*WebRTCAnswer)(nil),           // 31: edgemesh.WebRTCAnswer
+	(*WebRTCStop)(nil),             // 32: edgemesh.WebRTCStop
+	(*PlanPreviewRequest)(nil),     // 33: edgemesh.PlanPreviewRequest
+	(*PlanPreviewResponse)(nil),    // 34: edgemesh.PlanPreviewResponse
+	(*DownloadTicketRequest)(nil),  // 35: edgemesh.DownloadTicketRequest
+	(*DownloadTicketResponse)(nil), // 36: edgemesh.DownloadTicketResponse
 }
 var file_orchestrator_proto_depIdxs = []int32{
 	7,  // 0: edgemesh.ListDevicesResponse.devices:type_name -> edgemesh.DeviceInfo
@@ -2415,24 +2548,26 @@ var file_orchestrator_proto_depIdxs = []int32{
 	29, // 24: edgemesh.OrchestratorService.StartWebRTC:input_type -> edgemesh.WebRTCConfig
 	31, // 25: edgemesh.OrchestratorService.CompleteWebRTC:input_type -> edgemesh.WebRTCAnswer
 	32, // 26: edgemesh.OrchestratorService.StopWebRTC:input_type -> edgemesh.WebRTCStop
-	3,  // 27: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
-	1,  // 28: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
-	5,  // 29: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
-	8,  // 30: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
-	11, // 31: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
-	9,  // 32: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
-	13, // 33: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
-	14, // 34: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
-	17, // 35: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
-	24, // 36: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
-	25, // 37: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
-	28, // 38: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
-	34, // 39: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
-	30, // 40: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
-	1,  // 41: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
-	1,  // 42: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
-	27, // [27:43] is the sub-list for method output_type
-	11, // [11:27] is the sub-list for method input_type
+	35, // 27: edgemesh.OrchestratorService.CreateDownloadTicket:input_type -> edgemesh.DownloadTicketRequest
+	3,  // 28: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
+	1,  // 29: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
+	5,  // 30: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
+	8,  // 31: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
+	11, // 32: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
+	9,  // 33: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
+	13, // 34: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
+	14, // 35: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
+	17, // 36: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
+	24, // 37: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
+	25, // 38: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
+	28, // 39: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
+	34, // 40: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
+	30, // 41: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
+	1,  // 42: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
+	1,  // 43: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
+	36, // 44: edgemesh.OrchestratorService.CreateDownloadTicket:output_type -> edgemesh.DownloadTicketResponse
+	28, // [28:45] is the sub-list for method output_type
+	11, // [11:28] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
 	11, // [11:11] is the sub-list for extension extendee
 	0,  // [0:11] is the sub-list for field type_name
@@ -2449,7 +2584,7 @@ func file_orchestrator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orchestrator_proto_rawDesc), len(file_orchestrator_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   34,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

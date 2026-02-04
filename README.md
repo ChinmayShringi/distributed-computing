@@ -210,6 +210,7 @@ go run ./cmd/client register --name my-laptop --self-addr 192.168.1.10:50052
 Options:
 - `--name` (required): Device name for identification
 - `--self-addr` (required): This device's gRPC address
+- `--http-addr`: Bulk HTTP server address for file downloads (e.g., `10.0.0.5:8081`)
 - `--gpu`: Device has GPU capability
 - `--npu`: Device has NPU capability
 
@@ -446,6 +447,7 @@ Open http://localhost:8080 in your browser (or use LAN IP on phone: http://<your
 | `/api/submit-job` | POST | Submit distributed job |
 | `/api/job?id=` | GET | Get job status |
 | `/api/plan` | POST | Preview execution plan without creating a job |
+| `/api/request-download` | POST | Request file download ticket from a device |
 | `/api/assistant` | POST | Natural language command interface |
 | `/api/stream/start` | POST | Start WebRTC screen stream |
 | `/api/stream/answer` | POST | Complete WebRTC handshake |
@@ -641,6 +643,41 @@ Devices report `can_screen_capture` at registration time. The server tests scree
 - **Non-trickle ICE** - May fail on complex network topologies
 - **JPEG frames over DataChannel** - Not optimized for bandwidth (upgrade to video track planned)
 
+## File Download
+
+Download files from any registered device via the web UI. The server runs a bulk HTTP server on port `:8081` alongside the gRPC server.
+
+### How It Works
+
+1. The web UI sends `POST /api/request-download` with `device_id` and `path`
+2. The web server calls `CreateDownloadTicket` on the target device's gRPC server
+3. The device generates a one-time-use token (crypto/rand, configurable TTL)
+4. The browser receives a direct download URL pointing to the device's bulk HTTP server
+5. The file is served via `GET /bulk/download/<token>` on port 8081
+
+### Usage
+
+1. Ensure the `./shared` directory exists on the target device (or set `SHARED_DIR`)
+2. In the web UI, open the "File Download" card
+3. Select the target device and enter the file path
+4. Click "Download"
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BULK_HTTP_ADDR` | `:8081` | Bulk HTTP server listen address |
+| `BULK_TTL_SECONDS` | `60` | Download ticket expiration (seconds) |
+| `SHARED_DIR` | `./shared` | Root directory for downloadable files |
+
+### Registration
+
+Include `--http-addr` when registering a device so the coordinator knows where to direct download requests:
+
+```bash
+go run ./cmd/client register --name "windows-pc" --self-addr "10.20.38.80:50051" --http-addr "10.20.38.80:8081"
+```
+
 ## Development
 
 ```bash
@@ -695,6 +732,7 @@ edgecli/
 │   ├── registry/          # Device registry for orchestration
 │   ├── sysinfo/           # System info sampling
 │   ├── tools/             # Tool registry framework
+│   ├── transfer/          # Download ticket manager (one-time tokens, TTL)
 │   ├── ui/                # Terminal UI rendering
 │   └── webrtcstream/      # WebRTC screen streaming with pion/webrtc
 ├── proto/                 # gRPC proto definitions

@@ -40,7 +40,13 @@ go run ./cmd/web
 - View task progress per device
 - See final concatenated result
 
-### 4. Assistant Chat
+### 4. File Download
+- Select target device from dropdown
+- Enter file path on the remote device
+- Click "Download" to request a one-time download ticket
+- Browser initiates download via the device's bulk HTTP server
+
+### 5. Assistant Chat
 - Natural language interface
 - Commands: "list devices", "pwd", "ls"
 - Interactive command execution
@@ -188,6 +194,27 @@ Send message to assistant.
 ```json
 {
   "reply": "Found 2 devices:\n..."
+}
+```
+
+### POST /api/request-download
+Request a file download from a specific device. The web server calls `CreateDownloadTicket` on the target device's gRPC server and returns a direct download URL.
+
+**Request:**
+```json
+{
+  "device_id": "f66a8dc8-...",
+  "path": "./shared/report.csv"
+}
+```
+
+**Response:**
+```json
+{
+  "download_url": "http://10.20.38.80:8081/bulk/download/abc123token",
+  "filename": "report.csv",
+  "size_bytes": 204800,
+  "expires_unix_ms": 1770149394000
 }
 ```
 

@@ -8,6 +8,7 @@ The registry maintains an in-memory map of devices that have registered with the
 - Device metadata (ID, name, platform, arch)
 - Capabilities (CPU, GPU, NPU)
 - gRPC address for communication
+- Bulk HTTP address for file transfers
 - Last-seen timestamp
 
 ## Registering Devices
@@ -19,6 +20,7 @@ The registry maintains an in-memory map of devices that have registered with the
 go run ./cmd/client register \
   --name "windows-pc" \
   --self-addr "10.20.38.80:50051" \
+  --http-addr "10.20.38.80:8081" \
   --platform "windows" \
   --arch "amd64"
 ```
@@ -35,6 +37,7 @@ client.RegisterDevice(ctx, &pb.DeviceInfo{
     HasGpu:     false,
     HasNpu:     false,
     GrpcAddr:   "192.168.1.100:50051",
+    HttpAddr:   "192.168.1.100:8081",
 })
 ```
 
@@ -146,6 +149,7 @@ message DeviceInfo {
   bool has_npu = 7;              // NPU available
   string grpc_addr = 8;          // Reachable address
   bool can_screen_capture = 9;   // True if device can capture screen
+  string http_addr = 10;         // Bulk HTTP server address (e.g., "10.0.0.5:8081")
 }
 ```
 

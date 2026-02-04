@@ -37,31 +37,21 @@ sshpass -p "$WINDOWS_PASS" scp -o StrictHostKeyChecking=no \
   "$WINDOWS_USER@$WINDOWS_HOST:$WINDOWS_PATH/"
 echo -e "${GREEN}✓ Binary copied to $WINDOWS_PATH/${NC}"
 
-# Step 4: Start server on Windows
-echo -e "\n${YELLOW}[4/5] Starting server on Windows...${NC}"
-# Create a wrapper script (avoiding trailing spaces with Windows echo)
-sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
-  "echo @echo off> $WINDOWS_PATH/start-server.bat"
-sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
-  "echo set GRPC_ADDR=0.0.0.0:$GRPC_PORT>> $WINDOWS_PATH/start-server.bat"
-sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
-  "echo $WINDOWS_PATH/server-windows.exe>> $WINDOWS_PATH/start-server.bat"
-# Run via task scheduler for proper detachment
-sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
-  'schtasks /delete /tn "EdgeCLI-Server" /f 2>nul & schtasks /create /tn "EdgeCLI-Server" /tr "C:\Users\sshuser.Batman\start-server.bat" /sc once /st 00:00 /f >nul && schtasks /run /tn "EdgeCLI-Server" >nul'
-sleep 3
-echo -e "${GREEN}✓ Server started${NC}"
+# Step 4: Upload start script
+echo -e "\n${YELLOW}[4/4] Uploading start script...${NC}"
+cat > /tmp/edgecli-start-server.bat << 'BATCHEOF'
+@echo off
+set "GRPC_ADDR=0.0.0.0:50051"
+set "SHARED_DIR=C:\Users\sshuser.Batman\shared"
+C:\Users\sshuser.Batman\server-windows.exe
+BATCHEOF
+perl -pi -e 's/\n/\r\n/' /tmp/edgecli-start-server.bat
+sshpass -p "$WINDOWS_PASS" scp -o StrictHostKeyChecking=no \
+  /tmp/edgecli-start-server.bat \
+  "$WINDOWS_USER@$WINDOWS_HOST:$WINDOWS_PATH/start-server.bat"
+echo -e "${GREEN}✓ Start script uploaded${NC}"
 
-# Step 5: Verify server is running
-echo -e "\n${YELLOW}[5/5] Verifying server is listening...${NC}"
-LISTENING=$(sshpass -p "$WINDOWS_PASS" ssh -o StrictHostKeyChecking=no "$WINDOWS_USER@$WINDOWS_HOST" \
-  "netstat -an | findstr \"$GRPC_PORT.*LISTEN\"" 2>/dev/null || true)
-
-if [[ "$LISTENING" == *"LISTENING"* ]]; then
-  echo -e "${GREEN}✓ Server is listening on port $GRPC_PORT${NC}"
-  echo -e "\n${GREEN}=== Deployment successful! ===${NC}"
-  echo -e "Windows server: $WINDOWS_HOST:$GRPC_PORT"
-else
-  echo -e "${RED}✗ Server may not be running. Check manually.${NC}"
-  exit 1
-fi
+echo -e "\n${GREEN}=== Deployment complete! ===${NC}"
+echo -e "Binary deployed to: $WINDOWS_HOST:$WINDOWS_PATH/server-windows.exe"
+echo -e "\n${YELLOW}To start the server, run this on the Windows machine:${NC}"
+echo -e "  cd $WINDOWS_PATH && start-server.bat"

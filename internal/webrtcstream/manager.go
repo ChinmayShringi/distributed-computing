@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"log"
 	"sync"
@@ -13,7 +14,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/kbinani/screenshot"
 	"github.com/pion/webrtc/v3"
+	"golang.org/x/image/draw"
 )
+
+const maxMessageSize = 63 * 1024 // 63KB, safely under 64KB SCTP limit
 
 // Stream represents an active WebRTC screen streaming session
 type Stream struct {
@@ -200,6 +204,16 @@ func (s *Stream) captureLoop(ctx context.Context) {
 	}
 }
 
+// scaleImage downscales src by the given factor (0..1].
+func scaleImage(src image.Image, factor float64) image.Image {
+	srcBounds := src.Bounds()
+	newW := int(float64(srcBounds.Dx()) * factor)
+	newH := int(float64(srcBounds.Dy()) * factor)
+	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, srcBounds, draw.Over, nil)
+	return dst
+}
+
 // captureAndSend captures a single frame and sends it
 func (s *Stream) captureAndSend() error {
 	// Capture screen
@@ -209,16 +223,29 @@ func (s *Stream) captureAndSend() error {
 		return fmt.Errorf("capture failed: %w", err)
 	}
 
-	// Encode to JPEG
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: s.jpegQuality}); err != nil {
-		return fmt.Errorf("jpeg encode failed: %w", err)
+	// Scale down to fit within SCTP message limit.
+	// Start at 50% resolution, reduce further if still too large.
+	scale := 0.5
+	quality := s.jpegQuality
+
+	for attempts := 0; attempts < 4; attempts++ {
+		scaled := scaleImage(img, scale)
+
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, scaled, &jpeg.Options{Quality: quality}); err != nil {
+			return fmt.Errorf("jpeg encode failed: %w", err)
+		}
+
+		if buf.Len() <= maxMessageSize {
+			return s.DataChannel.Send(buf.Bytes())
+		}
+
+		// Still too large — reduce scale and quality
+		scale *= 0.7
+		if quality > 20 {
+			quality -= 10
+		}
 	}
 
-	// Send over data channel
-	if err := s.DataChannel.Send(buf.Bytes()); err != nil {
-		return fmt.Errorf("send failed: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("frame too large after scaling attempts")
 }

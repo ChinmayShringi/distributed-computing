@@ -89,6 +89,7 @@ message DeviceInfo {
   bool has_npu = 7;          // NPU available (Snapdragon, etc.)
   string grpc_addr = 8;      // Reachable address (e.g., "10.0.0.5:50051")
   bool can_screen_capture = 9; // True if device can capture screen (tested at startup)
+  string http_addr = 10;     // Bulk HTTP server address (e.g., "10.0.0.5:8081")
 }
 ```
 
@@ -322,6 +323,34 @@ Closes an active stream and cleans up resources.
 ```protobuf
 rpc StopWebRTC (WebRTCStop) returns (Empty);
 ```
+
+### Bulk File Transfer
+
+#### CreateDownloadTicket
+Creates a one-time-use download ticket for a file on the device. The ticket can be redeemed via the bulk HTTP server.
+
+```protobuf
+rpc CreateDownloadTicket (DownloadTicketRequest) returns (DownloadTicket);
+```
+
+**Request:**
+```protobuf
+message DownloadTicketRequest {
+  string path = 1;             // File path on the device
+}
+```
+
+**Response:**
+```protobuf
+message DownloadTicket {
+  string token = 1;            // One-time-use download token
+  string filename = 2;         // Base filename
+  int64 size_bytes = 3;        // File size
+  int64 expires_unix_ms = 4;   // Token expiration timestamp
+}
+```
+
+The token is redeemed via HTTP GET on the device's bulk HTTP server: `http://<http_addr>/bulk/download/<token>`
 
 ### Health Check
 

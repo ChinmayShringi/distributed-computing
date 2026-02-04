@@ -154,6 +154,7 @@ func handleRegister(ctx context.Context, client pb.OrchestratorServiceClient, ar
 	arch := fs.String("arch", "", "Architecture (auto-detected if not provided)")
 	hasGPU := fs.Bool("gpu", false, "Device has GPU")
 	hasNPU := fs.Bool("npu", false, "Device has NPU")
+	httpAddr := fs.String("http-addr", "", "Bulk HTTP address for file downloads (e.g., 10.20.38.80:8081)")
 	fs.Parse(args)
 
 	if *name == "" {
@@ -204,6 +205,7 @@ func handleRegister(ctx context.Context, client pb.OrchestratorServiceClient, ar
 		HasGpu:     *hasGPU,
 		HasNpu:     *hasNPU,
 		GrpcAddr:   *selfAddr,
+		HttpAddr:   *httpAddr,
 	}
 
 	// Register device
@@ -219,6 +221,9 @@ func handleRegister(ctx context.Context, client pb.OrchestratorServiceClient, ar
 		fmt.Printf("  Name: %s\n", *name)
 		fmt.Printf("  Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		fmt.Printf("  Address: %s\n", *selfAddr)
+		if *httpAddr != "" {
+			fmt.Printf("  HTTP Address: %s\n", *httpAddr)
+		}
 		fmt.Printf("  Registered at: %s\n", time.Unix(resp.RegisteredAt, 0).Format(time.RFC3339))
 	} else {
 		fmt.Fprintln(os.Stderr, "Registration failed")
