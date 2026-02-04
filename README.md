@@ -678,6 +678,18 @@ Include `--http-addr` when registering a device so the coordinator knows where t
 go run ./cmd/client register --name "windows-pc" --self-addr "10.20.38.80:50051" --http-addr "10.20.38.80:8081"
 ```
 
+## Qualcomm AI Hub CLI (optional)
+
+[Qualcomm AI Hub](https://aihub.qualcomm.com/) CLI (`qai-hub`) lets you compile, profile, and deploy AI models targeting Qualcomm devices from any Windows x86 host. No local Qualcomm hardware required.
+
+See [docs/qaihub.md](docs/qaihub.md) for full setup instructions.
+
+**Quick start (Windows):**
+
+```cmd
+powershell -ExecutionPolicy Bypass -File scripts/windows/setup_qaihub.ps1
+```
+
 ## Development
 
 ```bash

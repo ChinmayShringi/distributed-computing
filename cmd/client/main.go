@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"text/tabwriter"
@@ -45,6 +47,7 @@ Commands:
   routed-cmd       Execute command on best available device (routed)
   submit-job       Submit a distributed job to all devices
   get-job          Get the status/result of a submitted job
+  qaihub-list-devices  List Qualcomm AI Hub devices (no server needed)
 
 Legacy mode (without subcommand):
   --cmd string     Command to execute locally (requires --key)
@@ -96,6 +99,12 @@ func main() {
 
 	// Check for subcommand
 	subcommand := flag.Arg(0)
+
+	// Commands that don't need gRPC
+	if subcommand == "qaihub-list-devices" {
+		handleQAIHubListDevices()
+		return
+	}
 
 	// Connect to server
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -544,6 +553,37 @@ func handleExecuteCommand(ctx context.Context, client pb.OrchestratorServiceClie
 	// Exit with command's exit code
 	if cmdResp.ExitCode != 0 {
 		os.Exit(int(cmdResp.ExitCode))
+	}
+}
+
+func handleQAIHubListDevices() {
+	// Try venv path first, then fall back to PATH
+	var qaiHub string
+
+	venvExe := filepath.Join(".venv-qaihub", "Scripts", "qai-hub.exe")
+	if _, err := os.Stat(venvExe); err == nil {
+		qaiHub = venvExe
+	} else {
+		// Try PATH
+		found, err := exec.LookPath("qai-hub")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error: qai-hub not found.")
+			fmt.Fprintln(os.Stderr, "Install it with: pip install qai-hub")
+			fmt.Fprintln(os.Stderr, "Or run: scripts/windows/setup_qaihub.ps1")
+			os.Exit(1)
+		}
+		qaiHub = found
+	}
+
+	cmd := exec.Command(qaiHub, "list-devices")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		fmt.Fprintf(os.Stderr, "Error running qai-hub: %v\n", err)
+		os.Exit(1)
 	}
 }
 
