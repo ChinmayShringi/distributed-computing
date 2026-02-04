@@ -18,6 +18,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/kbinani/screenshot"
+
 	"github.com/edgecli/edgecli/internal/allowlist"
 	"github.com/edgecli/edgecli/internal/brain"
 	"github.com/edgecli/edgecli/internal/deviceid"
@@ -296,15 +298,27 @@ func (s *OrchestratorServer) RunAITask(ctx context.Context, req *pb.AITaskReques
 func (s *OrchestratorServer) getSelfDeviceInfo() *pb.DeviceInfo {
 	hostname, _ := os.Hostname()
 	return &pb.DeviceInfo{
-		DeviceId:   s.selfDeviceID,
-		DeviceName: hostname,
-		Platform:   runtime.GOOS,
-		Arch:       runtime.GOARCH,
-		HasCpu:     true,
-		HasGpu:     false,
-		HasNpu:     false,
-		GrpcAddr:   s.selfAddr,
+		DeviceId:         s.selfDeviceID,
+		DeviceName:       hostname,
+		Platform:         runtime.GOOS,
+		Arch:             runtime.GOARCH,
+		HasCpu:           true,
+		HasGpu:           false,
+		HasNpu:           false,
+		GrpcAddr:         s.selfAddr,
+		CanScreenCapture: detectScreenCapture(),
 	}
+}
+
+// detectScreenCapture tests whether this machine can capture the screen
+func detectScreenCapture() bool {
+	n := screenshot.NumActiveDisplays()
+	if n == 0 {
+		return false
+	}
+	bounds := screenshot.GetDisplayBounds(0)
+	_, err := screenshot.CaptureRect(bounds)
+	return err == nil
 }
 
 // HealthCheck returns the server's health status
@@ -496,13 +510,14 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 	plan := req.Plan
 	reduce := req.Reduce
 	if (plan == nil || len(plan.Groups) == 0) && s.brain != nil && s.brain.IsAvailable() {
-		generatedPlan, generatedReduce, err := s.brain.GeneratePlan(req.Text, devices, int(req.MaxWorkers))
-		if err == nil && generatedPlan != nil {
-			plan = generatedPlan
+		result, err := s.brain.GeneratePlan(req.Text, devices, int(req.MaxWorkers))
+		if err == nil && result != nil && result.Plan != nil {
+			plan = result.Plan
 			if reduce == nil {
-				reduce = generatedReduce
+				reduce = result.Reduce
 			}
-			log.Printf("[INFO] SubmitJob: using brain-generated plan with %d groups", len(plan.Groups))
+			log.Printf("[INFO] SubmitJob: brain plan used_ai=%v rationale=%q groups=%d",
+				result.UsedAi, result.Rationale, len(plan.Groups))
 		} else if err != nil {
 			log.Printf("[WARN] SubmitJob: brain plan generation failed, using default: %v", err)
 		}
@@ -687,6 +702,68 @@ func (s *OrchestratorServer) GetJob(ctx context.Context, req *pb.JobId) (*pb.Job
 		FinalResult:  job.FinalResult,
 		CurrentGroup: int32(job.CurrentGroup),
 		TotalGroups:  int32(job.TotalGroups),
+	}, nil
+}
+
+// PreviewPlan generates an execution plan without creating a job
+func (s *OrchestratorServer) PreviewPlan(ctx context.Context, req *pb.PlanPreviewRequest) (*pb.PlanPreviewResponse, error) {
+	// Verify session
+	s.mu.RLock()
+	_, exists := s.sessions[req.SessionId]
+	s.mu.RUnlock()
+
+	if !exists {
+		log.Printf("[ERROR] PreviewPlan: session not found: %s", req.SessionId)
+		return nil, status.Error(codes.Unauthenticated, "session not found")
+	}
+
+	// Get devices from registry
+	devices := s.registry.List()
+	if len(devices) == 0 {
+		return nil, status.Error(codes.FailedPrecondition, "no devices available")
+	}
+
+	// Select devices (limit by maxWorkers if specified)
+	selectedDevices := devices
+	if req.MaxWorkers > 0 && int(req.MaxWorkers) < len(devices) {
+		selectedDevices = devices[:req.MaxWorkers]
+	}
+
+	var plan *pb.Plan
+	var reduce *pb.ReduceSpec
+	usedAi := false
+	notes := ""
+	rationale := ""
+
+	// Try brain if available
+	if s.brain != nil && s.brain.IsAvailable() {
+		result, err := s.brain.GeneratePlan(req.Text, devices, int(req.MaxWorkers))
+		if err == nil && result != nil && result.Plan != nil {
+			plan = result.Plan
+			reduce = result.Reduce
+			usedAi = result.UsedAi
+			notes = result.Notes
+			rationale = result.Rationale
+			log.Printf("[INFO] PreviewPlan: brain plan used_ai=%v rationale=%q", usedAi, rationale)
+		} else if err != nil {
+			log.Printf("[WARN] PreviewPlan: brain failed, using default: %v", err)
+		}
+	}
+
+	// Fall back to default plan
+	if plan == nil {
+		plan = s.jobManager.GenerateDefaultPlan(selectedDevices)
+		reduce = &pb.ReduceSpec{Kind: "CONCAT"}
+		notes = "Brain not available (non-Windows or disabled)"
+		rationale = fmt.Sprintf("Default: 1 SYSINFO per device, %d of %d devices selected", len(selectedDevices), len(devices))
+	}
+
+	return &pb.PlanPreviewResponse{
+		UsedAi:    usedAi,
+		Notes:     notes,
+		Rationale: rationale,
+		Plan:      plan,
+		Reduce:    reduce,
 	}, nil
 }
 

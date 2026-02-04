@@ -61,6 +61,9 @@ WindowsAiCli.exe plan --in request.json --format json
 ```json
 {
   "ok": true,
+  "used_ai": false,
+  "notes": "Fallback mode. Windows build 26100 detected but AI APIs not found",
+  "rationale": "Deterministic: 1 SYSINFO task per device (2 of 3 devices selected, max_workers=2)",
   "plan": {
     "groups": [
       {
@@ -76,6 +79,13 @@ WindowsAiCli.exe plan --in request.json --format json
 }
 ```
 
+**Response fields:**
+- `used_ai` - Whether Windows AI APIs were used for plan generation
+- `notes` - AI availability information (e.g., Windows version, API detection results)
+- `rationale` - Human-readable explanation of plan generation logic
+- `plan` - The execution plan with task groups
+- `reduce` - How results should be combined
+
 Note: With `max_workers: 2`, only the first 2 devices are included in the plan.
 
 ### summarize
@@ -88,12 +98,12 @@ WindowsAiCli.exe summarize --text "Long text here..." --format json
 
 **Output:**
 ```json
-{"ok":true,"summary":"Long text here...","used_ai":false}
+{"ok":true,"summary":"Long text here...","used_ai":false,"notes":"Fallback mode. Windows build 26100 detected but AI APIs not found"}
 ```
 
 When text exceeds 200 characters, it's truncated with "...":
 ```json
-{"ok":true,"summary":"This is a very long text that will be truncated at a word boundary...","used_ai":false}
+{"ok":true,"summary":"This is a very long text that will be truncated at a word boundary...","used_ai":false,"notes":"AI available. Windows.AI.MachineLearning available"}
 ```
 
 ## Error Handling

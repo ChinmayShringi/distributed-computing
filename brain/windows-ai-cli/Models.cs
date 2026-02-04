@@ -128,6 +128,17 @@ public record PlanResponse
     [JsonPropertyName("ok")]
     public bool Ok { get; init; }
 
+    [JsonPropertyName("used_ai")]
+    public bool UsedAi { get; init; }
+
+    [JsonPropertyName("notes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Notes { get; init; }
+
+    [JsonPropertyName("rationale")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Rationale { get; init; }
+
     [JsonPropertyName("plan")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Plan? Plan { get; init; }
@@ -155,6 +166,10 @@ public record SummarizeResponse
 
     [JsonPropertyName("used_ai")]
     public bool UsedAi { get; init; }
+
+    [JsonPropertyName("notes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Notes { get; init; }
 
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

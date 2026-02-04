@@ -38,12 +38,13 @@ type WebServer struct {
 
 // DeviceResponse is the JSON response for /api/devices
 type DeviceResponse struct {
-	DeviceID     string   `json:"device_id"`
-	DeviceName   string   `json:"device_name"`
-	Platform     string   `json:"platform"`
-	Arch         string   `json:"arch"`
-	Capabilities []string `json:"capabilities"`
-	GRPCAddr     string   `json:"grpc_addr"`
+	DeviceID         string   `json:"device_id"`
+	DeviceName       string   `json:"device_name"`
+	Platform         string   `json:"platform"`
+	Arch             string   `json:"arch"`
+	Capabilities     []string `json:"capabilities"`
+	GRPCAddr         string   `json:"grpc_addr"`
+	CanScreenCapture bool     `json:"can_screen_capture"`
 }
 
 // RoutedCmdRequest is the JSON request for /api/routed-cmd
@@ -80,6 +81,21 @@ type AssistantResponse struct {
 // ErrorResponse is the JSON error response
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// PreviewPlanRequest is the JSON request for /api/plan
+type PreviewPlanRequest struct {
+	Text       string `json:"text"`
+	MaxWorkers int32  `json:"max_workers"`
+}
+
+// PreviewPlanResponse is the JSON response for /api/plan
+type PreviewPlanResponse struct {
+	UsedAi    bool        `json:"used_ai"`
+	Notes     string      `json:"notes"`
+	Rationale string      `json:"rationale"`
+	Plan      interface{} `json:"plan"`
+	Reduce    interface{} `json:"reduce"`
 }
 
 // SubmitJobRequest is the JSON request for /api/submit-job
@@ -193,6 +209,7 @@ func main() {
 	http.HandleFunc("/api/assistant", server.handleAssistant)
 	http.HandleFunc("/api/submit-job", server.handleSubmitJob)
 	http.HandleFunc("/api/job", server.handleGetJob)
+	http.HandleFunc("/api/plan", server.handlePreviewPlan)
 	http.HandleFunc("/api/stream/start", server.handleStreamStart)
 	http.HandleFunc("/api/stream/answer", server.handleStreamAnswer)
 	http.HandleFunc("/api/stream/stop", server.handleStreamStop)
@@ -253,12 +270,13 @@ func (s *WebServer) handleDevices(w http.ResponseWriter, r *http.Request) {
 		}
 
 		devices = append(devices, DeviceResponse{
-			DeviceID:     d.DeviceId,
-			DeviceName:   d.DeviceName,
-			Platform:     d.Platform,
-			Arch:         d.Arch,
-			Capabilities: caps,
-			GRPCAddr:     d.GrpcAddr,
+			DeviceID:         d.DeviceId,
+			DeviceName:       d.DeviceName,
+			Platform:         d.Platform,
+			Arch:             d.Arch,
+			Capabilities:     caps,
+			GRPCAddr:         d.GrpcAddr,
+			CanScreenCapture: d.CanScreenCapture,
 		})
 	}
 
@@ -559,6 +577,90 @@ func (s *WebServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		FinalResult:  jobResp.FinalResult,
 		CurrentGroup: jobResp.CurrentGroup,
 		TotalGroups:  jobResp.TotalGroups,
+	})
+}
+
+// handlePreviewPlan generates a plan preview without creating a job
+func (s *WebServer) handlePreviewPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req PreviewPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Create session
+	sessionResp, err := s.grpcClient.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "web-ui",
+		SecurityKey: s.devKey,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handlePreviewPlan: CreateSession failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Session error: %v", err))
+		return
+	}
+
+	// Call PreviewPlan
+	planResp, err := s.grpcClient.PreviewPlan(ctx, &pb.PlanPreviewRequest{
+		SessionId:  sessionResp.SessionId,
+		Text:       req.Text,
+		MaxWorkers: req.MaxWorkers,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handlePreviewPlan: PreviewPlan failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Plan error: %v", err))
+		return
+	}
+
+	// Convert plan to a JSON-friendly structure
+	type taskJSON struct {
+		TaskID         string `json:"task_id"`
+		Kind           string `json:"kind"`
+		Input          string `json:"input"`
+		TargetDeviceID string `json:"target_device_id"`
+	}
+	type groupJSON struct {
+		Index int32      `json:"index"`
+		Tasks []taskJSON `json:"tasks"`
+	}
+	type planJSON struct {
+		Groups []groupJSON `json:"groups"`
+	}
+
+	var plan planJSON
+	if planResp.Plan != nil {
+		for _, g := range planResp.Plan.Groups {
+			group := groupJSON{Index: g.Index}
+			for _, t := range g.Tasks {
+				group.Tasks = append(group.Tasks, taskJSON{
+					TaskID:         t.TaskId,
+					Kind:           t.Kind,
+					Input:          t.Input,
+					TargetDeviceID: t.TargetDeviceId,
+				})
+			}
+			plan.Groups = append(plan.Groups, group)
+		}
+	}
+
+	var reduce interface{}
+	if planResp.Reduce != nil {
+		reduce = map[string]string{"kind": planResp.Reduce.Kind}
+	}
+
+	s.writeJSON(w, http.StatusOK, PreviewPlanResponse{
+		UsedAi:    planResp.UsedAi,
+		Notes:     planResp.Notes,
+		Rationale: planResp.Rationale,
+		Plan:      plan,
+		Reduce:    reduce,
 	})
 }
 

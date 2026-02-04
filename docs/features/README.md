@@ -10,6 +10,14 @@ Documentation for EdgeCLI features and components.
 | [Web UI](web-ui.md) | Browser-based interface, REST API endpoints |
 | [CLI Tools](cli.md) | Command-line tools (server, client, web, edgecli) |
 
+## AI & Planning
+
+| Document | Description |
+|----------|-------------|
+| [Windows AI CLI](../../brain/windows-ai-cli/README.md) | C#/.NET CLI tool for AI-powered plan generation (Windows only) |
+
+The brain package (`internal/brain`) integrates with the Windows AI CLI to generate execution plans. On non-Windows platforms, it falls back to deterministic plan generation. Plans can be previewed before submission via the `PreviewPlan` gRPC RPC or `POST /api/plan` web endpoint.
+
 ## Orchestration
 
 | Document | Description |

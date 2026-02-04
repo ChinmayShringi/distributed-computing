@@ -443,7 +443,13 @@ Open http://localhost:8080 in your browser (or use LAN IP on phone: http://<your
 | `/` | GET | Serve web UI (index.html) |
 | `/api/devices` | GET | List all registered devices |
 | `/api/routed-cmd` | POST | Execute command on best device |
+| `/api/submit-job` | POST | Submit distributed job |
+| `/api/job?id=` | GET | Get job status |
+| `/api/plan` | POST | Preview execution plan without creating a job |
 | `/api/assistant` | POST | Natural language command interface |
+| `/api/stream/start` | POST | Start WebRTC screen stream |
+| `/api/stream/answer` | POST | Complete WebRTC handshake |
+| `/api/stream/stop` | POST | Stop active stream |
 
 #### POST /api/routed-cmd
 
@@ -509,6 +515,45 @@ Response:
    - Click "Refresh" to see both devices
    - Run command with "Prefer Remote" policy
    - Watch it execute on Laptop B
+
+## AI-Powered Plan Generation
+
+EdgeCLI includes an optional AI-powered plan generation system for distributed jobs.
+
+### How It Works
+
+1. On Windows, a C#/.NET CLI tool (`brain/windows-ai-cli/`) wraps Windows AI APIs
+2. The Go brain package (`internal/brain/`) calls the CLI via JSON stdin/stdout
+3. When submitting a job, the server tries the brain first, then falls back to deterministic planning
+4. Plan preview is available via `POST /api/plan` or the "Preview Plan" button in the web UI
+
+### Configuration
+
+```bash
+# Windows PowerShell
+$env:WINDOWS_AI_CLI_PATH = "C:\path\to\WindowsAiCli.exe"
+$env:USE_WINDOWS_AI_PLANNER = "true"
+```
+
+### Plan Preview
+
+Preview the execution plan before submitting a job:
+
+```bash
+curl -X POST http://localhost:8080/api/plan \
+  -H "Content-Type: application/json" \
+  -d '{"text":"collect status","max_workers":0}'
+```
+
+Returns the plan, whether AI was used, and the rationale for task assignments.
+
+### Design
+
+- **Fallback-first**: Deterministic plan generation always works, AI enhances when available
+- **Platform-specific**: Uses Go build tags (`//go:build windows` / `//go:build !windows`)
+- **Metadata**: Every plan includes `used_ai`, `notes`, and `rationale` for transparency
+
+See `brain/windows-ai-cli/README.md` for the CLI tool documentation.
 
 ## Remote Streaming (v1)
 
@@ -582,6 +627,14 @@ Response:
 }
 ```
 
+### Screen Capture Capability
+
+Devices report `can_screen_capture` at registration time. The server tests screen capture at startup using `kbinani/screenshot`. The web UI uses this flag to:
+
+- Show a "screen" badge on capable devices
+- Disable the "Start Stream" button for devices that can't capture
+- Label devices `[no screen capture]` in the stream device dropdown
+
 ### Limitations
 
 - **LAN only** - No STUN/TURN servers configured
@@ -611,6 +664,11 @@ make build-all
 
 ```
 edgecli/
+├── brain/
+│   └── windows-ai-cli/   # C#/.NET CLI for Windows AI integration
+│       ├── Program.cs     # CLI entry point (capabilities, plan, summarize)
+│       ├── Models.cs      # Request/response types
+│       └── WindowsAiCli.csproj
 ├── cmd/
 │   ├── edgecli/           # CLI entry point
 │   │   └── commands/      # Cobra commands
@@ -621,19 +679,26 @@ edgecli/
 ├── internal/
 │   ├── allowlist/         # Command allowlist for safe execution
 │   ├── approval/          # Tool approval workflows
+│   ├── brain/             # Go integration with Windows AI CLI
+│   │   ├── brain.go       # Types, conversion helpers, public API
+│   │   ├── brain_windows.go  # Windows: shells out to CLI
+│   │   └── brain_stub.go    # Non-Windows: returns error
 │   ├── chat/              # Execution budget management
 │   ├── config/            # Configuration management
 │   ├── deviceid/          # Device ID persistence
 │   ├── elevate/           # Privilege elevation
 │   ├── exec/              # Command execution
+│   ├── jobs/              # Job/task state machine with group execution
 │   ├── mode/              # Safe/dangerous mode
 │   ├── osdetect/          # Platform detection
 │   ├── redact/            # Secret redaction
 │   ├── registry/          # Device registry for orchestration
 │   ├── sysinfo/           # System info sampling
 │   ├── tools/             # Tool registry framework
-│   └── ui/                # Terminal UI rendering
+│   ├── ui/                # Terminal UI rendering
+│   └── webrtcstream/      # WebRTC screen streaming with pion/webrtc
 ├── proto/                 # gRPC proto definitions
+├── docs/                  # Feature documentation
 ├── Makefile               # Build configuration
 └── go.mod                 # Go module definition
 ```

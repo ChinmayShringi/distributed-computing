@@ -118,7 +118,8 @@ curl http://localhost:8080/api/devices
     "platform": "darwin",
     "arch": "arm64",
     "capabilities": ["cpu"],
-    "grpc_addr": "127.0.0.1:50051"
+    "grpc_addr": "127.0.0.1:50051",
+    "can_screen_capture": true
   },
   {
     "device_id": "f66a8dc8-2a81-4f30-a664-c0727359c7c5",
@@ -126,7 +127,8 @@ curl http://localhost:8080/api/devices
     "platform": "windows",
     "arch": "amd64",
     "capabilities": ["cpu"],
-    "grpc_addr": "10.20.38.80:50051"
+    "grpc_addr": "10.20.38.80:50051",
+    "can_screen_capture": true
   }
 ]
 ```
@@ -135,16 +137,21 @@ curl http://localhost:8080/api/devices
 
 ```protobuf
 message DeviceInfo {
-  string device_id = 1;    // Stable UUID (persisted)
-  string device_name = 2;  // Human-readable name
-  string platform = 3;     // "darwin", "windows", "linux"
-  string arch = 4;         // "amd64", "arm64"
-  bool has_cpu = 5;        // Always true
-  bool has_gpu = 6;        // GPU available
-  bool has_npu = 7;        // NPU available
-  string grpc_addr = 8;    // Reachable address
+  string device_id = 1;          // Stable UUID (persisted)
+  string device_name = 2;        // Human-readable name
+  string platform = 3;           // "darwin", "windows", "linux"
+  string arch = 4;               // "amd64", "arm64"
+  bool has_cpu = 5;              // Always true
+  bool has_gpu = 6;              // GPU available
+  bool has_npu = 7;              // NPU available
+  string grpc_addr = 8;          // Reachable address
+  bool can_screen_capture = 9;   // True if device can capture screen
 }
 ```
+
+### Screen Capture Detection
+
+The `can_screen_capture` flag is determined at server startup by performing a test screen capture using `kbinani/screenshot`. This tests whether the device has an active display and can capture frames. The flag is included in the device's self-registration and is used by the web UI to gate the Remote Stream feature.
 
 ## Device ID Persistence
 

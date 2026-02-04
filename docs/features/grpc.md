@@ -88,6 +88,7 @@ message DeviceInfo {
   bool has_gpu = 6;          // GPU available
   bool has_npu = 7;          // NPU available (Snapdragon, etc.)
   string grpc_addr = 8;      // Reachable address (e.g., "10.0.0.5:50051")
+  bool can_screen_capture = 9; // True if device can capture screen (tested at startup)
 }
 ```
 
@@ -220,6 +221,37 @@ message JobStatus {
 }
 ```
 
+### Plan Preview
+
+#### PreviewPlan
+Generates an execution plan without creating a job. Returns the plan, metadata about whether AI was used, and the rationale for the plan.
+
+```protobuf
+rpc PreviewPlan (PlanPreviewRequest) returns (PlanPreviewResponse);
+```
+
+**Request:**
+```protobuf
+message PlanPreviewRequest {
+  string session_id = 1;
+  string text = 2;           // Job description
+  int32 max_workers = 3;     // 0 = all devices
+}
+```
+
+**Response:**
+```protobuf
+message PlanPreviewResponse {
+  bool used_ai = 1;          // Whether AI was used for plan generation
+  string notes = 2;          // AI availability notes
+  string rationale = 3;      // Explanation of plan generation logic
+  Plan plan = 4;             // The generated execution plan
+  ReduceSpec reduce = 5;     // How results would be combined
+}
+```
+
+When the Windows AI Brain is available, the plan may be AI-generated. Otherwise, a deterministic fallback plan is returned (1 SYSINFO task per device).
+
 ### Worker Execution
 
 #### RunTask
@@ -248,6 +280,47 @@ message TaskResult {
   string error = 4;
   double time_ms = 5;
 }
+```
+
+### WebRTC Screen Streaming
+
+#### StartWebRTC
+Creates a WebRTC peer connection and returns an offer SDP for screen streaming.
+
+```protobuf
+rpc StartWebRTC (WebRTCConfig) returns (WebRTCOffer);
+```
+
+**Request:**
+```protobuf
+message WebRTCConfig {
+  string session_id = 1;
+  int32 target_fps = 2;      // Default 8 if 0
+  int32 jpeg_quality = 3;    // Default 60 if 0
+  int32 monitor_index = 4;   // Default 0
+}
+```
+
+**Response:**
+```protobuf
+message WebRTCOffer {
+  string stream_id = 1;
+  string sdp = 2;            // Offer SDP with ICE candidates (non-trickle)
+}
+```
+
+#### CompleteWebRTC
+Sets the remote description (answer SDP) to complete the WebRTC handshake.
+
+```protobuf
+rpc CompleteWebRTC (WebRTCAnswer) returns (Empty);
+```
+
+#### StopWebRTC
+Closes an active stream and cleans up resources.
+
+```protobuf
+rpc StopWebRTC (WebRTCStop) returns (Empty);
 ```
 
 ### Health Check

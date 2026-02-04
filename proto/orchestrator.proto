@@ -31,6 +31,9 @@ service OrchestratorService {
   // Worker execution
   rpc RunTask (TaskRequest) returns (TaskResult);
 
+  // Plan preview (no execution)
+  rpc PreviewPlan (PlanPreviewRequest) returns (PlanPreviewResponse);
+
   // WebRTC screen streaming
   rpc StartWebRTC (WebRTCConfig) returns (WebRTCOffer);
   rpc CompleteWebRTC (WebRTCAnswer) returns (Empty);
@@ -77,6 +80,7 @@ message DeviceInfo {
   bool has_gpu = 6;
   bool has_npu = 7;        // false for now, will be true on Snapdragon later
   string grpc_addr = 8;    // where this device can be reached, e.g. "10.0.0.5:50051"
+  bool can_screen_capture = 9;  // true if device can capture screen (tested at startup)
 }
 
 message DeviceAck {
@@ -245,4 +249,20 @@ message WebRTCAnswer {
 
 message WebRTCStop {
   string stream_id = 1;
+}
+
+// Plan preview messages
+
+message PlanPreviewRequest {
+  string session_id = 1;
+  string text = 2;
+  int32 max_workers = 3;
+}
+
+message PlanPreviewResponse {
+  bool used_ai = 1;
+  string notes = 2;
+  string rationale = 3;
+  Plan plan = 4;
+  ReduceSpec reduce = 5;
 }

@@ -19,6 +19,7 @@ go run ./cmd/web
 - Displays all registered devices
 - Shows device name, platform/arch, gRPC address
 - Displays capabilities (CPU, GPU, NPU) as badges
+- Shows "screen" badge for devices that support screen capture
 - Click "Refresh" to reload device list
 
 ### 2. Routed Command Execution
@@ -34,6 +35,7 @@ go run ./cmd/web
 ### 3. Distributed Jobs
 - Enter job description
 - Set max workers (0 = all devices)
+- **Preview Plan** - See the execution plan before submitting (shows rationale, AI usage, and task assignments)
 - Submit job and monitor status
 - View task progress per device
 - See final concatenated result
@@ -57,7 +59,8 @@ Returns list of registered devices.
     "platform": "darwin",
     "arch": "arm64",
     "capabilities": ["cpu"],
-    "grpc_addr": "127.0.0.1:50051"
+    "grpc_addr": "127.0.0.1:50051",
+    "can_screen_capture": true
   }
 ]
 ```
@@ -107,6 +110,45 @@ Submit a distributed job.
   "summary": "distributed to 2 devices in 1 group(s)"
 }
 ```
+
+### POST /api/plan
+Preview an execution plan without creating a job. Shows which devices would receive tasks, whether AI was used for plan generation, and the rationale.
+
+**Request:**
+```json
+{
+  "text": "collect status",
+  "max_workers": 0
+}
+```
+
+**Response:**
+```json
+{
+  "used_ai": false,
+  "notes": "Brain not available (non-Windows or disabled)",
+  "rationale": "Default: 1 SYSINFO per device, 2 of 2 devices selected",
+  "plan": {
+    "groups": [
+      {
+        "index": 0,
+        "tasks": [
+          {"task_id": "uuid-1", "kind": "SYSINFO", "input": "collect_status", "target_device_id": "e452458d-..."},
+          {"task_id": "uuid-2", "kind": "SYSINFO", "input": "collect_status", "target_device_id": "f66a8dc8-..."}
+        ]
+      }
+    ]
+  },
+  "reduce": {"kind": "CONCAT"}
+}
+```
+
+**Response fields:**
+- `used_ai` - Whether the Windows AI Brain was used for plan generation
+- `notes` - AI availability information
+- `rationale` - Human-readable explanation of plan generation logic
+- `plan` - The execution plan (groups of parallel tasks)
+- `reduce` - How results would be combined
 
 ### GET /api/job?id={job_id}
 Get job status.
@@ -158,6 +200,15 @@ Send message to assistant.
   - CPU: Gray
   - GPU: Green
   - NPU: Purple
+  - Screen: Blue (devices that support screen capture)
+
+## Stream Capability Gating
+
+The web UI checks the `can_screen_capture` field on each device before allowing screen streaming:
+
+- Devices without screen capture support are labeled `[no screen capture]` in the stream device dropdown
+- If a user selects a device with `can_screen_capture: false` and FORCE_DEVICE_ID policy, the UI shows an error and prevents the stream from starting
+- The `can_screen_capture` flag is set at server startup by performing a test screen capture using `kbinani/screenshot`
 
 ## Architecture
 

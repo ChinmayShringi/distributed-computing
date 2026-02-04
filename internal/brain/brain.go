@@ -38,11 +38,20 @@ func (b *Brain) IsAvailable() bool {
 	return isAvailable(b)
 }
 
+// PlanResult contains the generated plan along with metadata about how it was produced.
+type PlanResult struct {
+	Plan      *pb.Plan
+	Reduce    *pb.ReduceSpec
+	UsedAi    bool
+	Notes     string
+	Rationale string
+}
+
 // GeneratePlan generates an execution plan for the given devices.
-// Returns the generated plan, reduce spec, and any error.
+// Returns a PlanResult with the plan and metadata, or an error.
 // Falls back to returning nil (allowing the caller to use default plan generation)
 // if the CLI is unavailable or fails.
-func (b *Brain) GeneratePlan(text string, devices []*pb.DeviceInfo, maxWorkers int) (*pb.Plan, *pb.ReduceSpec, error) {
+func (b *Brain) GeneratePlan(text string, devices []*pb.DeviceInfo, maxWorkers int) (*PlanResult, error) {
 	return generatePlan(b, text, devices, maxWorkers)
 }
 
@@ -71,10 +80,13 @@ type DeviceInfo struct {
 
 // PlanResponse is the JSON response format for the plan command.
 type PlanResponse struct {
-	Ok     bool        `json:"ok"`
-	Plan   *Plan       `json:"plan,omitempty"`
-	Reduce *ReduceSpec `json:"reduce,omitempty"`
-	Error  string      `json:"error,omitempty"`
+	Ok        bool        `json:"ok"`
+	UsedAi    bool        `json:"used_ai"`
+	Notes     string      `json:"notes,omitempty"`
+	Rationale string      `json:"rationale,omitempty"`
+	Plan      *Plan       `json:"plan,omitempty"`
+	Reduce    *ReduceSpec `json:"reduce,omitempty"`
+	Error     string      `json:"error,omitempty"`
 }
 
 // Plan is the JSON format for an execution plan.
@@ -106,6 +118,7 @@ type SummarizeResponse struct {
 	Ok      bool   `json:"ok"`
 	Summary string `json:"summary,omitempty"`
 	UsedAi  bool   `json:"used_ai"`
+	Notes   string `json:"notes,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
 

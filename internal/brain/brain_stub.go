@@ -14,8 +14,8 @@ func isAvailable(b *Brain) bool {
 }
 
 // generatePlan returns an error on non-Windows platforms.
-func generatePlan(b *Brain, text string, devices []*pb.DeviceInfo, maxWorkers int) (*pb.Plan, *pb.ReduceSpec, error) {
-	return nil, nil, fmt.Errorf("Windows AI CLI is only available on Windows")
+func generatePlan(b *Brain, text string, devices []*pb.DeviceInfo, maxWorkers int) (*PlanResult, error) {
+	return nil, fmt.Errorf("Windows AI CLI is only available on Windows")
 }
 
 // summarize returns an error on non-Windows platforms.

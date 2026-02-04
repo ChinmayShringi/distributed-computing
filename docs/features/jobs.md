@@ -189,6 +189,54 @@ func (s *OrchestratorServer) executeJobGroups(job *jobs.Job) {
 }
 ```
 
+## Plan Generation
+
+When a job is submitted without an explicit plan, the system generates one automatically:
+
+### Windows AI Brain (Windows only)
+
+If the Windows AI Brain is enabled (`USE_WINDOWS_AI_PLANNER=true` and `WINDOWS_AI_CLI_PATH` set), the server calls the C# CLI tool to generate a plan. The brain returns:
+
+- **Plan** - Task groups with device assignments
+- **used_ai** - Whether Windows AI APIs were used (vs. deterministic fallback)
+- **rationale** - Human-readable explanation (e.g., "Deterministic: 1 SYSINFO task per device (2 of 3 devices selected, max_workers=2)")
+- **notes** - AI availability information
+
+See `brain/windows-ai-cli/README.md` for the CLI tool documentation.
+
+### Default Plan (fallback)
+
+When the brain is unavailable (non-Windows, disabled, or errors), the system generates a default plan:
+- One SYSINFO task per device
+- All tasks in a single parallel group
+- Respects `max_workers` limit
+- Reduce operation: CONCAT
+
+### Plan Preview
+
+Preview the plan before submitting a job:
+
+```bash
+curl -X POST http://localhost:8080/api/plan \
+  -H "Content-Type: application/json" \
+  -d '{"text":"collect status","max_workers":0}'
+```
+
+**Response:**
+```json
+{
+  "used_ai": false,
+  "notes": "Brain not available (non-Windows or disabled)",
+  "rationale": "Default: 1 SYSINFO per device, 2 of 2 devices selected",
+  "plan": {
+    "groups": [{"index": 0, "tasks": [...]}]
+  },
+  "reduce": {"kind": "CONCAT"}
+}
+```
+
+The web UI includes a "Preview Plan" button next to "Submit Job" that calls this endpoint and displays the plan visually.
+
 ## Custom Plans (Advanced)
 
 Jobs can include explicit execution plans via the gRPC API:
@@ -203,7 +251,7 @@ message JobRequest {
 }
 ```
 
-If no plan is provided, the system auto-generates a default plan with one SYSINFO task per device in a single group.
+If no plan is provided, the system auto-generates a plan (via brain or default fallback).
 
 ## Error Handling
 

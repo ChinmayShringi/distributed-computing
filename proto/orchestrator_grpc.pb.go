@@ -31,6 +31,7 @@ const (
 	OrchestratorService_SubmitJob_FullMethodName            = "/edgemesh.OrchestratorService/SubmitJob"
 	OrchestratorService_GetJob_FullMethodName               = "/edgemesh.OrchestratorService/GetJob"
 	OrchestratorService_RunTask_FullMethodName              = "/edgemesh.OrchestratorService/RunTask"
+	OrchestratorService_PreviewPlan_FullMethodName          = "/edgemesh.OrchestratorService/PreviewPlan"
 	OrchestratorService_StartWebRTC_FullMethodName          = "/edgemesh.OrchestratorService/StartWebRTC"
 	OrchestratorService_CompleteWebRTC_FullMethodName       = "/edgemesh.OrchestratorService/CompleteWebRTC"
 	OrchestratorService_StopWebRTC_FullMethodName           = "/edgemesh.OrchestratorService/StopWebRTC"
@@ -59,6 +60,8 @@ type OrchestratorServiceClient interface {
 	GetJob(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*JobStatus, error)
 	// Worker execution
 	RunTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResult, error)
+	// Plan preview (no execution)
+	PreviewPlan(ctx context.Context, in *PlanPreviewRequest, opts ...grpc.CallOption) (*PlanPreviewResponse, error)
 	// WebRTC screen streaming
 	StartWebRTC(ctx context.Context, in *WebRTCConfig, opts ...grpc.CallOption) (*WebRTCOffer, error)
 	CompleteWebRTC(ctx context.Context, in *WebRTCAnswer, opts ...grpc.CallOption) (*Empty, error)
@@ -193,6 +196,16 @@ func (c *orchestratorServiceClient) RunTask(ctx context.Context, in *TaskRequest
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) PreviewPlan(ctx context.Context, in *PlanPreviewRequest, opts ...grpc.CallOption) (*PlanPreviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlanPreviewResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_PreviewPlan_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *orchestratorServiceClient) StartWebRTC(ctx context.Context, in *WebRTCConfig, opts ...grpc.CallOption) (*WebRTCOffer, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WebRTCOffer)
@@ -246,6 +259,8 @@ type OrchestratorServiceServer interface {
 	GetJob(context.Context, *JobId) (*JobStatus, error)
 	// Worker execution
 	RunTask(context.Context, *TaskRequest) (*TaskResult, error)
+	// Plan preview (no execution)
+	PreviewPlan(context.Context, *PlanPreviewRequest) (*PlanPreviewResponse, error)
 	// WebRTC screen streaming
 	StartWebRTC(context.Context, *WebRTCConfig) (*WebRTCOffer, error)
 	CompleteWebRTC(context.Context, *WebRTCAnswer) (*Empty, error)
@@ -295,6 +310,9 @@ func (UnimplementedOrchestratorServiceServer) GetJob(context.Context, *JobId) (*
 }
 func (UnimplementedOrchestratorServiceServer) RunTask(context.Context, *TaskRequest) (*TaskResult, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunTask not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) PreviewPlan(context.Context, *PlanPreviewRequest) (*PlanPreviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreviewPlan not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) StartWebRTC(context.Context, *WebRTCConfig) (*WebRTCOffer, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartWebRTC not implemented")
@@ -542,6 +560,24 @@ func _OrchestratorService_RunTask_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_PreviewPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlanPreviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).PreviewPlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_PreviewPlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).PreviewPlan(ctx, req.(*PlanPreviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OrchestratorService_StartWebRTC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WebRTCConfig)
 	if err := dec(in); err != nil {
@@ -650,6 +686,10 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunTask",
 			Handler:    _OrchestratorService_RunTask_Handler,
+		},
+		{
+			MethodName: "PreviewPlan",
+			Handler:    _OrchestratorService_PreviewPlan_Handler,
 		},
 		{
 			MethodName: "StartWebRTC",

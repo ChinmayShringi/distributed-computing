@@ -93,17 +93,29 @@ class Program
             var plan = GenerateDeterministicPlan(request);
             var reduce = new ReduceSpec { Kind = "CONCAT" };
 
-            // Try AI enhancement if available (optional)
-            var (aiAvailable, _) = CheckWindowsAiAvailability();
+            // Check AI availability for metadata
+            var (aiAvailable, aiNotes) = CheckWindowsAiAvailability();
+            bool usedAi = false;
+
             if (aiAvailable)
             {
                 // Future: AI could validate/optimize the plan here
                 // For now, we just use the deterministic plan
             }
 
+            // Build rationale based on what the plan does
+            var totalDevices = request.Devices.Count;
+            var selectedDevices = request.MaxWorkers > 0 && request.MaxWorkers < totalDevices
+                ? request.MaxWorkers : totalDevices;
+            var rationale = $"Deterministic: 1 SYSINFO task per device ({selectedDevices} of {totalDevices} devices selected"
+                + (request.MaxWorkers > 0 ? $", max_workers={request.MaxWorkers}" : "") + ")";
+
             var response = new PlanResponse
             {
                 Ok = true,
+                UsedAi = usedAi,
+                Notes = aiAvailable ? $"AI available. {aiNotes}" : $"Fallback mode. {aiNotes}",
+                Rationale = rationale,
                 Plan = plan,
                 Reduce = reduce
             };
@@ -133,7 +145,7 @@ class Program
                 return;
             }
 
-            var (aiAvailable, _) = CheckWindowsAiAvailability();
+            var (aiAvailable, aiNotes) = CheckWindowsAiAvailability();
             string summary;
             bool usedAi = false;
 
@@ -154,7 +166,8 @@ class Program
             {
                 Ok = true,
                 Summary = summary,
-                UsedAi = usedAi
+                UsedAi = usedAi,
+                Notes = aiAvailable ? $"AI available. {aiNotes}" : $"Fallback mode. {aiNotes}"
             };
 
             Console.WriteLine(JsonSerializer.Serialize(response, JsonOptions));

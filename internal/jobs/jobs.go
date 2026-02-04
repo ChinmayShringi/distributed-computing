@@ -112,7 +112,7 @@ func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int, plan *pb.P
 
 	// If no plan provided, generate default plan
 	if plan == nil || len(plan.Groups) == 0 {
-		plan = m.generateDefaultPlan(selectedDevices)
+		plan = m.GenerateDefaultPlan(selectedDevices)
 	}
 
 	job.TotalGroups = len(plan.Groups)
@@ -163,8 +163,8 @@ func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int, plan *pb.P
 	return job, nil
 }
 
-// generateDefaultPlan creates a default plan with one SYSINFO task per device
-func (m *Manager) generateDefaultPlan(devices []*pb.DeviceInfo) *pb.Plan {
+// GenerateDefaultPlan creates a default plan with one SYSINFO task per device
+func (m *Manager) GenerateDefaultPlan(devices []*pb.DeviceInfo) *pb.Plan {
 	tasks := make([]*pb.TaskSpec, len(devices))
 	for i, d := range devices {
 		tasks[i] = &pb.TaskSpec{

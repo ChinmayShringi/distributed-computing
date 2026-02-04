@@ -316,7 +316,15 @@
             <label for="max-workers">Max Workers (0 = all devices)</label>
             <input type="number" id="max-workers" value="0" min="0" style="width: 120px;">
         </div>
-        <button onclick="submitJob()" id="submit-job-btn">Submit Job</button>
+        <div class="btn-row">
+            <button onclick="submitJob()" id="submit-job-btn">Submit Job</button>
+            <button onclick="previewPlan()" id="preview-plan-btn" class="secondary">Preview Plan</button>
+        </div>
+
+        <div class="output-section hidden" id="plan-preview">
+            <div class="output-meta" id="plan-meta"></div>
+            <pre id="plan-output"></pre>
+        </div>
 
         <div class="output-section hidden" id="job-status">
             <div class="output-meta">
@@ -436,6 +444,7 @@ Try:
                                 ${device.capabilities.map(cap =>
                                     `<span class="cap-badge ${cap}">${cap}</span>`
                                 ).join('')}
+                                ${device.can_screen_capture ? '<span class="cap-badge" style="background:#2196F3;color:white;">screen</span>' : ''}
                             </div>
                         </div>
                     `).join('');
@@ -702,6 +711,54 @@ Try:
             }
         }
 
+        // Preview execution plan without submitting
+        async function previewPlan() {
+            const btn = document.getElementById('preview-plan-btn');
+            const preview = document.getElementById('plan-preview');
+            const meta = document.getElementById('plan-meta');
+            const output = document.getElementById('plan-output');
+            const error = document.getElementById('job-error');
+
+            const text = document.getElementById('job-text').value.trim() || 'collect status';
+            const maxWorkers = parseInt(document.getElementById('max-workers').value) || 0;
+
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        max_workers: maxWorkers
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Plan preview failed');
+                }
+
+                meta.innerHTML = `
+                    <strong>AI Used:</strong> ${data.used_ai ? 'Yes' : 'No'} |
+                    <strong>Rationale:</strong> ${escapeHtml(data.rationale)}
+                    ${data.notes ? '<br><strong>Notes:</strong> ' + escapeHtml(data.notes) : ''}
+                `;
+
+                output.textContent = JSON.stringify(data.plan, null, 2);
+                preview.classList.remove('hidden');
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Preview Plan';
+            }
+        }
+
         // ===== Remote Stream (WebRTC) =====
         let streamPC = null;
         let streamInfo = null;
@@ -718,7 +775,8 @@ Try:
             availableDevices.forEach(device => {
                 const option = document.createElement('option');
                 option.value = device.device_id;
-                option.textContent = `${device.device_name} (${device.platform}/${device.arch})`;
+                const capLabel = device.can_screen_capture ? '' : ' [no screen capture]';
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})${capLabel}`;
                 dropdown.appendChild(option);
             });
         }
@@ -737,6 +795,16 @@ Try:
             const fps = parseInt(document.getElementById('stream-fps').value) || 8;
             const quality = parseInt(document.getElementById('stream-quality').value) || 60;
             const monitorIndex = parseInt(document.getElementById('stream-monitor').value) || 0;
+
+            // Check screen capture capability for forced device
+            if (policy === 'FORCE_DEVICE_ID' && forceDeviceId) {
+                const device = availableDevices.find(d => d.device_id === forceDeviceId);
+                if (device && !device.can_screen_capture) {
+                    error.textContent = `Device "${device.device_name}" does not support screen capture`;
+                    error.classList.remove('hidden');
+                    return;
+                }
+            }
 
             startBtn.disabled = true;
             startBtn.textContent = 'Starting...';

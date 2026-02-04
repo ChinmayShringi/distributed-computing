@@ -34,9 +34,9 @@ func isAvailable(b *Brain) bool {
 }
 
 // generatePlan calls the Windows AI CLI to generate an execution plan.
-func generatePlan(b *Brain, text string, devices []*pb.DeviceInfo, maxWorkers int) (*pb.Plan, *pb.ReduceSpec, error) {
+func generatePlan(b *Brain, text string, devices []*pb.DeviceInfo, maxWorkers int) (*PlanResult, error) {
 	if !isAvailable(b) {
-		return nil, nil, fmt.Errorf("brain not available")
+		return nil, fmt.Errorf("brain not available")
 	}
 
 	// Create request
@@ -49,18 +49,18 @@ func generatePlan(b *Brain, text string, devices []*pb.DeviceInfo, maxWorkers in
 	// Write request to temp file
 	requestJSON, err := json.Marshal(request)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	tmpFile, err := os.CreateTemp("", "brain-plan-*.json")
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create temp file: %w", err)
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer os.Remove(tmpFile.Name())
 
 	if _, err := tmpFile.Write(requestJSON); err != nil {
 		tmpFile.Close()
-		return nil, nil, fmt.Errorf("failed to write temp file: %w", err)
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 	tmpFile.Close()
 
@@ -75,26 +75,28 @@ func generatePlan(b *Brain, text string, devices []*pb.DeviceInfo, maxWorkers in
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, nil, fmt.Errorf("CLI timed out after %s", cliTimeout)
+			return nil, fmt.Errorf("CLI timed out after %s", cliTimeout)
 		}
-		return nil, nil, fmt.Errorf("CLI execution failed: %w (stderr: %s)", err, stderr.String())
+		return nil, fmt.Errorf("CLI execution failed: %w (stderr: %s)", err, stderr.String())
 	}
 
 	// Parse response
 	var response PlanResponse
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse CLI response: %w (output: %s)", err, stdout.String())
+		return nil, fmt.Errorf("failed to parse CLI response: %w (output: %s)", err, stdout.String())
 	}
 
 	if !response.Ok {
-		return nil, nil, fmt.Errorf("CLI returned error: %s", response.Error)
+		return nil, fmt.Errorf("CLI returned error: %s", response.Error)
 	}
 
-	// Convert to proto types
-	plan := convertPlanToProto(response.Plan)
-	reduce := convertReduceToProto(response.Reduce)
-
-	return plan, reduce, nil
+	return &PlanResult{
+		Plan:      convertPlanToProto(response.Plan),
+		Reduce:    convertReduceToProto(response.Reduce),
+		UsedAi:    response.UsedAi,
+		Notes:     response.Notes,
+		Rationale: response.Rationale,
+	}, nil
 }
 
 // summarize calls the Windows AI CLI to summarize text.
