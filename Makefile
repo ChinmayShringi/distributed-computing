@@ -8,7 +8,7 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X github.com/edgecli/edgecli/cmd/edgecli/commands.Version=$(VERSION) \
 	-X github.com/edgecli/edgecli/cmd/edgecli/commands.Commit=$(COMMIT)"
 
-.PHONY: all build install clean test lint fmt help proto server web
+.PHONY: all build install clean test lint fmt help proto server web qaihub-example
 
 all: build
 
@@ -100,6 +100,15 @@ server:
 ## web: Run the web UI server (requires gRPC server running)
 web:
 	go run ./cmd/web
+
+## qaihub-example: Run QAI Hub compile example (Windows only)
+qaihub-example:
+ifeq ($(OS),Windows_NT)
+	powershell -ExecutionPolicy Bypass -File scripts/windows/qaihub_compile_example.ps1
+else
+	@echo "QAI Hub compile example requires Windows."
+	@echo "Run the Python helper directly: python scripts/qaihub_download_job.py --job <id> --out <dir>"
+endif
 
 ## build-server: Build the gRPC server binary
 build-server:

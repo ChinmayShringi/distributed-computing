@@ -690,6 +690,23 @@ See [docs/qaihub.md](docs/qaihub.md) for full setup instructions.
 powershell -ExecutionPolicy Bypass -File scripts/windows/setup_qaihub.ps1
 ```
 
+## Compile a Model via QAI Hub (example)
+
+Submit a compile job for MobileNetV2 targeting a Qualcomm device:
+
+```powershell
+$env:QAI_HUB_API_TOKEN = "your_token"
+powershell -ExecutionPolicy Bypass -File scripts/windows/qaihub_compile_example.ps1 -Device "Samsung Galaxy S24 (Family)" -TargetRuntime "precompiled_qnn_onnx"
+```
+
+This downloads MobileNetV2 ONNX, submits a compile job, waits for completion, and saves compiled artifacts to `artifacts/qaihub/<jobid>/`.
+
+To download artifacts from an existing job on any platform:
+
+```bash
+python scripts/qaihub_download_job.py --job jXXXXXXXX --out ./artifacts/qaihub/jXXXXXXXX/
+```
+
 ## Development
 
 ```bash
