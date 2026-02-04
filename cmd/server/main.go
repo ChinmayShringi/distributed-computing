@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/edgecli/edgecli/internal/allowlist"
+	"github.com/edgecli/edgecli/internal/brain"
 	"github.com/edgecli/edgecli/internal/deviceid"
 	"github.com/edgecli/edgecli/internal/exec"
 	"github.com/edgecli/edgecli/internal/jobs"
@@ -50,6 +51,7 @@ type OrchestratorServer struct {
 	registry      *registry.Registry
 	jobManager    *jobs.Manager
 	webrtcManager *webrtcstream.Manager
+	brain         *brain.Brain
 	selfDeviceID  string
 	selfAddr      string
 }
@@ -80,6 +82,7 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		registry:      registry.NewRegistry(),
 		jobManager:    jobs.NewManager(),
 		webrtcManager: webrtcstream.NewManager(),
+		brain:         brain.New(),
 		selfDeviceID:  selfID,
 		selfAddr:      selfAddr,
 	}
@@ -489,8 +492,24 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 		return nil, status.Error(codes.FailedPrecondition, "no devices available")
 	}
 
+	// Try to generate plan using brain if available and no plan provided
+	plan := req.Plan
+	reduce := req.Reduce
+	if (plan == nil || len(plan.Groups) == 0) && s.brain != nil && s.brain.IsAvailable() {
+		generatedPlan, generatedReduce, err := s.brain.GeneratePlan(req.Text, devices, int(req.MaxWorkers))
+		if err == nil && generatedPlan != nil {
+			plan = generatedPlan
+			if reduce == nil {
+				reduce = generatedReduce
+			}
+			log.Printf("[INFO] SubmitJob: using brain-generated plan with %d groups", len(plan.Groups))
+		} else if err != nil {
+			log.Printf("[WARN] SubmitJob: brain plan generation failed, using default: %v", err)
+		}
+	}
+
 	// Create job with tasks (plan and reduce will use defaults if nil)
-	job, err := s.jobManager.CreateJob(devices, int(req.MaxWorkers), req.Plan, req.Reduce)
+	job, err := s.jobManager.CreateJob(devices, int(req.MaxWorkers), plan, reduce)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create job: %v", err)
 	}
@@ -746,6 +765,7 @@ func main() {
 	log.Printf("[INFO] Server device ID: %s", orchestrator.selfDeviceID)
 	log.Printf("[INFO] Server gRPC address: %s", orchestrator.selfAddr)
 	log.Printf("[INFO] Allowed commands: %v", allowlist.ListAllowed())
+	log.Printf("[INFO] Windows AI Brain available: %v", orchestrator.brain.IsAvailable())
 
 	// Serve
 	if err := grpcServer.Serve(lis); err != nil {
