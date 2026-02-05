@@ -15,8 +15,12 @@ Documentation for EdgeCLI features and components.
 | Document | Description |
 |----------|-------------|
 | [Windows AI CLI](../../brain/windows-ai-cli/README.md) | C#/.NET CLI tool for AI-powered plan generation (Windows only) |
+| [QAI Hub Integration](../qaihub.md) | Qualcomm AI Hub CLI for model compilation (cloud-based) |
+| [Local Chat Runtime](../chat.md) | Ollama/LM Studio integration for local chat on Mac |
 
 The brain package (`internal/brain`) integrates with the Windows AI CLI to generate execution plans. On non-Windows platforms, it falls back to deterministic plan generation. Plans can be previewed before submission via the `PreviewPlan` gRPC RPC or `POST /api/plan` web endpoint.
+
+The chat feature (`internal/llm`) provides a local LLM runtime via Ollama or OpenAI-compatible APIs (LM Studio). This is separate from the Qualcomm pipeline, which compiles models for Snapdragon devices but cannot run them on Mac.
 
 ## Orchestration
 

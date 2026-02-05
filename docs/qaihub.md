@@ -55,15 +55,78 @@ powershell -ExecutionPolicy Bypass -File scripts/windows/qaihub_smoketest.ps1
 
 This activates the venv and runs `qai-hub list-devices`, failing if the command errors or returns empty output.
 
-## Convenience Command
+## CLI Commands
 
-The CLI client provides an optional wrapper:
+### Doctor
+
+Check qai-hub installation and configuration:
+
+```bash
+go run ./cmd/edgecli qaihub doctor
+```
+
+Output includes:
+- qai-hub binary availability and version
+- `QAI_HUB_API_TOKEN` environment variable status
+- CLI functionality check
+
+Use `--json` for machine-readable output:
+
+```bash
+go run ./cmd/edgecli qaihub doctor --json
+```
+
+### Compile
+
+Compile an ONNX model for Qualcomm devices:
+
+```bash
+go run ./cmd/edgecli qaihub compile \
+  --onnx /path/to/model.onnx \
+  --target "Samsung Galaxy S24" \
+  --runtime precompiled_qnn_onnx \
+  --out ./artifacts/qaihub
+```
+
+Flags:
+- `--onnx` (required): Path to ONNX model file
+- `--target` (required): Target device (e.g., "Samsung Galaxy S24")
+- `--runtime`: Target runtime (default: "precompiled_qnn_onnx")
+- `--out`: Output directory (default: `./artifacts/qaihub/<timestamp>`)
+- `--json`: Output as JSON
+
+### List Devices
+
+The CLI client also provides a simple wrapper:
 
 ```bash
 go run ./cmd/client qaihub-list-devices
 ```
 
 This shells out to `qai-hub list-devices` (tries the `.venv-qaihub` venv first, then falls back to PATH). No gRPC server required.
+
+## Web UI Integration
+
+When the web server is running, you can also use the Web UI to:
+
+1. **Run Doctor**: Click "Run Doctor" in the Qualcomm Model Pipeline card to check qai-hub status
+2. **Compile Model**: Enter ONNX path and target device, then click "Compile Model"
+
+REST endpoints:
+- `GET /api/qaihub/doctor` - Check installation status
+- `POST /api/qaihub/compile` - Compile a model
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `QAI_HUB_API_TOKEN` | API token for Qualcomm AI Hub authentication |
+
+## Limitations
+
+**Important**: Compiled models target Qualcomm Snapdragon devices and **cannot run locally on Mac or non-Qualcomm hardware**. The qai-hub CLI is a cloud API client that submits jobs to Qualcomm's cloud infrastructure.
+
+For local chat/inference on Mac, use Ollama or LM Studio instead (see [chat.md](chat.md)).
 
 ## What This Is For
 

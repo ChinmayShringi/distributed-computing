@@ -15,7 +15,7 @@ type planWrapper struct {
 }
 
 type taskGroupJSON struct {
-	Index int           `json:"index"`
+	Index int            `json:"index"`
 	Tasks []taskSpecJSON `json:"tasks"`
 }
 

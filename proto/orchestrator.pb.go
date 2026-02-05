@@ -397,8 +397,12 @@ type DeviceInfo struct {
 	GrpcAddr         string                 `protobuf:"bytes,8,opt,name=grpc_addr,json=grpcAddr,proto3" json:"grpc_addr,omitempty"`                            // where this device can be reached, e.g. "10.0.0.5:50051"
 	CanScreenCapture bool                   `protobuf:"varint,9,opt,name=can_screen_capture,json=canScreenCapture,proto3" json:"can_screen_capture,omitempty"` // true if device can capture screen (tested at startup)
 	HttpAddr         string                 `protobuf:"bytes,10,opt,name=http_addr,json=httpAddr,proto3" json:"http_addr,omitempty"`                           // bulk HTTP server address, e.g. "10.0.0.5:8081"
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// LLM inference throughput (for cost estimation)
+	LlmPrefillToksPerS float64 `protobuf:"fixed64,11,opt,name=llm_prefill_toks_per_s,json=llmPrefillToksPerS,proto3" json:"llm_prefill_toks_per_s,omitempty"` // 0 = use platform default
+	LlmDecodeToksPerS  float64 `protobuf:"fixed64,12,opt,name=llm_decode_toks_per_s,json=llmDecodeToksPerS,proto3" json:"llm_decode_toks_per_s,omitempty"`    // 0 = use platform default
+	RamFreeMb          uint64  `protobuf:"varint,13,opt,name=ram_free_mb,json=ramFreeMb,proto3" json:"ram_free_mb,omitempty"`                                 // free RAM in MB (0 = unknown)
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *DeviceInfo) Reset() {
@@ -499,6 +503,27 @@ func (x *DeviceInfo) GetHttpAddr() string {
 		return x.HttpAddr
 	}
 	return ""
+}
+
+func (x *DeviceInfo) GetLlmPrefillToksPerS() float64 {
+	if x != nil {
+		return x.LlmPrefillToksPerS
+	}
+	return 0
+}
+
+func (x *DeviceInfo) GetLlmDecodeToksPerS() float64 {
+	if x != nil {
+		return x.LlmDecodeToksPerS
+	}
+	return 0
+}
+
+func (x *DeviceInfo) GetRamFreeMb() uint64 {
+	if x != nil {
+		return x.RamFreeMb
+	}
+	return 0
 }
 
 type DeviceAck struct {
@@ -1321,11 +1346,14 @@ func (x *TaskGroup) GetTasks() []*TaskSpec {
 type TaskSpec struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	TaskId         string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Kind           string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"` // "SYSINFO", "ECHO", etc.
+	Kind           string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"` // "SYSINFO", "ECHO", "LLM_GENERATE", etc.
 	Input          string                 `protobuf:"bytes,3,opt,name=input,proto3" json:"input,omitempty"`
 	TargetDeviceId string                 `protobuf:"bytes,4,opt,name=target_device_id,json=targetDeviceId,proto3" json:"target_device_id,omitempty"` // empty = let orchestrator assign
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// LLM_GENERATE parameters (for cost estimation)
+	PromptTokens    int32 `protobuf:"varint,5,opt,name=prompt_tokens,json=promptTokens,proto3" json:"prompt_tokens,omitempty"`            // estimated prompt tokens
+	MaxOutputTokens int32 `protobuf:"varint,6,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"` // max output tokens to generate
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TaskSpec) Reset() {
@@ -1384,6 +1412,20 @@ func (x *TaskSpec) GetTargetDeviceId() string {
 		return x.TargetDeviceId
 	}
 	return ""
+}
+
+func (x *TaskSpec) GetPromptTokens() int32 {
+	if x != nil {
+		return x.PromptTokens
+	}
+	return 0
+}
+
+func (x *TaskSpec) GetMaxOutputTokens() int32 {
+	if x != nil {
+		return x.MaxOutputTokens
+	}
+	return 0
 }
 
 type ReduceSpec struct {
@@ -2154,6 +2196,318 @@ func (x *PlanPreviewResponse) GetReduce() *ReduceSpec {
 	return nil
 }
 
+type PlanCostRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Plan          *Plan                  `protobuf:"bytes,2,opt,name=plan,proto3" json:"plan,omitempty"`                            // plan to estimate
+	DeviceIds     []string               `protobuf:"bytes,3,rep,name=device_ids,json=deviceIds,proto3" json:"device_ids,omitempty"` // optional: limit to these devices (empty = all)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanCostRequest) Reset() {
+	*x = PlanCostRequest{}
+	mi := &file_orchestrator_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanCostRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanCostRequest) ProtoMessage() {}
+
+func (x *PlanCostRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanCostRequest.ProtoReflect.Descriptor instead.
+func (*PlanCostRequest) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *PlanCostRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *PlanCostRequest) GetPlan() *Plan {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
+func (x *PlanCostRequest) GetDeviceIds() []string {
+	if x != nil {
+		return x.DeviceIds
+	}
+	return nil
+}
+
+type PlanCostResponse struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	TotalPredictedMs      float64                `protobuf:"fixed64,1,opt,name=total_predicted_ms,json=totalPredictedMs,proto3" json:"total_predicted_ms,omitempty"` // best device's total latency
+	DeviceCosts           []*DeviceCostEstimate  `protobuf:"bytes,2,rep,name=device_costs,json=deviceCosts,proto3" json:"device_costs,omitempty"`
+	RecommendedDeviceId   string                 `protobuf:"bytes,3,opt,name=recommended_device_id,json=recommendedDeviceId,proto3" json:"recommended_device_id,omitempty"`
+	RecommendedDeviceName string                 `protobuf:"bytes,4,opt,name=recommended_device_name,json=recommendedDeviceName,proto3" json:"recommended_device_name,omitempty"`
+	HasUnknownCosts       bool                   `protobuf:"varint,5,opt,name=has_unknown_costs,json=hasUnknownCosts,proto3" json:"has_unknown_costs,omitempty"` // true if any step had unknown cost
+	Warning               string                 `protobuf:"bytes,6,opt,name=warning,proto3" json:"warning,omitempty"`                                           // warning message if applicable
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *PlanCostResponse) Reset() {
+	*x = PlanCostResponse{}
+	mi := &file_orchestrator_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanCostResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanCostResponse) ProtoMessage() {}
+
+func (x *PlanCostResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanCostResponse.ProtoReflect.Descriptor instead.
+func (*PlanCostResponse) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *PlanCostResponse) GetTotalPredictedMs() float64 {
+	if x != nil {
+		return x.TotalPredictedMs
+	}
+	return 0
+}
+
+func (x *PlanCostResponse) GetDeviceCosts() []*DeviceCostEstimate {
+	if x != nil {
+		return x.DeviceCosts
+	}
+	return nil
+}
+
+func (x *PlanCostResponse) GetRecommendedDeviceId() string {
+	if x != nil {
+		return x.RecommendedDeviceId
+	}
+	return ""
+}
+
+func (x *PlanCostResponse) GetRecommendedDeviceName() string {
+	if x != nil {
+		return x.RecommendedDeviceName
+	}
+	return ""
+}
+
+func (x *PlanCostResponse) GetHasUnknownCosts() bool {
+	if x != nil {
+		return x.HasUnknownCosts
+	}
+	return false
+}
+
+func (x *PlanCostResponse) GetWarning() string {
+	if x != nil {
+		return x.Warning
+	}
+	return ""
+}
+
+type DeviceCostEstimate struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId           string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DeviceName         string                 `protobuf:"bytes,2,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	TotalMs            float64                `protobuf:"fixed64,3,opt,name=total_ms,json=totalMs,proto3" json:"total_ms,omitempty"`
+	StepCosts          []*StepCostEstimate    `protobuf:"bytes,4,rep,name=step_costs,json=stepCosts,proto3" json:"step_costs,omitempty"`
+	EstimatedPeakRamMb uint64                 `protobuf:"varint,5,opt,name=estimated_peak_ram_mb,json=estimatedPeakRamMb,proto3" json:"estimated_peak_ram_mb,omitempty"`
+	RamSufficient      bool                   `protobuf:"varint,6,opt,name=ram_sufficient,json=ramSufficient,proto3" json:"ram_sufficient,omitempty"` // false if estimated RAM > device free RAM
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *DeviceCostEstimate) Reset() {
+	*x = DeviceCostEstimate{}
+	mi := &file_orchestrator_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceCostEstimate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceCostEstimate) ProtoMessage() {}
+
+func (x *DeviceCostEstimate) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceCostEstimate.ProtoReflect.Descriptor instead.
+func (*DeviceCostEstimate) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *DeviceCostEstimate) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *DeviceCostEstimate) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
+}
+
+func (x *DeviceCostEstimate) GetTotalMs() float64 {
+	if x != nil {
+		return x.TotalMs
+	}
+	return 0
+}
+
+func (x *DeviceCostEstimate) GetStepCosts() []*StepCostEstimate {
+	if x != nil {
+		return x.StepCosts
+	}
+	return nil
+}
+
+func (x *DeviceCostEstimate) GetEstimatedPeakRamMb() uint64 {
+	if x != nil {
+		return x.EstimatedPeakRamMb
+	}
+	return 0
+}
+
+func (x *DeviceCostEstimate) GetRamSufficient() bool {
+	if x != nil {
+		return x.RamSufficient
+	}
+	return false
+}
+
+type StepCostEstimate struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	TaskId            string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Kind              string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	PredictedMs       float64                `protobuf:"fixed64,3,opt,name=predicted_ms,json=predictedMs,proto3" json:"predicted_ms,omitempty"`
+	PredictedMemoryMb float64                `protobuf:"fixed64,4,opt,name=predicted_memory_mb,json=predictedMemoryMb,proto3" json:"predicted_memory_mb,omitempty"`
+	UnknownCost       bool                   `protobuf:"varint,5,opt,name=unknown_cost,json=unknownCost,proto3" json:"unknown_cost,omitempty"` // true if step type not recognized
+	Notes             string                 `protobuf:"bytes,6,opt,name=notes,proto3" json:"notes,omitempty"`                                 // e.g., "using default prefill TPS"
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *StepCostEstimate) Reset() {
+	*x = StepCostEstimate{}
+	mi := &file_orchestrator_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StepCostEstimate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StepCostEstimate) ProtoMessage() {}
+
+func (x *StepCostEstimate) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StepCostEstimate.ProtoReflect.Descriptor instead.
+func (*StepCostEstimate) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *StepCostEstimate) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *StepCostEstimate) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *StepCostEstimate) GetPredictedMs() float64 {
+	if x != nil {
+		return x.PredictedMs
+	}
+	return 0
+}
+
+func (x *StepCostEstimate) GetPredictedMemoryMb() float64 {
+	if x != nil {
+		return x.PredictedMemoryMb
+	}
+	return 0
+}
+
+func (x *StepCostEstimate) GetUnknownCost() bool {
+	if x != nil {
+		return x.UnknownCost
+	}
+	return false
+}
+
+func (x *StepCostEstimate) GetNotes() string {
+	if x != nil {
+		return x.Notes
+	}
+	return ""
+}
+
 type DownloadTicketRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"` // relative path under shared root, e.g. "test.txt"
@@ -2163,7 +2517,7 @@ type DownloadTicketRequest struct {
 
 func (x *DownloadTicketRequest) Reset() {
 	*x = DownloadTicketRequest{}
-	mi := &file_orchestrator_proto_msgTypes[34]
+	mi := &file_orchestrator_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2175,7 +2529,7 @@ func (x *DownloadTicketRequest) String() string {
 func (*DownloadTicketRequest) ProtoMessage() {}
 
 func (x *DownloadTicketRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_orchestrator_proto_msgTypes[34]
+	mi := &file_orchestrator_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2188,7 +2542,7 @@ func (x *DownloadTicketRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadTicketRequest.ProtoReflect.Descriptor instead.
 func (*DownloadTicketRequest) Descriptor() ([]byte, []int) {
-	return file_orchestrator_proto_rawDescGZIP(), []int{34}
+	return file_orchestrator_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *DownloadTicketRequest) GetPath() string {
@@ -2210,7 +2564,7 @@ type DownloadTicketResponse struct {
 
 func (x *DownloadTicketResponse) Reset() {
 	*x = DownloadTicketResponse{}
-	mi := &file_orchestrator_proto_msgTypes[35]
+	mi := &file_orchestrator_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2222,7 +2576,7 @@ func (x *DownloadTicketResponse) String() string {
 func (*DownloadTicketResponse) ProtoMessage() {}
 
 func (x *DownloadTicketResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_orchestrator_proto_msgTypes[35]
+	mi := &file_orchestrator_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2235,7 +2589,7 @@ func (x *DownloadTicketResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadTicketResponse.ProtoReflect.Descriptor instead.
 func (*DownloadTicketResponse) Descriptor() ([]byte, []int) {
-	return file_orchestrator_proto_rawDescGZIP(), []int{35}
+	return file_orchestrator_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *DownloadTicketResponse) GetToken() string {
@@ -2291,7 +2645,7 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x06stdout\x18\x02 \x01(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x03 \x01(\tR\x06stderr\"'\n" +
 	"\bDeviceId\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\"\xad\x02\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\"\xb3\x03\n" +
 	"\n" +
 	"DeviceInfo\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1f\n" +
@@ -2305,7 +2659,10 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\tgrpc_addr\x18\b \x01(\tR\bgrpcAddr\x12,\n" +
 	"\x12can_screen_capture\x18\t \x01(\bR\x10canScreenCapture\x12\x1b\n" +
 	"\thttp_addr\x18\n" +
-	" \x01(\tR\bhttpAddr\"@\n" +
+	" \x01(\tR\bhttpAddr\x122\n" +
+	"\x16llm_prefill_toks_per_s\x18\v \x01(\x01R\x12llmPrefillToksPerS\x120\n" +
+	"\x15llm_decode_toks_per_s\x18\f \x01(\x01R\x11llmDecodeToksPerS\x12\x1e\n" +
+	"\vram_free_mb\x18\r \x01(\x04R\tramFreeMb\"@\n" +
 	"\tDeviceAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12#\n" +
 	"\rregistered_at\x18\x02 \x01(\x03R\fregisteredAt\"\xa5\x01\n" +
@@ -2370,12 +2727,14 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x06groups\x18\x01 \x03(\v2\x13.edgemesh.TaskGroupR\x06groups\"K\n" +
 	"\tTaskGroup\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12(\n" +
-	"\x05tasks\x18\x02 \x03(\v2\x12.edgemesh.TaskSpecR\x05tasks\"w\n" +
+	"\x05tasks\x18\x02 \x03(\v2\x12.edgemesh.TaskSpecR\x05tasks\"\xc8\x01\n" +
 	"\bTaskSpec\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
 	"\x05input\x18\x03 \x01(\tR\x05input\x12(\n" +
-	"\x10target_device_id\x18\x04 \x01(\tR\x0etargetDeviceId\" \n" +
+	"\x10target_device_id\x18\x04 \x01(\tR\x0etargetDeviceId\x12#\n" +
+	"\rprompt_tokens\x18\x05 \x01(\x05R\fpromptTokens\x12*\n" +
+	"\x11max_output_tokens\x18\x06 \x01(\x05R\x0fmaxOutputTokens\" \n" +
 	"\n" +
 	"ReduceSpec\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\"Y\n" +
@@ -2438,7 +2797,36 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x05notes\x18\x02 \x01(\tR\x05notes\x12\x1c\n" +
 	"\trationale\x18\x03 \x01(\tR\trationale\x12\"\n" +
 	"\x04plan\x18\x04 \x01(\v2\x0e.edgemesh.PlanR\x04plan\x12,\n" +
-	"\x06reduce\x18\x05 \x01(\v2\x14.edgemesh.ReduceSpecR\x06reduce\"+\n" +
+	"\x06reduce\x18\x05 \x01(\v2\x14.edgemesh.ReduceSpecR\x06reduce\"s\n" +
+	"\x0fPlanCostRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\"\n" +
+	"\x04plan\x18\x02 \x01(\v2\x0e.edgemesh.PlanR\x04plan\x12\x1d\n" +
+	"\n" +
+	"device_ids\x18\x03 \x03(\tR\tdeviceIds\"\xb3\x02\n" +
+	"\x10PlanCostResponse\x12,\n" +
+	"\x12total_predicted_ms\x18\x01 \x01(\x01R\x10totalPredictedMs\x12?\n" +
+	"\fdevice_costs\x18\x02 \x03(\v2\x1c.edgemesh.DeviceCostEstimateR\vdeviceCosts\x122\n" +
+	"\x15recommended_device_id\x18\x03 \x01(\tR\x13recommendedDeviceId\x126\n" +
+	"\x17recommended_device_name\x18\x04 \x01(\tR\x15recommendedDeviceName\x12*\n" +
+	"\x11has_unknown_costs\x18\x05 \x01(\bR\x0fhasUnknownCosts\x12\x18\n" +
+	"\awarning\x18\x06 \x01(\tR\awarning\"\x82\x02\n" +
+	"\x12DeviceCostEstimate\x12\x1b\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1f\n" +
+	"\vdevice_name\x18\x02 \x01(\tR\n" +
+	"deviceName\x12\x19\n" +
+	"\btotal_ms\x18\x03 \x01(\x01R\atotalMs\x129\n" +
+	"\n" +
+	"step_costs\x18\x04 \x03(\v2\x1a.edgemesh.StepCostEstimateR\tstepCosts\x121\n" +
+	"\x15estimated_peak_ram_mb\x18\x05 \x01(\x04R\x12estimatedPeakRamMb\x12%\n" +
+	"\x0eram_sufficient\x18\x06 \x01(\bR\rramSufficient\"\xcb\x01\n" +
+	"\x10StepCostEstimate\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12!\n" +
+	"\fpredicted_ms\x18\x03 \x01(\x01R\vpredictedMs\x12.\n" +
+	"\x13predicted_memory_mb\x18\x04 \x01(\x01R\x11predictedMemoryMb\x12!\n" +
+	"\funknown_cost\x18\x05 \x01(\bR\vunknownCost\x12\x14\n" +
+	"\x05notes\x18\x06 \x01(\tR\x05notes\"+\n" +
 	"\x15DownloadTicketRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"\x91\x01\n" +
 	"\x16DownloadTicketResponse\x12\x14\n" +
@@ -2446,7 +2834,7 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x03 \x01(\x03R\tsizeBytes\x12&\n" +
-	"\x0fexpires_unix_ms\x18\x04 \x01(\x03R\rexpiresUnixMs2\xdc\b\n" +
+	"\x0fexpires_unix_ms\x18\x04 \x01(\x03R\rexpiresUnixMs2\xa6\t\n" +
 	"\x13OrchestratorService\x12=\n" +
 	"\rCreateSession\x12\x15.edgemesh.AuthRequest\x1a\x15.edgemesh.SessionInfo\x123\n" +
 	"\tHeartbeat\x12\x15.edgemesh.SessionInfo\x1a\x0f.edgemesh.Empty\x12E\n" +
@@ -2460,7 +2848,8 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\tSubmitJob\x12\x14.edgemesh.JobRequest\x1a\x11.edgemesh.JobInfo\x12.\n" +
 	"\x06GetJob\x12\x0f.edgemesh.JobId\x1a\x13.edgemesh.JobStatus\x126\n" +
 	"\aRunTask\x12\x15.edgemesh.TaskRequest\x1a\x14.edgemesh.TaskResult\x12J\n" +
-	"\vPreviewPlan\x12\x1c.edgemesh.PlanPreviewRequest\x1a\x1d.edgemesh.PlanPreviewResponse\x12<\n" +
+	"\vPreviewPlan\x12\x1c.edgemesh.PlanPreviewRequest\x1a\x1d.edgemesh.PlanPreviewResponse\x12H\n" +
+	"\x0fPreviewPlanCost\x12\x19.edgemesh.PlanCostRequest\x1a\x1a.edgemesh.PlanCostResponse\x12<\n" +
 	"\vStartWebRTC\x12\x16.edgemesh.WebRTCConfig\x1a\x15.edgemesh.WebRTCOffer\x129\n" +
 	"\x0eCompleteWebRTC\x12\x16.edgemesh.WebRTCAnswer\x1a\x0f.edgemesh.Empty\x123\n" +
 	"\n" +
@@ -2480,7 +2869,7 @@ func file_orchestrator_proto_rawDescGZIP() []byte {
 }
 
 var file_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_orchestrator_proto_goTypes = []any{
 	(RoutingPolicy_Mode)(0),        // 0: edgemesh.RoutingPolicy.Mode
 	(*Empty)(nil),                  // 1: edgemesh.Empty
@@ -2517,8 +2906,12 @@ var file_orchestrator_proto_goTypes = []any{
 	(*WebRTCStop)(nil),             // 32: edgemesh.WebRTCStop
 	(*PlanPreviewRequest)(nil),     // 33: edgemesh.PlanPreviewRequest
 	(*PlanPreviewResponse)(nil),    // 34: edgemesh.PlanPreviewResponse
-	(*DownloadTicketRequest)(nil),  // 35: edgemesh.DownloadTicketRequest
-	(*DownloadTicketResponse)(nil), // 36: edgemesh.DownloadTicketResponse
+	(*PlanCostRequest)(nil),        // 35: edgemesh.PlanCostRequest
+	(*PlanCostResponse)(nil),       // 36: edgemesh.PlanCostResponse
+	(*DeviceCostEstimate)(nil),     // 37: edgemesh.DeviceCostEstimate
+	(*StepCostEstimate)(nil),       // 38: edgemesh.StepCostEstimate
+	(*DownloadTicketRequest)(nil),  // 39: edgemesh.DownloadTicketRequest
+	(*DownloadTicketResponse)(nil), // 40: edgemesh.DownloadTicketResponse
 }
 var file_orchestrator_proto_depIdxs = []int32{
 	7,  // 0: edgemesh.ListDevicesResponse.devices:type_name -> edgemesh.DeviceInfo
@@ -2532,45 +2925,50 @@ var file_orchestrator_proto_depIdxs = []int32{
 	26, // 8: edgemesh.JobStatus.tasks:type_name -> edgemesh.TaskStatus
 	20, // 9: edgemesh.PlanPreviewResponse.plan:type_name -> edgemesh.Plan
 	23, // 10: edgemesh.PlanPreviewResponse.reduce:type_name -> edgemesh.ReduceSpec
-	2,  // 11: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
-	3,  // 12: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
-	4,  // 13: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
-	7,  // 14: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
-	10, // 15: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
-	6,  // 16: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
-	12, // 17: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
-	1,  // 18: edgemesh.OrchestratorService.HealthCheck:input_type -> edgemesh.Empty
-	16, // 19: edgemesh.OrchestratorService.ExecuteRoutedCommand:input_type -> edgemesh.RoutedCommandRequest
-	19, // 20: edgemesh.OrchestratorService.SubmitJob:input_type -> edgemesh.JobRequest
-	18, // 21: edgemesh.OrchestratorService.GetJob:input_type -> edgemesh.JobId
-	27, // 22: edgemesh.OrchestratorService.RunTask:input_type -> edgemesh.TaskRequest
-	33, // 23: edgemesh.OrchestratorService.PreviewPlan:input_type -> edgemesh.PlanPreviewRequest
-	29, // 24: edgemesh.OrchestratorService.StartWebRTC:input_type -> edgemesh.WebRTCConfig
-	31, // 25: edgemesh.OrchestratorService.CompleteWebRTC:input_type -> edgemesh.WebRTCAnswer
-	32, // 26: edgemesh.OrchestratorService.StopWebRTC:input_type -> edgemesh.WebRTCStop
-	35, // 27: edgemesh.OrchestratorService.CreateDownloadTicket:input_type -> edgemesh.DownloadTicketRequest
-	3,  // 28: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
-	1,  // 29: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
-	5,  // 30: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
-	8,  // 31: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
-	11, // 32: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
-	9,  // 33: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
-	13, // 34: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
-	14, // 35: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
-	17, // 36: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
-	24, // 37: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
-	25, // 38: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
-	28, // 39: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
-	34, // 40: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
-	30, // 41: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
-	1,  // 42: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
-	1,  // 43: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
-	36, // 44: edgemesh.OrchestratorService.CreateDownloadTicket:output_type -> edgemesh.DownloadTicketResponse
-	28, // [28:45] is the sub-list for method output_type
-	11, // [11:28] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	20, // 11: edgemesh.PlanCostRequest.plan:type_name -> edgemesh.Plan
+	37, // 12: edgemesh.PlanCostResponse.device_costs:type_name -> edgemesh.DeviceCostEstimate
+	38, // 13: edgemesh.DeviceCostEstimate.step_costs:type_name -> edgemesh.StepCostEstimate
+	2,  // 14: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
+	3,  // 15: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
+	4,  // 16: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
+	7,  // 17: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
+	10, // 18: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
+	6,  // 19: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
+	12, // 20: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
+	1,  // 21: edgemesh.OrchestratorService.HealthCheck:input_type -> edgemesh.Empty
+	16, // 22: edgemesh.OrchestratorService.ExecuteRoutedCommand:input_type -> edgemesh.RoutedCommandRequest
+	19, // 23: edgemesh.OrchestratorService.SubmitJob:input_type -> edgemesh.JobRequest
+	18, // 24: edgemesh.OrchestratorService.GetJob:input_type -> edgemesh.JobId
+	27, // 25: edgemesh.OrchestratorService.RunTask:input_type -> edgemesh.TaskRequest
+	33, // 26: edgemesh.OrchestratorService.PreviewPlan:input_type -> edgemesh.PlanPreviewRequest
+	35, // 27: edgemesh.OrchestratorService.PreviewPlanCost:input_type -> edgemesh.PlanCostRequest
+	29, // 28: edgemesh.OrchestratorService.StartWebRTC:input_type -> edgemesh.WebRTCConfig
+	31, // 29: edgemesh.OrchestratorService.CompleteWebRTC:input_type -> edgemesh.WebRTCAnswer
+	32, // 30: edgemesh.OrchestratorService.StopWebRTC:input_type -> edgemesh.WebRTCStop
+	39, // 31: edgemesh.OrchestratorService.CreateDownloadTicket:input_type -> edgemesh.DownloadTicketRequest
+	3,  // 32: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
+	1,  // 33: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
+	5,  // 34: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
+	8,  // 35: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
+	11, // 36: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
+	9,  // 37: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
+	13, // 38: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
+	14, // 39: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
+	17, // 40: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
+	24, // 41: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
+	25, // 42: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
+	28, // 43: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
+	34, // 44: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
+	36, // 45: edgemesh.OrchestratorService.PreviewPlanCost:output_type -> edgemesh.PlanCostResponse
+	30, // 46: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
+	1,  // 47: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
+	1,  // 48: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
+	40, // 49: edgemesh.OrchestratorService.CreateDownloadTicket:output_type -> edgemesh.DownloadTicketResponse
+	32, // [32:50] is the sub-list for method output_type
+	14, // [14:32] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_orchestrator_proto_init() }
@@ -2584,7 +2982,7 @@ func file_orchestrator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orchestrator_proto_rawDesc), len(file_orchestrator_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   36,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

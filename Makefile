@@ -98,8 +98,9 @@ server:
 	go run ./cmd/server
 
 ## web: Run the web UI server (requires gRPC server running)
+## Loads .env file if present for chat configuration
 web:
-	go run ./cmd/web
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && go run ./cmd/web
 
 ## qaihub-example: Run QAI Hub compile example (Windows only)
 qaihub-example:

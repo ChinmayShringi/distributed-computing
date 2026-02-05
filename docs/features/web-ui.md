@@ -51,6 +51,17 @@ go run ./cmd/web
 - Commands: "list devices", "pwd", "ls"
 - Interactive command execution
 
+### 6. Qualcomm Model Pipeline (qai-hub)
+- Run qai-hub doctor to check CLI installation
+- Compile ONNX models for Qualcomm Snapdragon devices
+- Note: Compiled models target Snapdragon and cannot run locally on Mac
+
+### 7. Local Chat Runtime
+- Chat powered by local LLM (Ollama or LM Studio)
+- Independent of Qualcomm pipeline
+- Health status indicator
+- Multi-turn conversation support
+
 ## REST API Endpoints
 
 ### GET /api/devices
@@ -156,6 +167,70 @@ Preview an execution plan without creating a job. Shows which devices would rece
 - `plan` - The execution plan (groups of parallel tasks)
 - `reduce` - How results would be combined
 
+### POST /api/plan-cost
+Estimate execution cost (latency, memory) for a plan. Returns per-device cost breakdowns and recommends the best device for execution.
+
+**Request:**
+```json
+{
+  "plan": {
+    "groups": [
+      {
+        "index": 0,
+        "tasks": [
+          {"task_id": "step-1", "kind": "LLM_GENERATE", "prompt_tokens": 500, "max_output_tokens": 200},
+          {"task_id": "step-2", "kind": "LLM_GENERATE", "prompt_tokens": 100, "max_output_tokens": 50}
+        ]
+      }
+    ]
+  },
+  "device_ids": []
+}
+```
+
+**Response:**
+```json
+{
+  "total_predicted_ms": 4166.67,
+  "device_costs": [
+    {
+      "device_id": "e452458d-...",
+      "device_name": "macbook-pro",
+      "total_ms": 8333.33,
+      "step_costs": [
+        {"task_id": "step-1", "kind": "LLM_GENERATE", "predicted_ms": 8333.33, "predicted_memory_mb": 2048, "unknown_cost": false, "notes": "using default throughput for platform"},
+        {"task_id": "step-2", "kind": "LLM_GENERATE", "predicted_ms": 2000.00, "predicted_memory_mb": 2048, "unknown_cost": false, "notes": "using default throughput for platform"}
+      ],
+      "estimated_peak_ram_mb": 2048,
+      "ram_sufficient": true
+    },
+    {
+      "device_id": "f66a8dc8-...",
+      "device_name": "fast-device",
+      "total_ms": 4166.67,
+      "step_costs": [...],
+      "estimated_peak_ram_mb": 2048,
+      "ram_sufficient": true
+    }
+  ],
+  "recommended_device_id": "f66a8dc8-...",
+  "recommended_device_name": "fast-device",
+  "has_unknown_costs": false,
+  "warning": ""
+}
+```
+
+**Request fields:**
+- `plan` - The execution plan (same structure as job submission)
+- `device_ids` - Optional array of device IDs to limit estimation to (empty = all devices)
+
+**Response fields:**
+- `total_predicted_ms` - Best device's total predicted latency
+- `device_costs` - Per-device breakdown with step costs
+- `recommended_device_id/name` - Device with lowest total cost
+- `has_unknown_costs` - True if any step type was unrecognized
+- `warning` - Warning message if applicable
+
 ### GET /api/job?id={job_id}
 Get job status.
 
@@ -217,6 +292,78 @@ Request a file download from a specific device. The web server calls `CreateDown
   "expires_unix_ms": 1770149394000
 }
 ```
+
+### GET /api/chat/health
+Check the local chat runtime health.
+
+**Response:**
+```json
+{
+  "ok": true,
+  "provider": "ollama",
+  "base_url": "http://localhost:11434",
+  "model": "llama2"
+}
+```
+
+### POST /api/chat
+Send a chat message to the local LLM runtime.
+
+**Request:**
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Hello!"}
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "reply": "Hello! How can I help you today?"
+}
+```
+
+Supports multi-turn conversations by including the full message history.
+
+### GET /api/qaihub/doctor
+Check the qai-hub CLI installation and configuration.
+
+**Response:**
+```json
+{
+  "qai_hub_found": true,
+  "qai_hub_version": "0.18.0",
+  "token_env_present": true,
+  "notes": ["qai-hub binary found at: /usr/local/bin/qai-hub", "CLI commands appear functional"]
+}
+```
+
+### POST /api/qaihub/compile
+Compile an ONNX model using Qualcomm AI Hub.
+
+**Request:**
+```json
+{
+  "onnx_path": "/path/to/model.onnx",
+  "target": "Samsung Galaxy S24",
+  "runtime": "precompiled_qnn_onnx"
+}
+```
+
+**Response:**
+```json
+{
+  "submitted": true,
+  "job_id": "abc123",
+  "out_dir": "/path/to/artifacts/qaihub/20250205-120000",
+  "raw_output_path": "/path/to/artifacts/qaihub/20250205-120000/compile.log",
+  "notes": ["Compile command completed"]
+}
+```
+
+Note: Compiled models target Qualcomm Snapdragon devices and cannot run on Mac.
 
 ## UI Styling
 

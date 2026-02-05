@@ -26,6 +26,7 @@ import (
 
 	"github.com/edgecli/edgecli/internal/allowlist"
 	"github.com/edgecli/edgecli/internal/brain"
+	"github.com/edgecli/edgecli/internal/cost"
 	"github.com/edgecli/edgecli/internal/deviceid"
 	"github.com/edgecli/edgecli/internal/exec"
 	"github.com/edgecli/edgecli/internal/jobs"
@@ -817,6 +818,57 @@ func (s *OrchestratorServer) PreviewPlan(ctx context.Context, req *pb.PlanPrevie
 		Plan:      plan,
 		Reduce:    reduce,
 	}, nil
+}
+
+// PreviewPlanCost estimates execution cost for a plan without running it
+func (s *OrchestratorServer) PreviewPlanCost(ctx context.Context, req *pb.PlanCostRequest) (*pb.PlanCostResponse, error) {
+	// Verify session
+	s.mu.RLock()
+	_, exists := s.sessions[req.SessionId]
+	s.mu.RUnlock()
+
+	if !exists {
+		log.Printf("[ERROR] PreviewPlanCost: session not found: %s", req.SessionId)
+		return nil, status.Error(codes.Unauthenticated, "session not found")
+	}
+
+	// Get devices from registry
+	devices := s.registry.List()
+	if len(devices) == 0 {
+		return nil, status.Error(codes.FailedPrecondition, "no devices available")
+	}
+
+	// Filter devices if device_ids specified
+	if len(req.DeviceIds) > 0 {
+		deviceSet := make(map[string]bool)
+		for _, id := range req.DeviceIds {
+			deviceSet[id] = true
+		}
+		filtered := make([]*pb.DeviceInfo, 0)
+		for _, d := range devices {
+			if deviceSet[d.DeviceId] {
+				filtered = append(filtered, d)
+			}
+		}
+		if len(filtered) == 0 {
+			return nil, status.Error(codes.InvalidArgument, "none of the specified devices found")
+		}
+		devices = filtered
+	}
+
+	// Validate plan
+	if req.Plan == nil || len(req.Plan.Groups) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "plan is required and must have at least one group")
+	}
+
+	// Estimate costs
+	estimator := cost.NewEstimator()
+	resp := estimator.EstimatePlanCost(req.Plan, devices)
+
+	log.Printf("[INFO] PreviewPlanCost: devices=%d total_ms=%.2f recommended=%s has_unknown=%v",
+		len(devices), resp.TotalPredictedMs, resp.RecommendedDeviceId, resp.HasUnknownCosts)
+
+	return resp, nil
 }
 
 // StartWebRTC creates a new WebRTC peer connection and returns an offer SDP

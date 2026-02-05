@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/edgecli/edgecli/internal/llm"
+	"github.com/edgecli/edgecli/internal/qaihub"
 	pb "github.com/edgecli/edgecli/proto"
 )
 
@@ -32,10 +34,12 @@ const (
 
 // WebServer handles HTTP requests and forwards them to gRPC
 type WebServer struct {
-	grpcClient pb.OrchestratorServiceClient
-	grpcConn   *grpc.ClientConn
-	devKey     string
-	llm        llm.Provider // nil if disabled
+	grpcClient   pb.OrchestratorServiceClient
+	grpcConn     *grpc.ClientConn
+	devKey       string
+	llm          llm.Provider     // nil if disabled
+	chat         llm.ChatProvider // nil if disabled
+	qaihubClient *qaihub.Client   // qai-hub CLI wrapper
 }
 
 // DeviceResponse is the JSON response for /api/devices
@@ -79,9 +83,9 @@ type AssistantRequest struct {
 type AssistantResponse struct {
 	Reply string      `json:"reply"`
 	Raw   interface{} `json:"raw,omitempty"`
-	Mode  string      `json:"mode,omitempty"`  // "llm", "fallback", or ""
+	Mode  string      `json:"mode,omitempty"` // "llm", "fallback", or ""
 	JobID string      `json:"job_id,omitempty"`
-	Plan  interface{} `json:"plan,omitempty"`  // plan JSON for debug
+	Plan  interface{} `json:"plan,omitempty"` // plan JSON for debug
 }
 
 // ErrorResponse is the JSON error response
@@ -102,6 +106,42 @@ type PreviewPlanResponse struct {
 	Rationale string      `json:"rationale"`
 	Plan      interface{} `json:"plan"`
 	Reduce    interface{} `json:"reduce"`
+}
+
+// PlanCostRequest is the JSON request for /api/plan-cost
+type PlanCostRequest struct {
+	Plan      interface{} `json:"plan"`       // Plan object with groups/tasks
+	DeviceIDs []string    `json:"device_ids"` // Optional: limit to these devices
+}
+
+// StepCostResponse is the cost for a single step
+type StepCostResponse struct {
+	TaskID            string  `json:"task_id"`
+	Kind              string  `json:"kind"`
+	PredictedMs       float64 `json:"predicted_ms"`
+	PredictedMemoryMB float64 `json:"predicted_memory_mb"`
+	UnknownCost       bool    `json:"unknown_cost"`
+	Notes             string  `json:"notes,omitempty"`
+}
+
+// DeviceCostResponse is the cost breakdown for a single device
+type DeviceCostResponse struct {
+	DeviceID           string             `json:"device_id"`
+	DeviceName         string             `json:"device_name"`
+	TotalMs            float64            `json:"total_ms"`
+	StepCosts          []StepCostResponse `json:"step_costs"`
+	EstimatedPeakRAMMB uint64             `json:"estimated_peak_ram_mb"`
+	RAMSufficient      bool               `json:"ram_sufficient"`
+}
+
+// PlanCostResponse is the JSON response for /api/plan-cost
+type PlanCostResponse struct {
+	TotalPredictedMs      float64              `json:"total_predicted_ms"`
+	DeviceCosts           []DeviceCostResponse `json:"device_costs"`
+	RecommendedDeviceID   string               `json:"recommended_device_id"`
+	RecommendedDeviceName string               `json:"recommended_device_name"`
+	HasUnknownCosts       bool                 `json:"has_unknown_costs"`
+	Warning               string               `json:"warning,omitempty"`
 }
 
 // DownloadRequest is the JSON request for /api/request-download
@@ -182,6 +222,23 @@ type StreamStopRequest struct {
 	StreamID           string `json:"stream_id"`
 }
 
+// CompileRequest is the JSON request for /api/qaihub/compile
+type CompileRequest struct {
+	ONNXPath string `json:"onnx_path"`
+	Target   string `json:"target"`
+	Runtime  string `json:"runtime"`
+}
+
+// ChatRequest is the JSON request for /api/chat
+type ChatRequest struct {
+	Messages []llm.ChatMessage `json:"messages"`
+}
+
+// ChatResponse is the JSON response for /api/chat
+type ChatResponse struct {
+	Reply string `json:"reply"`
+}
+
 func main() {
 	// Get configuration from environment
 	httpAddr := os.Getenv("WEB_ADDR")
@@ -227,11 +284,32 @@ func main() {
 		log.Printf("[INFO] LLM provider: disabled")
 	}
 
+	// Initialize Chat provider (optional, defaults to Ollama)
+	chatProvider, err := llm.NewChatFromEnv()
+	if err != nil {
+		log.Printf("[WARN] Chat provider init failed: %v", err)
+	}
+	if chatProvider != nil {
+		log.Printf("[INFO] Chat provider: %s", chatProvider.Name())
+	} else {
+		log.Printf("[INFO] Chat provider: disabled")
+	}
+
+	// Initialize QAI Hub client
+	qaihubCli := qaihub.New()
+	if qaihubCli.IsAvailable() {
+		log.Printf("[INFO] QAI Hub CLI: available at %s", qaihubCli.Bin)
+	} else {
+		log.Printf("[INFO] QAI Hub CLI: not available")
+	}
+
 	server := &WebServer{
-		grpcClient: client,
-		grpcConn:   conn,
-		devKey:     devKey,
-		llm:        llmProvider,
+		grpcClient:   client,
+		grpcConn:     conn,
+		devKey:       devKey,
+		llm:          llmProvider,
+		chat:         chatProvider,
+		qaihubClient: qaihubCli,
 	}
 
 	// Setup routes
@@ -242,10 +320,19 @@ func main() {
 	http.HandleFunc("/api/submit-job", server.handleSubmitJob)
 	http.HandleFunc("/api/job", server.handleGetJob)
 	http.HandleFunc("/api/plan", server.handlePreviewPlan)
+	http.HandleFunc("/api/plan-cost", server.handlePlanCost)
 	http.HandleFunc("/api/stream/start", server.handleStreamStart)
 	http.HandleFunc("/api/stream/answer", server.handleStreamAnswer)
 	http.HandleFunc("/api/stream/stop", server.handleStreamStop)
 	http.HandleFunc("/api/request-download", server.handleRequestDownload)
+
+	// QAI Hub endpoints
+	http.HandleFunc("/api/qaihub/doctor", server.handleQaihubDoctor)
+	http.HandleFunc("/api/qaihub/compile", server.handleQaihubCompile)
+
+	// Chat endpoints
+	http.HandleFunc("/api/chat", server.handleChat)
+	http.HandleFunc("/api/chat/health", server.handleChatHealth)
 
 	log.Printf("[INFO] Web server listening on %s", httpAddr)
 	log.Printf("[INFO] Connected to gRPC server at %s", grpcAddr)
@@ -789,6 +876,144 @@ func (s *WebServer) handlePreviewPlan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handlePlanCost estimates execution cost for a plan
+func (s *WebServer) handlePlanCost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req PlanCostRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	// Convert request plan to proto Plan
+	planProto, err := s.convertJSONToPlan(req.Plan)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid plan: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	// Create session
+	sessionResp, err := s.grpcClient.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "web-ui",
+		SecurityKey: s.devKey,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handlePlanCost: CreateSession failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Session error: %v", err))
+		return
+	}
+
+	// Call PreviewPlanCost
+	costResp, err := s.grpcClient.PreviewPlanCost(ctx, &pb.PlanCostRequest{
+		SessionId: sessionResp.SessionId,
+		Plan:      planProto,
+		DeviceIds: req.DeviceIDs,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handlePlanCost: PreviewPlanCost failed: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Cost estimation error: %v", err))
+		return
+	}
+
+	// Convert to JSON response
+	deviceCosts := make([]DeviceCostResponse, len(costResp.DeviceCosts))
+	for i, dc := range costResp.DeviceCosts {
+		stepCosts := make([]StepCostResponse, len(dc.StepCosts))
+		for j, sc := range dc.StepCosts {
+			stepCosts[j] = StepCostResponse{
+				TaskID:            sc.TaskId,
+				Kind:              sc.Kind,
+				PredictedMs:       sc.PredictedMs,
+				PredictedMemoryMB: sc.PredictedMemoryMb,
+				UnknownCost:       sc.UnknownCost,
+				Notes:             sc.Notes,
+			}
+		}
+		deviceCosts[i] = DeviceCostResponse{
+			DeviceID:           dc.DeviceId,
+			DeviceName:         dc.DeviceName,
+			TotalMs:            dc.TotalMs,
+			StepCosts:          stepCosts,
+			EstimatedPeakRAMMB: dc.EstimatedPeakRamMb,
+			RAMSufficient:      dc.RamSufficient,
+		}
+	}
+
+	s.writeJSON(w, http.StatusOK, PlanCostResponse{
+		TotalPredictedMs:      costResp.TotalPredictedMs,
+		DeviceCosts:           deviceCosts,
+		RecommendedDeviceID:   costResp.RecommendedDeviceId,
+		RecommendedDeviceName: costResp.RecommendedDeviceName,
+		HasUnknownCosts:       costResp.HasUnknownCosts,
+		Warning:               costResp.Warning,
+	})
+}
+
+// convertJSONToPlan converts a JSON plan to a proto Plan
+func (s *WebServer) convertJSONToPlan(planJSON interface{}) (*pb.Plan, error) {
+	// Re-encode to JSON and then decode into a structured type
+	jsonBytes, err := json.Marshal(planJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal plan: %v", err)
+	}
+
+	type taskInput struct {
+		TaskID          string `json:"task_id"`
+		Kind            string `json:"kind"`
+		Input           string `json:"input"`
+		TargetDeviceID  string `json:"target_device_id"`
+		PromptTokens    int32  `json:"prompt_tokens"`
+		MaxOutputTokens int32  `json:"max_output_tokens"`
+	}
+	type groupInput struct {
+		Index int32       `json:"index"`
+		Tasks []taskInput `json:"tasks"`
+	}
+	type planInput struct {
+		Groups []groupInput `json:"groups"`
+	}
+
+	var plan planInput
+	if err := json.Unmarshal(jsonBytes, &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan: %v", err)
+	}
+
+	if len(plan.Groups) == 0 {
+		return nil, fmt.Errorf("plan must have at least one group")
+	}
+
+	// Convert to proto
+	protoPlan := &pb.Plan{
+		Groups: make([]*pb.TaskGroup, len(plan.Groups)),
+	}
+	for i, g := range plan.Groups {
+		protoGroup := &pb.TaskGroup{
+			Index: g.Index,
+			Tasks: make([]*pb.TaskSpec, len(g.Tasks)),
+		}
+		for j, t := range g.Tasks {
+			protoGroup.Tasks[j] = &pb.TaskSpec{
+				TaskId:          t.TaskID,
+				Kind:            t.Kind,
+				Input:           t.Input,
+				TargetDeviceId:  t.TargetDeviceID,
+				PromptTokens:    t.PromptTokens,
+				MaxOutputTokens: t.MaxOutputTokens,
+			}
+		}
+		protoPlan.Groups[i] = protoGroup
+	}
+
+	return protoPlan, nil
+}
+
 // handleStreamStart initiates a WebRTC stream from a selected device
 func (s *WebServer) handleStreamStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1125,4 +1350,161 @@ func (s *WebServer) handleRequestDownload(w http.ResponseWriter, r *http.Request
 		SizeBytes:     ticketResp.SizeBytes,
 		ExpiresUnixMs: ticketResp.ExpiresUnixMs,
 	})
+}
+
+// handleQaihubDoctor runs qai-hub diagnostics
+func (s *WebServer) handleQaihubDoctor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	result, err := s.qaihubClient.Doctor(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubDoctor: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Doctor failed: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleQaihubCompile runs model compilation using qai-hub
+func (s *WebServer) handleQaihubCompile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req CompileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	// Validate required fields
+	if req.ONNXPath == "" {
+		s.writeError(w, http.StatusBadRequest, "onnx_path is required")
+		return
+	}
+	if req.Target == "" {
+		s.writeError(w, http.StatusBadRequest, "target is required")
+		return
+	}
+
+	// Validate path: must be absolute and exist
+	if !filepath.IsAbs(req.ONNXPath) {
+		s.writeError(w, http.StatusBadRequest, "onnx_path must be an absolute path")
+		return
+	}
+
+	// Block path traversal
+	if strings.Contains(req.ONNXPath, "..") {
+		s.writeError(w, http.StatusBadRequest, "onnx_path cannot contain path traversal (..)")
+		return
+	}
+
+	// Check file exists
+	info, err := os.Stat(req.ONNXPath)
+	if os.IsNotExist(err) {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("ONNX file not found: %s", req.ONNXPath))
+		return
+	}
+	if info.IsDir() {
+		s.writeError(w, http.StatusBadRequest, "onnx_path must be a file, not a directory")
+		return
+	}
+
+	// Check if qai-hub is available
+	if !s.qaihubClient.IsAvailable() {
+		s.writeError(w, http.StatusServiceUnavailable, "qai-hub CLI is not available. Run qaihub doctor for setup instructions.")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	// Default output directory
+	outDir := filepath.Join("artifacts", "qaihub", time.Now().Format("20060102-150405"))
+
+	result, err := s.qaihubClient.Compile(ctx, req.ONNXPath, req.Target, req.Runtime, outDir)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubCompile: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Compile failed: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleChat handles chat requests using the local LLM runtime
+func (s *WebServer) handleChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if s.chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "Chat provider is not configured. Set CHAT_PROVIDER environment variable.")
+		return
+	}
+
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if len(req.Messages) == 0 {
+		s.writeError(w, http.StatusBadRequest, "messages array is required and must not be empty")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	reply, err := s.chat.Chat(ctx, req.Messages)
+	if err != nil {
+		log.Printf("[ERROR] handleChat: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Chat failed: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, ChatResponse{Reply: reply})
+}
+
+// handleChatHealth checks the chat runtime status
+func (s *WebServer) handleChatHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if s.chat == nil {
+		s.writeJSON(w, http.StatusOK, &llm.HealthResult{
+			Ok:       false,
+			Provider: "none",
+			Error:    "Chat provider is not configured",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := s.chat.Health(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleChatHealth: %v", err)
+		s.writeJSON(w, http.StatusOK, &llm.HealthResult{
+			Ok:       false,
+			Provider: s.chat.Name(),
+			Error:    err.Error(),
+		})
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
 }

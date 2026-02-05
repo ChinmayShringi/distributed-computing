@@ -4,8 +4,10 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +49,7 @@ Commands:
   routed-cmd       Execute command on best available device (routed)
   submit-job       Submit a distributed job to all devices
   get-job          Get the status/result of a submitted job
+  plan-cost        Estimate execution cost for a plan
   qaihub-list-devices  List Qualcomm AI Hub devices (no server needed)
 
 Legacy mode (without subcommand):
@@ -79,6 +82,10 @@ Examples:
 
   # Get job status/result
   client get-job --id <job-id>
+
+  # Estimate plan cost
+  cat plan.json | client --key dev plan-cost
+  client --key dev plan-cost --plan plan.json
 
   # Execute a command locally (legacy mode)
   client --key dev --cmd pwd
@@ -138,6 +145,8 @@ func main() {
 		handleSubmitJob(ctx, client, *key, flag.Args()[1:])
 	case "get-job":
 		handleGetJob(ctx, client, flag.Args()[1:])
+	case "plan-cost":
+		handlePlanCost(ctx, client, *key, flag.Args()[1:])
 	case "":
 		// Legacy mode: execute command
 		if *cmd == "" {
@@ -502,6 +511,145 @@ func handleGetJob(ctx context.Context, client pb.OrchestratorServiceClient, args
 	if resp.State == "DONE" || resp.State == "FAILED" {
 		fmt.Printf("\nResult:\n%s\n", resp.FinalResult)
 	}
+}
+
+func handlePlanCost(ctx context.Context, client pb.OrchestratorServiceClient, key string, args []string) {
+	// Parse plan-cost specific flags
+	fs := flag.NewFlagSet("plan-cost", flag.ExitOnError)
+	planFile := fs.String("plan", "", "Path to plan JSON file (reads stdin if empty)")
+	fs.Parse(args)
+
+	if key == "" {
+		fmt.Fprintln(os.Stderr, "Error: --key is required for plan-cost")
+		os.Exit(1)
+	}
+
+	// Read plan JSON from file or stdin
+	var planBytes []byte
+	var err error
+
+	if *planFile != "" {
+		planBytes, err = os.ReadFile(*planFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading plan file: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		planBytes, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if len(planBytes) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: no plan provided (use --plan or pipe to stdin)")
+		os.Exit(1)
+	}
+
+	// Parse plan JSON
+	type taskInput struct {
+		TaskID          string `json:"task_id"`
+		Kind            string `json:"kind"`
+		Input           string `json:"input"`
+		TargetDeviceID  string `json:"target_device_id"`
+		PromptTokens    int32  `json:"prompt_tokens"`
+		MaxOutputTokens int32  `json:"max_output_tokens"`
+	}
+	type groupInput struct {
+		Index int32       `json:"index"`
+		Tasks []taskInput `json:"tasks"`
+	}
+	type planInput struct {
+		Groups []groupInput `json:"groups"`
+	}
+
+	var planData planInput
+	if err := json.Unmarshal(planBytes, &planData); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing plan JSON: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(planData.Groups) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: plan must have at least one group")
+		os.Exit(1)
+	}
+
+	// Convert to proto
+	protoPlan := &pb.Plan{
+		Groups: make([]*pb.TaskGroup, len(planData.Groups)),
+	}
+	for i, g := range planData.Groups {
+		protoGroup := &pb.TaskGroup{
+			Index: g.Index,
+			Tasks: make([]*pb.TaskSpec, len(g.Tasks)),
+		}
+		for j, t := range g.Tasks {
+			protoGroup.Tasks[j] = &pb.TaskSpec{
+				TaskId:          t.TaskID,
+				Kind:            t.Kind,
+				Input:           t.Input,
+				TargetDeviceId:  t.TargetDeviceID,
+				PromptTokens:    t.PromptTokens,
+				MaxOutputTokens: t.MaxOutputTokens,
+			}
+		}
+		protoPlan.Groups[i] = protoGroup
+	}
+
+	// Create session
+	hostname, _ := os.Hostname()
+	sessionResp, err := client.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  hostname,
+		SecurityKey: key,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating session: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Call PreviewPlanCost
+	resp, err := client.PreviewPlanCost(ctx, &pb.PlanCostRequest{
+		SessionId: sessionResp.SessionId,
+		Plan:      protoPlan,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error estimating plan cost: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print results
+	fmt.Println("Plan Cost Estimation")
+	fmt.Println("====================")
+	fmt.Printf("Total predicted latency: %.0fms\n", resp.TotalPredictedMs)
+	fmt.Println()
+
+	if resp.Warning != "" {
+		fmt.Printf("Warning: %s\n\n", resp.Warning)
+	}
+
+	fmt.Println("Per-device breakdown:")
+	for _, dc := range resp.DeviceCosts {
+		fmt.Printf("  Device: %s (%s)\n", dc.DeviceName, truncateID(dc.DeviceId))
+		fmt.Printf("    Total: %.0fms\n", dc.TotalMs)
+		if dc.EstimatedPeakRamMb > 0 {
+			fmt.Printf("    Peak RAM: %d MB", dc.EstimatedPeakRamMb)
+			if !dc.RamSufficient {
+				fmt.Print(" (INSUFFICIENT)")
+			}
+			fmt.Println()
+		}
+		for _, sc := range dc.StepCosts {
+			costStr := fmt.Sprintf("%.0fms", sc.PredictedMs)
+			if sc.UnknownCost {
+				costStr += " (unknown)"
+			}
+			fmt.Printf("    - %s: %s %s\n", sc.TaskId, sc.Kind, costStr)
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("Recommended device: %s (%s)\n", resp.RecommendedDeviceName, truncateID(resp.RecommendedDeviceId))
 }
 
 func handleExecuteCommand(ctx context.Context, client pb.OrchestratorServiceClient, key, device, cmd string, args []string) {

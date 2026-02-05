@@ -47,6 +47,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(toolsCmd)
 	rootCmd.AddCommand(debugCmd)
+	rootCmd.AddCommand(qaihubCmd)
 }
 
 // versionCmd shows version info

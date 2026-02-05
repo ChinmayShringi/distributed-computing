@@ -34,6 +34,9 @@ service OrchestratorService {
   // Plan preview (no execution)
   rpc PreviewPlan (PlanPreviewRequest) returns (PlanPreviewResponse);
 
+  // Plan cost estimation
+  rpc PreviewPlanCost (PlanCostRequest) returns (PlanCostResponse);
+
   // WebRTC screen streaming
   rpc StartWebRTC (WebRTCConfig) returns (WebRTCOffer);
   rpc CompleteWebRTC (WebRTCAnswer) returns (Empty);
@@ -85,6 +88,10 @@ message DeviceInfo {
   string grpc_addr = 8;    // where this device can be reached, e.g. "10.0.0.5:50051"
   bool can_screen_capture = 9;  // true if device can capture screen (tested at startup)
   string http_addr = 10;  // bulk HTTP server address, e.g. "10.0.0.5:8081"
+  // LLM inference throughput (for cost estimation)
+  double llm_prefill_toks_per_s = 11;  // 0 = use platform default
+  double llm_decode_toks_per_s = 12;   // 0 = use platform default
+  uint64 ram_free_mb = 13;              // free RAM in MB (0 = unknown)
 }
 
 message DeviceAck {
@@ -184,9 +191,12 @@ message TaskGroup {
 
 message TaskSpec {
   string task_id = 1;
-  string kind = 2;               // "SYSINFO", "ECHO", etc.
+  string kind = 2;               // "SYSINFO", "ECHO", "LLM_GENERATE", etc.
   string input = 3;
   string target_device_id = 4;   // empty = let orchestrator assign
+  // LLM_GENERATE parameters (for cost estimation)
+  int32 prompt_tokens = 5;       // estimated prompt tokens
+  int32 max_output_tokens = 6;   // max output tokens to generate
 }
 
 message ReduceSpec {
@@ -269,6 +279,41 @@ message PlanPreviewResponse {
   string rationale = 3;
   Plan plan = 4;
   ReduceSpec reduce = 5;
+}
+
+// Plan cost estimation messages
+
+message PlanCostRequest {
+  string session_id = 1;
+  Plan plan = 2;                      // plan to estimate
+  repeated string device_ids = 3;     // optional: limit to these devices (empty = all)
+}
+
+message PlanCostResponse {
+  double total_predicted_ms = 1;               // best device's total latency
+  repeated DeviceCostEstimate device_costs = 2;
+  string recommended_device_id = 3;
+  string recommended_device_name = 4;
+  bool has_unknown_costs = 5;                  // true if any step had unknown cost
+  string warning = 6;                          // warning message if applicable
+}
+
+message DeviceCostEstimate {
+  string device_id = 1;
+  string device_name = 2;
+  double total_ms = 3;
+  repeated StepCostEstimate step_costs = 4;
+  uint64 estimated_peak_ram_mb = 5;
+  bool ram_sufficient = 6;                     // false if estimated RAM > device free RAM
+}
+
+message StepCostEstimate {
+  string task_id = 1;
+  string kind = 2;
+  double predicted_ms = 3;
+  double predicted_memory_mb = 4;
+  bool unknown_cost = 5;                       // true if step type not recognized
+  string notes = 6;                            // e.g., "using default prefill TPS"
 }
 
 // File download messages

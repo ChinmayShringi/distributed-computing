@@ -90,6 +90,9 @@ message DeviceInfo {
   string grpc_addr = 8;      // Reachable address (e.g., "10.0.0.5:50051")
   bool can_screen_capture = 9; // True if device can capture screen (tested at startup)
   string http_addr = 10;     // Bulk HTTP server address (e.g., "10.0.0.5:8081")
+  double llm_prefill_toks_per_s = 11; // LLM prefill throughput (0 = use default)
+  double llm_decode_toks_per_s = 12;  // LLM decode throughput (0 = use default)
+  uint64 ram_free_mb = 13;   // Free RAM in MB (0 = unknown)
 }
 ```
 
@@ -193,9 +196,11 @@ message TaskGroup {
 
 message TaskSpec {
   string task_id = 1;
-  string kind = 2;               // "SYSINFO", "ECHO"
+  string kind = 2;               // "SYSINFO", "ECHO", "LLM_GENERATE"
   string input = 3;
   string target_device_id = 4;   // Empty = auto-assign
+  int32 prompt_tokens = 5;       // For LLM_GENERATE: estimated prompt tokens
+  int32 max_output_tokens = 6;   // For LLM_GENERATE: max output tokens
 }
 
 message ReduceSpec {
@@ -252,6 +257,65 @@ message PlanPreviewResponse {
 ```
 
 When the Windows AI Brain is available, the plan may be AI-generated. Otherwise, a deterministic fallback plan is returned (1 SYSINFO task per device).
+
+#### PreviewPlanCost
+Estimates execution cost (latency, memory) for a plan without running it. Returns per-device cost breakdowns and recommends the best device.
+
+```protobuf
+rpc PreviewPlanCost (PlanCostRequest) returns (PlanCostResponse);
+```
+
+**Request:**
+```protobuf
+message PlanCostRequest {
+  string session_id = 1;
+  Plan plan = 2;                      // Plan to estimate
+  repeated string device_ids = 3;     // Optional: limit to these devices
+}
+```
+
+**Response:**
+```protobuf
+message PlanCostResponse {
+  double total_predicted_ms = 1;               // Best device's total latency
+  repeated DeviceCostEstimate device_costs = 2;
+  string recommended_device_id = 3;
+  string recommended_device_name = 4;
+  bool has_unknown_costs = 5;                  // True if any step had unknown cost
+  string warning = 6;                          // Warning message if applicable
+}
+
+message DeviceCostEstimate {
+  string device_id = 1;
+  string device_name = 2;
+  double total_ms = 3;
+  repeated StepCostEstimate step_costs = 4;
+  uint64 estimated_peak_ram_mb = 5;
+  bool ram_sufficient = 6;                     // False if estimated RAM > device free RAM
+}
+
+message StepCostEstimate {
+  string task_id = 1;
+  string kind = 2;
+  double predicted_ms = 3;
+  double predicted_memory_mb = 4;
+  bool unknown_cost = 5;                       // True if step type not recognized
+  string notes = 6;                            // e.g., "using default prefill TPS"
+}
+```
+
+**Cost Estimation Formula:**
+- For `LLM_GENERATE` steps: `predicted_ms = (prompt_tokens / prefill_tps + max_output_tokens / decode_tps) * 1000`
+- For `SYSINFO`, `ECHO`: ~10ms (local operations)
+- For unknown step types: 250ms penalty
+
+**Device Throughput Defaults:**
+- Laptop (macos/windows/linux): prefill=300 tps, decode=30 tps
+- Phone (android/ios): prefill=120 tps, decode=12 tps
+
+**Execution Model:**
+- Tasks within a group execute in parallel: `group_cost = max(task_costs)`
+- Groups execute sequentially: `total_cost = sum(group_costs)`
 
 ### Worker Execution
 
