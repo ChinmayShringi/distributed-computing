@@ -39,6 +39,7 @@ type WebServer struct {
 	devKey       string
 	llm          llm.Provider     // nil if disabled
 	chat         llm.ChatProvider // nil if disabled
+	agent        *llm.AgentLoop   // LLM tool-calling agent (nil if disabled)
 	qaihubClient *qaihub.Client   // qai-hub CLI wrapper
 }
 
@@ -239,6 +240,27 @@ type ChatResponse struct {
 	Reply string `json:"reply"`
 }
 
+// AgentRequest is the JSON request for /api/agent
+type AgentRequest struct {
+	Message string `json:"message"`
+}
+
+// AgentToolCallInfo records a tool call made during agent execution
+type AgentToolCallInfo struct {
+	Iteration int    `json:"iteration"`
+	ToolName  string `json:"tool_name"`
+	Arguments string `json:"arguments"`
+	ResultLen int    `json:"result_len"`
+}
+
+// AgentResponseJSON is the JSON response for /api/agent
+type AgentResponseJSON struct {
+	Reply      string              `json:"reply"`
+	Iterations int                 `json:"iterations"`
+	ToolCalls  []AgentToolCallInfo `json:"tool_calls,omitempty"`
+	Error      string              `json:"error,omitempty"`
+}
+
 func main() {
 	// Get configuration from environment
 	httpAddr := os.Getenv("WEB_ADDR")
@@ -295,6 +317,17 @@ func main() {
 		log.Printf("[INFO] Chat provider: disabled")
 	}
 
+	// Initialize Agent (LLM tool-calling)
+	var agentLoop *llm.AgentLoop
+	agentLoop, err = llm.NewAgentLoop(llm.AgentLoopConfig{
+		GRPCAddr: grpcAddr,
+	})
+	if err != nil {
+		log.Printf("[WARN] Agent init failed: %v — agent endpoint will be disabled", err)
+	} else {
+		log.Printf("[INFO] Agent: enabled (max iterations: 8)")
+	}
+
 	// Initialize QAI Hub client
 	qaihubCli := qaihub.New()
 	if qaihubCli.IsAvailable() {
@@ -309,6 +342,7 @@ func main() {
 		devKey:       devKey,
 		llm:          llmProvider,
 		chat:         chatProvider,
+		agent:        agentLoop,
 		qaihubClient: qaihubCli,
 	}
 
@@ -333,6 +367,10 @@ func main() {
 	// Chat endpoints
 	http.HandleFunc("/api/chat", server.handleChat)
 	http.HandleFunc("/api/chat/health", server.handleChatHealth)
+
+	// Agent endpoint (LLM tool-calling)
+	http.HandleFunc("/api/agent", server.handleAgent)
+	http.HandleFunc("/api/agent/health", server.handleAgentHealth)
 
 	log.Printf("[INFO] Web server listening on %s", httpAddr)
 	log.Printf("[INFO] Connected to gRPC server at %s", grpcAddr)
@@ -1507,4 +1545,101 @@ func (s *WebServer) handleChatHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleAgent handles LLM tool-calling agent requests
+func (s *WebServer) handleAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if s.agent == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "Agent is not available. Check CHAT_PROVIDER configuration and gRPC server connectivity.")
+		return
+	}
+
+	var req AgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.Message == "" {
+		s.writeError(w, http.StatusBadRequest, "message is required")
+		return
+	}
+
+	// Use a longer timeout for agent requests (2 minutes default)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	log.Printf("[INFO] handleAgent: processing message: %q", truncate(req.Message, 100))
+
+	resp, err := s.agent.Run(ctx, req.Message)
+	if err != nil {
+		log.Printf("[ERROR] handleAgent: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Agent error: %v", err))
+		return
+	}
+
+	// Convert tool calls to response format
+	toolCalls := make([]AgentToolCallInfo, len(resp.ToolCalls))
+	for i, tc := range resp.ToolCalls {
+		toolCalls[i] = AgentToolCallInfo{
+			Iteration: tc.Iteration,
+			ToolName:  tc.ToolName,
+			Arguments: tc.Arguments,
+			ResultLen: tc.ResultLen,
+		}
+	}
+
+	log.Printf("[INFO] handleAgent: completed in %d iterations, %d tool calls", resp.Iterations, len(toolCalls))
+
+	s.writeJSON(w, http.StatusOK, AgentResponseJSON{
+		Reply:      resp.Reply,
+		Iterations: resp.Iterations,
+		ToolCalls:  toolCalls,
+		Error:      resp.Error,
+	})
+}
+
+// handleAgentHealth checks the agent health status
+func (s *WebServer) handleAgentHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if s.agent == nil {
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":       false,
+			"provider": "none",
+			"error":    "Agent is not configured",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := s.agent.HealthCheck(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleAgentHealth: %v", err)
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// truncate shortens a string for logging
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

@@ -183,3 +183,107 @@ This design allows you to:
 - See both statuses clearly in the UI
 
 In production on Qualcomm devices, you would replace the local runtime with QNN-compiled models. On Mac (development), the local runtime provides equivalent functionality.
+
+## LLM Agent with Tool Calling
+
+The agent endpoint (`/api/agent`) provides an LLM that can call tools to interact with the device mesh.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `get_capabilities` | List all registered devices with hardware info and benchmarks |
+| `execute_shell_cmd` | Execute shell commands on devices (dangerous commands blocked) |
+| `get_file` | Read files from devices (full, head, tail, or range modes) |
+
+### Agent Configuration
+
+```bash
+# Required: Use OpenAI-compatible provider (LM Studio)
+export CHAT_PROVIDER=openai
+export CHAT_BASE_URL=http://localhost:1234
+export CHAT_MODEL=qwen3-vl-8b
+
+# Optional
+export AGENT_MAX_ITERATIONS=8  # Max tool calling iterations
+```
+
+### REST API
+
+#### Agent Health Check
+
+```bash
+curl http://localhost:8080/api/agent/health
+```
+
+#### Send Agent Request
+
+```bash
+curl -X POST http://localhost:8080/api/agent \
+  -H "Content-Type: application/json" \
+  -d '{"message": "show me disk usage on any device"}'
+```
+
+Response:
+```json
+{
+  "reply": "Here is the disk usage on device abc123...",
+  "iterations": 2,
+  "tool_calls": [
+    {"iteration": 1, "tool_name": "get_capabilities", "result_len": 512},
+    {"iteration": 1, "tool_name": "execute_shell_cmd", "result_len": 1024}
+  ]
+}
+```
+
+### CLI Usage
+
+```bash
+# Interactive mode
+edgecli chat
+
+# Single message mode
+edgecli chat "list all devices"
+
+# Custom server address
+edgecli chat --web-addr localhost:8080 "run df -h on any device"
+```
+
+### Example Tool-Calling Transcript
+
+```
+User: "show me disk usage on the best laptop"
+
+1. Agent calls: get_capabilities({include_benchmarks: true})
+   -> Returns: [{device_id: "abc123", platform: "macos", ...}]
+
+2. Agent calls: execute_shell_cmd({device_id: "abc123", command: "df -h"})
+   -> Returns: {exit_code: 0, stdout: "Filesystem  Size  Used  Avail..."}
+
+3. Agent responds:
+   "Here's the disk usage on device abc123 (macOS):
+    - Root filesystem: 500GB total, 200GB used (40%)
+    - Data volume: 1TB total, 600GB used (60%)"
+```
+
+### Safety Controls
+
+The `execute_shell_cmd` tool blocks dangerous commands:
+- `rm -rf /`, `rm -rf ~`, `rm -rf .`
+- `dd if=`, `mkfs`, `format`
+- `shutdown`, `reboot`, `poweroff`
+- `curl | sh`, `wget | bash`
+- Fork bombs and other destructive patterns
+
+Most read-only commands are allowed (ls, cat, df, ps, grep, etc.).
+
+### Smoke Test
+
+```bash
+# Start servers
+make server  # In terminal 1
+CHAT_PROVIDER=openai CHAT_BASE_URL=http://localhost:1234 make web  # In terminal 2
+
+# Run smoke test
+./scripts/smoke/agent_smoke.sh
+```

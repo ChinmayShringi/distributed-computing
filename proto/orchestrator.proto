@@ -44,6 +44,9 @@ service OrchestratorService {
 
   // File download ticket
   rpc CreateDownloadTicket (DownloadTicketRequest) returns (DownloadTicketResponse);
+
+  // File reading (for LLM tool calling)
+  rpc ReadFile (ReadFileRequest) returns (ReadFileResponse);
 }
 
 message Empty {}
@@ -327,4 +330,32 @@ message DownloadTicketResponse {
   string filename = 2;           // basename of the file
   int64 size_bytes = 3;          // file size
   int64 expires_unix_ms = 4;     // absolute expiry (ms since epoch)
+}
+
+// File reading messages (for LLM tool calling)
+
+enum ReadMode {
+  READ_MODE_FULL = 0;
+  READ_MODE_HEAD = 1;
+  READ_MODE_TAIL = 2;
+  READ_MODE_RANGE = 3;
+}
+
+message ReadFileRequest {
+  string session_id = 1;
+  string device_id = 2;      // target device (empty = local)
+  string path = 3;
+  ReadMode mode = 4;
+  int32 max_bytes = 5;       // default 65536, max 10MB
+  int64 offset = 6;          // for RANGE mode
+  int64 length = 7;          // for RANGE mode
+}
+
+message ReadFileResponse {
+  bytes content = 1;
+  int64 size_bytes = 2;      // actual file size
+  int64 bytes_returned = 3;  // bytes returned in content
+  bool truncated = 4;
+  string error = 5;
+  string content_preview = 6;  // first ~2KB decoded if text
 }

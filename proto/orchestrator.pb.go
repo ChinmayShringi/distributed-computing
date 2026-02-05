@@ -21,6 +21,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ReadMode int32
+
+const (
+	ReadMode_READ_MODE_FULL  ReadMode = 0
+	ReadMode_READ_MODE_HEAD  ReadMode = 1
+	ReadMode_READ_MODE_TAIL  ReadMode = 2
+	ReadMode_READ_MODE_RANGE ReadMode = 3
+)
+
+// Enum value maps for ReadMode.
+var (
+	ReadMode_name = map[int32]string{
+		0: "READ_MODE_FULL",
+		1: "READ_MODE_HEAD",
+		2: "READ_MODE_TAIL",
+		3: "READ_MODE_RANGE",
+	}
+	ReadMode_value = map[string]int32{
+		"READ_MODE_FULL":  0,
+		"READ_MODE_HEAD":  1,
+		"READ_MODE_TAIL":  2,
+		"READ_MODE_RANGE": 3,
+	}
+)
+
+func (x ReadMode) Enum() *ReadMode {
+	p := new(ReadMode)
+	*p = x
+	return p
+}
+
+func (x ReadMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReadMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_orchestrator_proto_enumTypes[0].Descriptor()
+}
+
+func (ReadMode) Type() protoreflect.EnumType {
+	return &file_orchestrator_proto_enumTypes[0]
+}
+
+func (x ReadMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReadMode.Descriptor instead.
+func (ReadMode) EnumDescriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{0}
+}
+
 type RoutingPolicy_Mode int32
 
 const (
@@ -57,11 +109,11 @@ func (x RoutingPolicy_Mode) String() string {
 }
 
 func (RoutingPolicy_Mode) Descriptor() protoreflect.EnumDescriptor {
-	return file_orchestrator_proto_enumTypes[0].Descriptor()
+	return file_orchestrator_proto_enumTypes[1].Descriptor()
 }
 
 func (RoutingPolicy_Mode) Type() protoreflect.EnumType {
-	return &file_orchestrator_proto_enumTypes[0]
+	return &file_orchestrator_proto_enumTypes[1]
 }
 
 func (x RoutingPolicy_Mode) Number() protoreflect.EnumNumber {
@@ -2620,6 +2672,182 @@ func (x *DownloadTicketResponse) GetExpiresUnixMs() int64 {
 	return 0
 }
 
+type ReadFileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"` // target device (empty = local)
+	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	Mode          ReadMode               `protobuf:"varint,4,opt,name=mode,proto3,enum=edgemesh.ReadMode" json:"mode,omitempty"`
+	MaxBytes      int32                  `protobuf:"varint,5,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"` // default 65536, max 10MB
+	Offset        int64                  `protobuf:"varint,6,opt,name=offset,proto3" json:"offset,omitempty"`                     // for RANGE mode
+	Length        int64                  `protobuf:"varint,7,opt,name=length,proto3" json:"length,omitempty"`                     // for RANGE mode
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadFileRequest) Reset() {
+	*x = ReadFileRequest{}
+	mi := &file_orchestrator_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadFileRequest) ProtoMessage() {}
+
+func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadFileRequest.ProtoReflect.Descriptor instead.
+func (*ReadFileRequest) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *ReadFileRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ReadFileRequest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *ReadFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ReadFileRequest) GetMode() ReadMode {
+	if x != nil {
+		return x.Mode
+	}
+	return ReadMode_READ_MODE_FULL
+}
+
+func (x *ReadFileRequest) GetMaxBytes() int32 {
+	if x != nil {
+		return x.MaxBytes
+	}
+	return 0
+}
+
+func (x *ReadFileRequest) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *ReadFileRequest) GetLength() int64 {
+	if x != nil {
+		return x.Length
+	}
+	return 0
+}
+
+type ReadFileResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Content        []byte                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	SizeBytes      int64                  `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`             // actual file size
+	BytesReturned  int64                  `protobuf:"varint,3,opt,name=bytes_returned,json=bytesReturned,proto3" json:"bytes_returned,omitempty"` // bytes returned in content
+	Truncated      bool                   `protobuf:"varint,4,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	Error          string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	ContentPreview string                 `protobuf:"bytes,6,opt,name=content_preview,json=contentPreview,proto3" json:"content_preview,omitempty"` // first ~2KB decoded if text
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReadFileResponse) Reset() {
+	*x = ReadFileResponse{}
+	mi := &file_orchestrator_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadFileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadFileResponse) ProtoMessage() {}
+
+func (x *ReadFileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadFileResponse.ProtoReflect.Descriptor instead.
+func (*ReadFileResponse) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ReadFileResponse) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *ReadFileResponse) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *ReadFileResponse) GetBytesReturned() int64 {
+	if x != nil {
+		return x.BytesReturned
+	}
+	return 0
+}
+
+func (x *ReadFileResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+func (x *ReadFileResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ReadFileResponse) GetContentPreview() string {
+	if x != nil {
+		return x.ContentPreview
+	}
+	return ""
+}
+
 var File_orchestrator_proto protoreflect.FileDescriptor
 
 const file_orchestrator_proto_rawDesc = "" +
@@ -2834,7 +3062,29 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x03 \x01(\x03R\tsizeBytes\x12&\n" +
-	"\x0fexpires_unix_ms\x18\x04 \x01(\x03R\rexpiresUnixMs2\xa6\t\n" +
+	"\x0fexpires_unix_ms\x18\x04 \x01(\x03R\rexpiresUnixMs\"\xd6\x01\n" +
+	"\x0fReadFileRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12&\n" +
+	"\x04mode\x18\x04 \x01(\x0e2\x12.edgemesh.ReadModeR\x04mode\x12\x1b\n" +
+	"\tmax_bytes\x18\x05 \x01(\x05R\bmaxBytes\x12\x16\n" +
+	"\x06offset\x18\x06 \x01(\x03R\x06offset\x12\x16\n" +
+	"\x06length\x18\a \x01(\x03R\x06length\"\xcf\x01\n" +
+	"\x10ReadFileResponse\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\fR\acontent\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x03R\tsizeBytes\x12%\n" +
+	"\x0ebytes_returned\x18\x03 \x01(\x03R\rbytesReturned\x12\x1c\n" +
+	"\ttruncated\x18\x04 \x01(\bR\ttruncated\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12'\n" +
+	"\x0fcontent_preview\x18\x06 \x01(\tR\x0econtentPreview*[\n" +
+	"\bReadMode\x12\x12\n" +
+	"\x0eREAD_MODE_FULL\x10\x00\x12\x12\n" +
+	"\x0eREAD_MODE_HEAD\x10\x01\x12\x12\n" +
+	"\x0eREAD_MODE_TAIL\x10\x02\x12\x13\n" +
+	"\x0fREAD_MODE_RANGE\x10\x032\xe9\t\n" +
 	"\x13OrchestratorService\x12=\n" +
 	"\rCreateSession\x12\x15.edgemesh.AuthRequest\x1a\x15.edgemesh.SessionInfo\x123\n" +
 	"\tHeartbeat\x12\x15.edgemesh.SessionInfo\x1a\x0f.edgemesh.Empty\x12E\n" +
@@ -2854,7 +3104,8 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x0eCompleteWebRTC\x12\x16.edgemesh.WebRTCAnswer\x1a\x0f.edgemesh.Empty\x123\n" +
 	"\n" +
 	"StopWebRTC\x12\x14.edgemesh.WebRTCStop\x1a\x0f.edgemesh.Empty\x12Y\n" +
-	"\x14CreateDownloadTicket\x12\x1f.edgemesh.DownloadTicketRequest\x1a .edgemesh.DownloadTicketResponseB\"Z github.com/edgecli/edgecli/protob\x06proto3"
+	"\x14CreateDownloadTicket\x12\x1f.edgemesh.DownloadTicketRequest\x1a .edgemesh.DownloadTicketResponse\x12A\n" +
+	"\bReadFile\x12\x19.edgemesh.ReadFileRequest\x1a\x1a.edgemesh.ReadFileResponseB\"Z github.com/edgecli/edgecli/protob\x06proto3"
 
 var (
 	file_orchestrator_proto_rawDescOnce sync.Once
@@ -2868,107 +3119,113 @@ func file_orchestrator_proto_rawDescGZIP() []byte {
 	return file_orchestrator_proto_rawDescData
 }
 
-var file_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
+var file_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_orchestrator_proto_goTypes = []any{
-	(RoutingPolicy_Mode)(0),        // 0: edgemesh.RoutingPolicy.Mode
-	(*Empty)(nil),                  // 1: edgemesh.Empty
-	(*AuthRequest)(nil),            // 2: edgemesh.AuthRequest
-	(*SessionInfo)(nil),            // 3: edgemesh.SessionInfo
-	(*CommandRequest)(nil),         // 4: edgemesh.CommandRequest
-	(*CommandResponse)(nil),        // 5: edgemesh.CommandResponse
-	(*DeviceId)(nil),               // 6: edgemesh.DeviceId
-	(*DeviceInfo)(nil),             // 7: edgemesh.DeviceInfo
-	(*DeviceAck)(nil),              // 8: edgemesh.DeviceAck
-	(*DeviceStatus)(nil),           // 9: edgemesh.DeviceStatus
-	(*ListDevicesRequest)(nil),     // 10: edgemesh.ListDevicesRequest
-	(*ListDevicesResponse)(nil),    // 11: edgemesh.ListDevicesResponse
-	(*AITaskRequest)(nil),          // 12: edgemesh.AITaskRequest
-	(*AITaskResponse)(nil),         // 13: edgemesh.AITaskResponse
-	(*HealthStatus)(nil),           // 14: edgemesh.HealthStatus
-	(*RoutingPolicy)(nil),          // 15: edgemesh.RoutingPolicy
-	(*RoutedCommandRequest)(nil),   // 16: edgemesh.RoutedCommandRequest
-	(*RoutedCommandResponse)(nil),  // 17: edgemesh.RoutedCommandResponse
-	(*JobId)(nil),                  // 18: edgemesh.JobId
-	(*JobRequest)(nil),             // 19: edgemesh.JobRequest
-	(*Plan)(nil),                   // 20: edgemesh.Plan
-	(*TaskGroup)(nil),              // 21: edgemesh.TaskGroup
-	(*TaskSpec)(nil),               // 22: edgemesh.TaskSpec
-	(*ReduceSpec)(nil),             // 23: edgemesh.ReduceSpec
-	(*JobInfo)(nil),                // 24: edgemesh.JobInfo
-	(*JobStatus)(nil),              // 25: edgemesh.JobStatus
-	(*TaskStatus)(nil),             // 26: edgemesh.TaskStatus
-	(*TaskRequest)(nil),            // 27: edgemesh.TaskRequest
-	(*TaskResult)(nil),             // 28: edgemesh.TaskResult
-	(*WebRTCConfig)(nil),           // 29: edgemesh.WebRTCConfig
-	(*WebRTCOffer)(nil),            // 30: edgemesh.WebRTCOffer
-	(*WebRTCAnswer)(nil),           // 31: edgemesh.WebRTCAnswer
-	(*WebRTCStop)(nil),             // 32: edgemesh.WebRTCStop
-	(*PlanPreviewRequest)(nil),     // 33: edgemesh.PlanPreviewRequest
-	(*PlanPreviewResponse)(nil),    // 34: edgemesh.PlanPreviewResponse
-	(*PlanCostRequest)(nil),        // 35: edgemesh.PlanCostRequest
-	(*PlanCostResponse)(nil),       // 36: edgemesh.PlanCostResponse
-	(*DeviceCostEstimate)(nil),     // 37: edgemesh.DeviceCostEstimate
-	(*StepCostEstimate)(nil),       // 38: edgemesh.StepCostEstimate
-	(*DownloadTicketRequest)(nil),  // 39: edgemesh.DownloadTicketRequest
-	(*DownloadTicketResponse)(nil), // 40: edgemesh.DownloadTicketResponse
+	(ReadMode)(0),                  // 0: edgemesh.ReadMode
+	(RoutingPolicy_Mode)(0),        // 1: edgemesh.RoutingPolicy.Mode
+	(*Empty)(nil),                  // 2: edgemesh.Empty
+	(*AuthRequest)(nil),            // 3: edgemesh.AuthRequest
+	(*SessionInfo)(nil),            // 4: edgemesh.SessionInfo
+	(*CommandRequest)(nil),         // 5: edgemesh.CommandRequest
+	(*CommandResponse)(nil),        // 6: edgemesh.CommandResponse
+	(*DeviceId)(nil),               // 7: edgemesh.DeviceId
+	(*DeviceInfo)(nil),             // 8: edgemesh.DeviceInfo
+	(*DeviceAck)(nil),              // 9: edgemesh.DeviceAck
+	(*DeviceStatus)(nil),           // 10: edgemesh.DeviceStatus
+	(*ListDevicesRequest)(nil),     // 11: edgemesh.ListDevicesRequest
+	(*ListDevicesResponse)(nil),    // 12: edgemesh.ListDevicesResponse
+	(*AITaskRequest)(nil),          // 13: edgemesh.AITaskRequest
+	(*AITaskResponse)(nil),         // 14: edgemesh.AITaskResponse
+	(*HealthStatus)(nil),           // 15: edgemesh.HealthStatus
+	(*RoutingPolicy)(nil),          // 16: edgemesh.RoutingPolicy
+	(*RoutedCommandRequest)(nil),   // 17: edgemesh.RoutedCommandRequest
+	(*RoutedCommandResponse)(nil),  // 18: edgemesh.RoutedCommandResponse
+	(*JobId)(nil),                  // 19: edgemesh.JobId
+	(*JobRequest)(nil),             // 20: edgemesh.JobRequest
+	(*Plan)(nil),                   // 21: edgemesh.Plan
+	(*TaskGroup)(nil),              // 22: edgemesh.TaskGroup
+	(*TaskSpec)(nil),               // 23: edgemesh.TaskSpec
+	(*ReduceSpec)(nil),             // 24: edgemesh.ReduceSpec
+	(*JobInfo)(nil),                // 25: edgemesh.JobInfo
+	(*JobStatus)(nil),              // 26: edgemesh.JobStatus
+	(*TaskStatus)(nil),             // 27: edgemesh.TaskStatus
+	(*TaskRequest)(nil),            // 28: edgemesh.TaskRequest
+	(*TaskResult)(nil),             // 29: edgemesh.TaskResult
+	(*WebRTCConfig)(nil),           // 30: edgemesh.WebRTCConfig
+	(*WebRTCOffer)(nil),            // 31: edgemesh.WebRTCOffer
+	(*WebRTCAnswer)(nil),           // 32: edgemesh.WebRTCAnswer
+	(*WebRTCStop)(nil),             // 33: edgemesh.WebRTCStop
+	(*PlanPreviewRequest)(nil),     // 34: edgemesh.PlanPreviewRequest
+	(*PlanPreviewResponse)(nil),    // 35: edgemesh.PlanPreviewResponse
+	(*PlanCostRequest)(nil),        // 36: edgemesh.PlanCostRequest
+	(*PlanCostResponse)(nil),       // 37: edgemesh.PlanCostResponse
+	(*DeviceCostEstimate)(nil),     // 38: edgemesh.DeviceCostEstimate
+	(*StepCostEstimate)(nil),       // 39: edgemesh.StepCostEstimate
+	(*DownloadTicketRequest)(nil),  // 40: edgemesh.DownloadTicketRequest
+	(*DownloadTicketResponse)(nil), // 41: edgemesh.DownloadTicketResponse
+	(*ReadFileRequest)(nil),        // 42: edgemesh.ReadFileRequest
+	(*ReadFileResponse)(nil),       // 43: edgemesh.ReadFileResponse
 }
 var file_orchestrator_proto_depIdxs = []int32{
-	7,  // 0: edgemesh.ListDevicesResponse.devices:type_name -> edgemesh.DeviceInfo
-	0,  // 1: edgemesh.RoutingPolicy.mode:type_name -> edgemesh.RoutingPolicy.Mode
-	15, // 2: edgemesh.RoutedCommandRequest.policy:type_name -> edgemesh.RoutingPolicy
-	5,  // 3: edgemesh.RoutedCommandResponse.output:type_name -> edgemesh.CommandResponse
-	20, // 4: edgemesh.JobRequest.plan:type_name -> edgemesh.Plan
-	23, // 5: edgemesh.JobRequest.reduce:type_name -> edgemesh.ReduceSpec
-	21, // 6: edgemesh.Plan.groups:type_name -> edgemesh.TaskGroup
-	22, // 7: edgemesh.TaskGroup.tasks:type_name -> edgemesh.TaskSpec
-	26, // 8: edgemesh.JobStatus.tasks:type_name -> edgemesh.TaskStatus
-	20, // 9: edgemesh.PlanPreviewResponse.plan:type_name -> edgemesh.Plan
-	23, // 10: edgemesh.PlanPreviewResponse.reduce:type_name -> edgemesh.ReduceSpec
-	20, // 11: edgemesh.PlanCostRequest.plan:type_name -> edgemesh.Plan
-	37, // 12: edgemesh.PlanCostResponse.device_costs:type_name -> edgemesh.DeviceCostEstimate
-	38, // 13: edgemesh.DeviceCostEstimate.step_costs:type_name -> edgemesh.StepCostEstimate
-	2,  // 14: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
-	3,  // 15: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
-	4,  // 16: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
-	7,  // 17: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
-	10, // 18: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
-	6,  // 19: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
-	12, // 20: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
-	1,  // 21: edgemesh.OrchestratorService.HealthCheck:input_type -> edgemesh.Empty
-	16, // 22: edgemesh.OrchestratorService.ExecuteRoutedCommand:input_type -> edgemesh.RoutedCommandRequest
-	19, // 23: edgemesh.OrchestratorService.SubmitJob:input_type -> edgemesh.JobRequest
-	18, // 24: edgemesh.OrchestratorService.GetJob:input_type -> edgemesh.JobId
-	27, // 25: edgemesh.OrchestratorService.RunTask:input_type -> edgemesh.TaskRequest
-	33, // 26: edgemesh.OrchestratorService.PreviewPlan:input_type -> edgemesh.PlanPreviewRequest
-	35, // 27: edgemesh.OrchestratorService.PreviewPlanCost:input_type -> edgemesh.PlanCostRequest
-	29, // 28: edgemesh.OrchestratorService.StartWebRTC:input_type -> edgemesh.WebRTCConfig
-	31, // 29: edgemesh.OrchestratorService.CompleteWebRTC:input_type -> edgemesh.WebRTCAnswer
-	32, // 30: edgemesh.OrchestratorService.StopWebRTC:input_type -> edgemesh.WebRTCStop
-	39, // 31: edgemesh.OrchestratorService.CreateDownloadTicket:input_type -> edgemesh.DownloadTicketRequest
-	3,  // 32: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
-	1,  // 33: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
-	5,  // 34: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
-	8,  // 35: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
-	11, // 36: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
-	9,  // 37: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
-	13, // 38: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
-	14, // 39: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
-	17, // 40: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
-	24, // 41: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
-	25, // 42: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
-	28, // 43: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
-	34, // 44: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
-	36, // 45: edgemesh.OrchestratorService.PreviewPlanCost:output_type -> edgemesh.PlanCostResponse
-	30, // 46: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
-	1,  // 47: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
-	1,  // 48: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
-	40, // 49: edgemesh.OrchestratorService.CreateDownloadTicket:output_type -> edgemesh.DownloadTicketResponse
-	32, // [32:50] is the sub-list for method output_type
-	14, // [14:32] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	8,  // 0: edgemesh.ListDevicesResponse.devices:type_name -> edgemesh.DeviceInfo
+	1,  // 1: edgemesh.RoutingPolicy.mode:type_name -> edgemesh.RoutingPolicy.Mode
+	16, // 2: edgemesh.RoutedCommandRequest.policy:type_name -> edgemesh.RoutingPolicy
+	6,  // 3: edgemesh.RoutedCommandResponse.output:type_name -> edgemesh.CommandResponse
+	21, // 4: edgemesh.JobRequest.plan:type_name -> edgemesh.Plan
+	24, // 5: edgemesh.JobRequest.reduce:type_name -> edgemesh.ReduceSpec
+	22, // 6: edgemesh.Plan.groups:type_name -> edgemesh.TaskGroup
+	23, // 7: edgemesh.TaskGroup.tasks:type_name -> edgemesh.TaskSpec
+	27, // 8: edgemesh.JobStatus.tasks:type_name -> edgemesh.TaskStatus
+	21, // 9: edgemesh.PlanPreviewResponse.plan:type_name -> edgemesh.Plan
+	24, // 10: edgemesh.PlanPreviewResponse.reduce:type_name -> edgemesh.ReduceSpec
+	21, // 11: edgemesh.PlanCostRequest.plan:type_name -> edgemesh.Plan
+	38, // 12: edgemesh.PlanCostResponse.device_costs:type_name -> edgemesh.DeviceCostEstimate
+	39, // 13: edgemesh.DeviceCostEstimate.step_costs:type_name -> edgemesh.StepCostEstimate
+	0,  // 14: edgemesh.ReadFileRequest.mode:type_name -> edgemesh.ReadMode
+	3,  // 15: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
+	4,  // 16: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
+	5,  // 17: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
+	8,  // 18: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
+	11, // 19: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
+	7,  // 20: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
+	13, // 21: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
+	2,  // 22: edgemesh.OrchestratorService.HealthCheck:input_type -> edgemesh.Empty
+	17, // 23: edgemesh.OrchestratorService.ExecuteRoutedCommand:input_type -> edgemesh.RoutedCommandRequest
+	20, // 24: edgemesh.OrchestratorService.SubmitJob:input_type -> edgemesh.JobRequest
+	19, // 25: edgemesh.OrchestratorService.GetJob:input_type -> edgemesh.JobId
+	28, // 26: edgemesh.OrchestratorService.RunTask:input_type -> edgemesh.TaskRequest
+	34, // 27: edgemesh.OrchestratorService.PreviewPlan:input_type -> edgemesh.PlanPreviewRequest
+	36, // 28: edgemesh.OrchestratorService.PreviewPlanCost:input_type -> edgemesh.PlanCostRequest
+	30, // 29: edgemesh.OrchestratorService.StartWebRTC:input_type -> edgemesh.WebRTCConfig
+	32, // 30: edgemesh.OrchestratorService.CompleteWebRTC:input_type -> edgemesh.WebRTCAnswer
+	33, // 31: edgemesh.OrchestratorService.StopWebRTC:input_type -> edgemesh.WebRTCStop
+	40, // 32: edgemesh.OrchestratorService.CreateDownloadTicket:input_type -> edgemesh.DownloadTicketRequest
+	42, // 33: edgemesh.OrchestratorService.ReadFile:input_type -> edgemesh.ReadFileRequest
+	4,  // 34: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
+	2,  // 35: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
+	6,  // 36: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
+	9,  // 37: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
+	12, // 38: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
+	10, // 39: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
+	14, // 40: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
+	15, // 41: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
+	18, // 42: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
+	25, // 43: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
+	26, // 44: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
+	29, // 45: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
+	35, // 46: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
+	37, // 47: edgemesh.OrchestratorService.PreviewPlanCost:output_type -> edgemesh.PlanCostResponse
+	31, // 48: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
+	2,  // 49: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
+	2,  // 50: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
+	41, // 51: edgemesh.OrchestratorService.CreateDownloadTicket:output_type -> edgemesh.DownloadTicketResponse
+	43, // 52: edgemesh.OrchestratorService.ReadFile:output_type -> edgemesh.ReadFileResponse
+	34, // [34:53] is the sub-list for method output_type
+	15, // [15:34] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_orchestrator_proto_init() }
@@ -2981,8 +3238,8 @@ func file_orchestrator_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orchestrator_proto_rawDesc), len(file_orchestrator_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   40,
+			NumEnums:      2,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -969,6 +969,249 @@ func (s *OrchestratorServer) CreateDownloadTicket(ctx context.Context, req *pb.D
 	}, nil
 }
 
+// ReadFile reads a file from local or remote device (for LLM tool calling)
+func (s *OrchestratorServer) ReadFile(ctx context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+	// Verify session
+	s.mu.RLock()
+	_, exists := s.sessions[req.SessionId]
+	s.mu.RUnlock()
+
+	if !exists {
+		log.Printf("[ERROR] ReadFile: session not found: %s", req.SessionId)
+		return nil, status.Error(codes.Unauthenticated, "session not found")
+	}
+
+	// If device_id specified and not self, forward to remote device
+	if req.DeviceId != "" && req.DeviceId != s.selfDeviceID {
+		return s.forwardReadFile(ctx, req)
+	}
+
+	// Read local file
+	return s.readLocalFile(ctx, req)
+}
+
+// readLocalFile reads a file from the local filesystem
+func (s *OrchestratorServer) readLocalFile(ctx context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+	path := req.Path
+	if path == "" {
+		return &pb.ReadFileResponse{Error: "path is required"}, nil
+	}
+
+	// Validate no path traversal
+	if strings.Contains(path, "..") {
+		return &pb.ReadFileResponse{Error: "path must not contain '..'"}, nil
+	}
+
+	// Resolve path: absolute paths used directly, relative under sharedRoot
+	var fullPath string
+	if filepath.IsAbs(path) {
+		fullPath = filepath.Clean(path)
+	} else {
+		cleaned := filepath.Clean(path)
+		fullPath = filepath.Join(s.sharedRoot, cleaned)
+	}
+
+	// Open file
+	f, err := os.Open(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &pb.ReadFileResponse{Error: fmt.Sprintf("file not found: %s", fullPath)}, nil
+		}
+		return &pb.ReadFileResponse{Error: fmt.Sprintf("open error: %v", err)}, nil
+	}
+	defer f.Close()
+
+	// Get file info
+	info, err := f.Stat()
+	if err != nil {
+		return &pb.ReadFileResponse{Error: fmt.Sprintf("stat error: %v", err)}, nil
+	}
+	if !info.Mode().IsRegular() {
+		return &pb.ReadFileResponse{Error: "path is not a regular file"}, nil
+	}
+
+	fileSize := info.Size()
+
+	// Determine max bytes (default 64KB, max 10MB)
+	maxBytes := int64(65536)
+	if req.MaxBytes > 0 {
+		maxBytes = int64(req.MaxBytes)
+	}
+	if maxBytes > 10*1024*1024 {
+		maxBytes = 10 * 1024 * 1024
+	}
+
+	var content []byte
+	var truncated bool
+
+	switch req.Mode {
+	case pb.ReadMode_READ_MODE_HEAD, pb.ReadMode_READ_MODE_FULL:
+		// Read from beginning
+		toRead := fileSize
+		if toRead > maxBytes {
+			toRead = maxBytes
+			truncated = true
+		}
+		content = make([]byte, toRead)
+		n, err := f.Read(content)
+		if err != nil && err != io.EOF {
+			return &pb.ReadFileResponse{Error: fmt.Sprintf("read error: %v", err)}, nil
+		}
+		content = content[:n]
+
+	case pb.ReadMode_READ_MODE_TAIL:
+		// Read from end
+		toRead := fileSize
+		if toRead > maxBytes {
+			toRead = maxBytes
+			truncated = true
+		}
+		offset := fileSize - toRead
+		if offset < 0 {
+			offset = 0
+		}
+		if _, err := f.Seek(offset, 0); err != nil {
+			return &pb.ReadFileResponse{Error: fmt.Sprintf("seek error: %v", err)}, nil
+		}
+		content = make([]byte, toRead)
+		n, err := f.Read(content)
+		if err != nil && err != io.EOF {
+			return &pb.ReadFileResponse{Error: fmt.Sprintf("read error: %v", err)}, nil
+		}
+		content = content[:n]
+
+	case pb.ReadMode_READ_MODE_RANGE:
+		// Read specific range
+		offset := req.Offset
+		length := req.Length
+		if length <= 0 {
+			length = maxBytes
+		}
+		if length > maxBytes {
+			length = maxBytes
+			truncated = true
+		}
+		if offset >= fileSize {
+			return &pb.ReadFileResponse{
+				SizeBytes:     fileSize,
+				BytesReturned: 0,
+				Error:         "offset beyond file end",
+			}, nil
+		}
+		if _, err := f.Seek(offset, 0); err != nil {
+			return &pb.ReadFileResponse{Error: fmt.Sprintf("seek error: %v", err)}, nil
+		}
+		content = make([]byte, length)
+		n, err := f.Read(content)
+		if err != nil && err != io.EOF {
+			return &pb.ReadFileResponse{Error: fmt.Sprintf("read error: %v", err)}, nil
+		}
+		content = content[:n]
+
+	default:
+		// Default to full read
+		toRead := fileSize
+		if toRead > maxBytes {
+			toRead = maxBytes
+			truncated = true
+		}
+		content = make([]byte, toRead)
+		n, err := f.Read(content)
+		if err != nil && err != io.EOF {
+			return &pb.ReadFileResponse{Error: fmt.Sprintf("read error: %v", err)}, nil
+		}
+		content = content[:n]
+	}
+
+	// Generate preview (first ~2KB if text-like)
+	preview := ""
+	if len(content) > 0 && isTextLike(content) {
+		previewLen := 2048
+		if len(content) < previewLen {
+			previewLen = len(content)
+		}
+		preview = string(content[:previewLen])
+	}
+
+	log.Printf("[INFO] ReadFile: path=%s mode=%v size=%d returned=%d truncated=%v",
+		fullPath, req.Mode, fileSize, len(content), truncated)
+
+	return &pb.ReadFileResponse{
+		Content:        content,
+		SizeBytes:      fileSize,
+		BytesReturned:  int64(len(content)),
+		Truncated:      truncated,
+		ContentPreview: preview,
+	}, nil
+}
+
+// forwardReadFile forwards a ReadFile request to a remote device
+func (s *OrchestratorServer) forwardReadFile(ctx context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+	// Find device in registry
+	devices := s.registry.List()
+	var targetDevice *pb.DeviceInfo
+	for _, d := range devices {
+		if d.DeviceId == req.DeviceId {
+			targetDevice = d
+			break
+		}
+	}
+	if targetDevice == nil {
+		return &pb.ReadFileResponse{Error: fmt.Sprintf("device not found: %s", req.DeviceId)}, nil
+	}
+
+	// Dial remote device
+	dialCtx, cancel := context.WithTimeout(ctx, remoteDialTimeout)
+	defer cancel()
+
+	conn, err := grpc.DialContext(dialCtx, targetDevice.GrpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return &pb.ReadFileResponse{Error: fmt.Sprintf("failed to connect to device %s: %v", req.DeviceId, err)}, nil
+	}
+	defer conn.Close()
+
+	client := pb.NewOrchestratorServiceClient(conn)
+
+	// Create session on remote
+	sessionResp, err := client.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "coordinator-readfile",
+		SecurityKey: "internal-routing",
+	})
+	if err != nil {
+		return &pb.ReadFileResponse{Error: fmt.Sprintf("failed to create session on remote: %v", err)}, nil
+	}
+
+	// Forward request with remote session
+	remoteReq := *req
+	remoteReq.SessionId = sessionResp.SessionId
+	remoteReq.DeviceId = "" // Clear device_id so remote reads locally
+
+	return client.ReadFile(ctx, &remoteReq)
+}
+
+// isTextLike checks if content appears to be text (no null bytes, mostly printable)
+func isTextLike(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	// Check first 512 bytes
+	checkLen := 512
+	if len(data) < checkLen {
+		checkLen = len(data)
+	}
+	for i := 0; i < checkLen; i++ {
+		b := data[i]
+		// Null byte = binary
+		if b == 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // handleBulkDownload serves file bytes for a valid, unexpired token
 func (s *OrchestratorServer) handleBulkDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

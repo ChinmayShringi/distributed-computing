@@ -37,6 +37,7 @@ const (
 	OrchestratorService_CompleteWebRTC_FullMethodName       = "/edgemesh.OrchestratorService/CompleteWebRTC"
 	OrchestratorService_StopWebRTC_FullMethodName           = "/edgemesh.OrchestratorService/StopWebRTC"
 	OrchestratorService_CreateDownloadTicket_FullMethodName = "/edgemesh.OrchestratorService/CreateDownloadTicket"
+	OrchestratorService_ReadFile_FullMethodName             = "/edgemesh.OrchestratorService/ReadFile"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -72,6 +73,8 @@ type OrchestratorServiceClient interface {
 	StopWebRTC(ctx context.Context, in *WebRTCStop, opts ...grpc.CallOption) (*Empty, error)
 	// File download ticket
 	CreateDownloadTicket(ctx context.Context, in *DownloadTicketRequest, opts ...grpc.CallOption) (*DownloadTicketResponse, error)
+	// File reading (for LLM tool calling)
+	ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (*ReadFileResponse, error)
 }
 
 type orchestratorServiceClient struct {
@@ -262,6 +265,16 @@ func (c *orchestratorServiceClient) CreateDownloadTicket(ctx context.Context, in
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (*ReadFileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReadFileResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_ReadFile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -295,6 +308,8 @@ type OrchestratorServiceServer interface {
 	StopWebRTC(context.Context, *WebRTCStop) (*Empty, error)
 	// File download ticket
 	CreateDownloadTicket(context.Context, *DownloadTicketRequest) (*DownloadTicketResponse, error)
+	// File reading (for LLM tool calling)
+	ReadFile(context.Context, *ReadFileRequest) (*ReadFileResponse, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -358,6 +373,9 @@ func (UnimplementedOrchestratorServiceServer) StopWebRTC(context.Context, *WebRT
 }
 func (UnimplementedOrchestratorServiceServer) CreateDownloadTicket(context.Context, *DownloadTicketRequest) (*DownloadTicketResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateDownloadTicket not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) ReadFile(context.Context, *ReadFileRequest) (*ReadFileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReadFile not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -704,6 +722,24 @@ func _OrchestratorService_CreateDownloadTicket_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_ReadFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadFileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).ReadFile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_ReadFile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).ReadFile(ctx, req.(*ReadFileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -782,6 +818,10 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateDownloadTicket",
 			Handler:    _OrchestratorService_CreateDownloadTicket_Handler,
+		},
+		{
+			MethodName: "ReadFile",
+			Handler:    _OrchestratorService_ReadFile_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
