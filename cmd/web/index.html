@@ -599,12 +599,36 @@ Try:
                     throw new Error(data.error || 'Assistant error');
                 }
 
+                let metaHtml = '';
+                if (data.mode) {
+                    metaHtml += `<div style="font-size:0.8rem;color:#888;margin-top:4px;">Mode: ${escapeHtml(data.mode)}`;
+                    if (data.job_id) metaHtml += ` | Job: ${escapeHtml(data.job_id.substring(0, 12))}...`;
+                    metaHtml += `</div>`;
+                }
+
+                let planHtml = '';
+                if (data.plan) {
+                    planHtml = `<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:0.85rem;color:#555;">Plan JSON</summary><pre style="font-size:0.8rem;max-height:200px;overflow:auto;margin-top:4px;">${escapeHtml(JSON.stringify(data.plan, null, 2))}</pre></details>`;
+                }
+
                 log.innerHTML += `
                     <div class="chat-message">
                         <span class="chat-assistant">Assistant:</span>
                         <div class="chat-content">${escapeHtml(data.reply)}</div>
+                        ${metaHtml}
+                        ${planHtml}
                     </div>
                 `;
+
+                // Auto-populate job polling if we got a job_id
+                if (data.job_id) {
+                    currentJobId = data.job_id;
+                    document.getElementById('job-id').textContent = data.job_id.substring(0, 12) + '...';
+                    document.getElementById('job-state').textContent = 'SUBMITTED';
+                    document.getElementById('job-output').textContent = 'Submitted via assistant';
+                    document.getElementById('job-status').classList.remove('hidden');
+                    pollJobStatus();
+                }
             } catch (err) {
                 log.innerHTML += `
                     <div class="chat-message">

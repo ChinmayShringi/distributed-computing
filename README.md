@@ -707,6 +707,36 @@ To download artifacts from an existing job on any platform:
 python scripts/qaihub_download_job.py --job jXXXXXXXX --out ./artifacts/qaihub/jXXXXXXXX/
 ```
 
+## Local SLM Agent (OpenAI-compatible)
+
+The web gateway can use any local model server that exposes an OpenAI-compatible
+`/v1/chat/completions` endpoint (e.g., LM Studio, Ollama, vLLM) to generate
+execution plans from natural language.
+
+### Configuration
+
+Set these env vars before starting the web server:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `disabled` | `openai_compat` to enable |
+| `LLM_BASE_URL` | `http://127.0.0.1:1234` | Model server URL |
+| `LLM_API_KEY` | (empty) | Optional API key |
+| `LLM_MODEL` | (empty) | Model name (server default if empty) |
+| `LLM_TIMEOUT_SECONDS` | `20` | Request timeout |
+| `LLM_MAX_TOKENS` | `900` | Max response tokens |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature |
+
+### Usage
+
+```bash
+LLM_PROVIDER=openai_compat LLM_BASE_URL=http://10.20.38.80:1234 make web
+```
+
+Then use the Assistant in the web UI — it will generate plans via the model.
+If the model server is down or returns invalid JSON, the system falls back
+to the deterministic planner automatically.
+
 ## Development
 
 ```bash
@@ -755,6 +785,10 @@ edgecli/
 │   ├── elevate/           # Privilege elevation
 │   ├── exec/              # Command execution
 │   ├── jobs/              # Job/task state machine with group execution
+│   ├── llm/               # Swappable LLM provider (OpenAI-compatible)
+│   │   ├── provider.go       # Interface + factory
+│   │   ├── openai_compat.go  # OpenAI-compatible HTTP provider
+│   │   └── plan_parse.go     # Plan JSON parsing + validation
 │   ├── mode/              # Safe/dangerous mode
 │   ├── osdetect/          # Platform detection
 │   ├── redact/            # Secret redaction

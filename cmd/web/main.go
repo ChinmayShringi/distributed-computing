@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/edgecli/edgecli/internal/llm"
 	pb "github.com/edgecli/edgecli/proto"
 )
 
@@ -34,6 +35,7 @@ type WebServer struct {
 	grpcClient pb.OrchestratorServiceClient
 	grpcConn   *grpc.ClientConn
 	devKey     string
+	llm        llm.Provider // nil if disabled
 }
 
 // DeviceResponse is the JSON response for /api/devices
@@ -77,6 +79,9 @@ type AssistantRequest struct {
 type AssistantResponse struct {
 	Reply string      `json:"reply"`
 	Raw   interface{} `json:"raw,omitempty"`
+	Mode  string      `json:"mode,omitempty"`  // "llm", "fallback", or ""
+	JobID string      `json:"job_id,omitempty"`
+	Plan  interface{} `json:"plan,omitempty"`  // plan JSON for debug
 }
 
 // ErrorResponse is the JSON error response
@@ -211,10 +216,22 @@ func main() {
 
 	client := pb.NewOrchestratorServiceClient(conn)
 
+	// Initialize LLM provider (optional)
+	llmProvider, err := llm.NewFromEnv()
+	if err != nil {
+		log.Fatalf("[FATAL] LLM provider init failed: %v", err)
+	}
+	if llmProvider != nil {
+		log.Printf("[INFO] LLM provider: %s", llmProvider.Name())
+	} else {
+		log.Printf("[INFO] LLM provider: disabled")
+	}
+
 	server := &WebServer{
 		grpcClient: client,
 		grpcConn:   conn,
 		devKey:     devKey,
+		llm:        llmProvider,
 	}
 
 	// Setup routes
@@ -397,6 +414,9 @@ func (s *WebServer) handleAssistant(w http.ResponseWriter, r *http.Request) {
 
 	var reply string
 	var raw interface{}
+	var mode string
+	var jobID string
+	var planDebug interface{}
 
 	switch {
 	case strings.Contains(text, "list devices") || strings.Contains(text, "show devices") || strings.Contains(text, "devices"):
@@ -447,18 +467,15 @@ func (s *WebServer) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		}
 
 	default:
-		reply = "I can help you run commands on your devices.\n\n" +
-			"Try:\n" +
-			"- 'list devices' - show all registered devices\n" +
-			"- 'pwd' - print working directory\n" +
-			"- 'ls' - list files\n" +
-			"- 'cat ./shared/<file>' - show file contents\n\n" +
-			"For more control, use the Routed Command section above."
+		reply, mode, jobID, planDebug = s.handleAssistantDefault(ctx, req.Text)
 	}
 
 	s.writeJSON(w, http.StatusOK, AssistantResponse{
 		Reply: reply,
 		Raw:   raw,
+		Mode:  mode,
+		JobID: jobID,
+		Plan:  planDebug,
 	})
 }
 
@@ -501,6 +518,97 @@ func (s *WebServer) executeAssistantCommand(ctx context.Context, cmd string, arg
 	}
 
 	return sb.String(), cmdResp
+}
+
+// handleAssistantDefault handles the default case in the assistant: tries LLM plan, falls back to deterministic.
+func (s *WebServer) handleAssistantDefault(ctx context.Context, userText string) (reply, mode, jobID string, planDebug interface{}) {
+	// Fetch device list for LLM context
+	devicesResp, err := s.grpcClient.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		return fmt.Sprintf("Error listing devices: %v", err), "", "", nil
+	}
+	if len(devicesResp.Devices) == 0 {
+		return "No devices registered. Register a device first.", "", "", nil
+	}
+
+	// Try LLM plan generation
+	if s.llm != nil {
+		// Build compact devices JSON
+		type deviceCompact struct {
+			DeviceID string `json:"device_id"`
+			Name     string `json:"name"`
+			HasNPU   bool   `json:"has_npu"`
+			HasGPU   bool   `json:"has_gpu"`
+			HasCPU   bool   `json:"has_cpu"`
+		}
+		devList := make([]deviceCompact, len(devicesResp.Devices))
+		for i, d := range devicesResp.Devices {
+			devList[i] = deviceCompact{
+				DeviceID: d.DeviceId,
+				Name:     d.DeviceName,
+				HasNPU:   d.HasNpu,
+				HasGPU:   d.HasGpu,
+				HasCPU:   d.HasCpu,
+			}
+		}
+		devJSON, _ := json.MarshalIndent(devList, "", "  ")
+
+		planRaw, err := s.llm.Plan(ctx, userText, string(devJSON))
+		if err != nil {
+			log.Printf("[WARN] LLM plan generation failed: %v — falling back", err)
+		} else {
+			plan, reduce, err := llm.ParsePlanJSON(planRaw)
+			if err != nil {
+				log.Printf("[WARN] LLM plan validation failed: %v — falling back", err)
+			} else {
+				// Create session and submit job with explicit plan
+				sessionResp, err := s.grpcClient.CreateSession(ctx, &pb.AuthRequest{
+					DeviceName:  "web-ui-assistant",
+					SecurityKey: s.devKey,
+				})
+				if err != nil {
+					return fmt.Sprintf("Session error: %v", err), "", "", nil
+				}
+
+				jobResp, err := s.grpcClient.SubmitJob(ctx, &pb.JobRequest{
+					SessionId: sessionResp.SessionId,
+					Text:      userText,
+					Plan:      plan,
+					Reduce:    reduce,
+				})
+				if err != nil {
+					log.Printf("[WARN] LLM plan submit failed: %v — falling back", err)
+				} else {
+					// Parse planRaw for debug display
+					var planJSON interface{}
+					json.Unmarshal([]byte(planRaw), &planJSON)
+
+					return fmt.Sprintf("Job submitted via LLM planner.\nJob ID: %s", jobResp.JobId),
+						"llm", jobResp.JobId, planJSON
+				}
+			}
+		}
+	}
+
+	// Fallback: submit job without explicit plan (server uses deterministic)
+	sessionResp, err := s.grpcClient.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "web-ui-assistant",
+		SecurityKey: s.devKey,
+	})
+	if err != nil {
+		return fmt.Sprintf("Session error: %v", err), "", "", nil
+	}
+
+	jobResp, err := s.grpcClient.SubmitJob(ctx, &pb.JobRequest{
+		SessionId: sessionResp.SessionId,
+		Text:      userText,
+	})
+	if err != nil {
+		return fmt.Sprintf("Job submission error: %v", err), "", "", nil
+	}
+
+	return fmt.Sprintf("Job submitted via fallback planner.\nJob ID: %s", jobResp.JobId),
+		"fallback", jobResp.JobId, nil
 }
 
 // handleSubmitJob submits a distributed job to all devices
