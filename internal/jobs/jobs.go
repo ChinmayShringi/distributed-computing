@@ -2,6 +2,7 @@
 package jobs
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -76,8 +77,8 @@ func NewManager() *Manager {
 }
 
 // CreateJob creates a new job with tasks distributed across devices
-// If no plan provided, auto-generates a default plan with one SYSINFO task per device
-func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int, plan *pb.Plan, reduce *pb.ReduceSpec) (*Job, error) {
+// If no plan provided, auto-generates a smart plan based on userText
+func (m *Manager) CreateJob(userText string, devices []*pb.DeviceInfo, maxWorkers int, plan *pb.Plan, reduce *pb.ReduceSpec) (*Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -110,9 +111,13 @@ func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int, plan *pb.P
 		deviceMap[d.DeviceId] = d
 	}
 
-	// If no plan provided, generate default plan
+	// If no plan provided, generate smart plan based on user request
 	if plan == nil || len(plan.Groups) == 0 {
-		plan = m.GenerateDefaultPlan(selectedDevices)
+		if userText != "" {
+			plan = m.GenerateSmartPlan(userText, selectedDevices)
+		} else {
+			plan = m.GenerateDefaultPlan(selectedDevices)
+		}
 	}
 
 	job.TotalGroups = len(plan.Groups)
@@ -180,6 +185,84 @@ func (m *Manager) GenerateDefaultPlan(devices []*pb.DeviceInfo) *pb.Plan {
 			{Index: 0, Tasks: tasks},
 		},
 	}
+}
+
+// GenerateSmartPlan analyzes the user's request and creates an intelligent plan.
+// For LLM-related requests (summarize, chat, code), it creates LLM_GENERATE tasks.
+// For status/info requests, it creates SYSINFO tasks.
+func (m *Manager) GenerateSmartPlan(userText string, devices []*pb.DeviceInfo) *pb.Plan {
+	textLower := strings.ToLower(userText)
+
+	// Detect if this is an LLM task
+	isLLMTask := strings.Contains(textLower, "summarize") ||
+		strings.Contains(textLower, "generate") ||
+		strings.Contains(textLower, "write") ||
+		strings.Contains(textLower, "create") ||
+		strings.Contains(textLower, "code") ||
+		strings.Contains(textLower, "explain") ||
+		strings.Contains(textLower, "chat") ||
+		strings.Contains(textLower, "answer") ||
+		strings.Contains(textLower, "translate") ||
+		strings.Contains(textLower, "image")
+
+	if isLLMTask {
+		// Create LLM_GENERATE task routed to best device (NPU > GPU > CPU)
+		var bestDevice *pb.DeviceInfo
+		for _, d := range devices {
+			if d.HasNpu {
+				bestDevice = d
+				break
+			}
+		}
+		if bestDevice == nil {
+			for _, d := range devices {
+				if d.HasGpu {
+					bestDevice = d
+					break
+				}
+			}
+		}
+		if bestDevice == nil && len(devices) > 0 {
+			bestDevice = devices[0]
+		}
+
+		// Estimate tokens (rough: 4 chars per token)
+		promptTokens := int32(len(userText) / 4)
+		if promptTokens < 10 {
+			promptTokens = 10
+		}
+
+		// Output tokens based on task type
+		maxOutput := int32(300) // default
+		if strings.Contains(textLower, "summarize") {
+			maxOutput = 200
+		} else if strings.Contains(textLower, "code") || strings.Contains(textLower, "write") {
+			maxOutput = 500
+		} else if strings.Contains(textLower, "image") {
+			maxOutput = 100 // just a description
+		}
+
+		task := &pb.TaskSpec{
+			TaskId:          uuid.New().String(),
+			Kind:            "LLM_GENERATE",
+			Input:           userText,
+			TargetDeviceId:  "",
+			PromptTokens:    promptTokens,
+			MaxOutputTokens: maxOutput,
+		}
+		if bestDevice != nil {
+			task.TargetDeviceId = bestDevice.DeviceId
+		}
+
+		return &pb.Plan{
+			Groups: []*pb.TaskGroup{
+				{Index: 0, Tasks: []*pb.TaskSpec{task}},
+			},
+		}
+	}
+
+	// Fall back to SYSINFO for status/info requests
+	return m.GenerateDefaultPlan(devices)
 }
 
 // Get retrieves a job by ID

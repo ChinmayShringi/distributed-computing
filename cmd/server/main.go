@@ -825,8 +825,8 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 		}
 	}
 
-	// Create job with tasks (plan and reduce will use defaults if nil)
-	job, err := s.jobManager.CreateJob(devices, int(req.MaxWorkers), plan, reduce)
+	// Create job with tasks (plan and reduce will use smart defaults if nil)
+	job, err := s.jobManager.CreateJob(req.Text, devices, int(req.MaxWorkers), plan, reduce)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create job: %v", err)
 	}
@@ -1052,12 +1052,22 @@ func (s *OrchestratorServer) PreviewPlan(ctx context.Context, req *pb.PlanPrevie
 		}
 	}
 
-	// Fall back to default plan
+	// Fall back to smart plan based on user text
 	if plan == nil {
-		plan = s.jobManager.GenerateDefaultPlan(selectedDevices)
+		plan = s.jobManager.GenerateSmartPlan(req.Text, selectedDevices)
 		reduce = &pb.ReduceSpec{Kind: "CONCAT"}
 		notes = "Brain not available (non-Windows or disabled)"
-		rationale = fmt.Sprintf("Default: 1 SYSINFO per device, %d of %d devices selected", len(selectedDevices), len(devices))
+		
+		// Determine rationale based on what kind of plan was generated
+		isLLMTask := false
+		if len(plan.Groups) > 0 && len(plan.Groups[0].Tasks) > 0 {
+			isLLMTask = plan.Groups[0].Tasks[0].Kind == "LLM_GENERATE"
+		}
+		if isLLMTask {
+			rationale = fmt.Sprintf("Smart: detected LLM request, routing to best NPU device")
+		} else {
+			rationale = fmt.Sprintf("Default: 1 SYSINFO per device, %d of %d devices selected", len(selectedDevices), len(devices))
+		}
 	}
 
 	return &pb.PlanPreviewResponse{
