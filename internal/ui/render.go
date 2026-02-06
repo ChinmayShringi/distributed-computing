@@ -38,10 +38,10 @@ func RenderHeader(appName, version, user, serverURL, workspace string) string {
 	// Empty line
 	sb.WriteString(formatCenteredLine("", width))
 
-	// ASCII art logo
-	sb.WriteString(formatCenteredLine(Color(Magenta, "* ▐▛███▜▌ *"), width))
-	sb.WriteString(formatCenteredLine(Color(Magenta, "* ▝▜█████▛▘ *"), width))
-	sb.WriteString(formatCenteredLine(Color(Magenta, "*  ▘▘ ▝▝  *"), width))
+	sb.WriteString(formatCenteredLine(Color(Magenta, "  ▞▛███▜▚  "), width))
+	sb.WriteString(formatCenteredLine(Color(Magenta, " ▟▛█████▜▙ "), width))
+	sb.WriteString(formatCenteredLine(Color(Magenta, " ▖▘  ▐▌  ▝▗ "), width))
+	sb.WriteString(formatCenteredLine(Color(Magenta, " ▝▗       ▖▘ "), width))
 
 	// Empty line
 	sb.WriteString(formatCenteredLine("", width))

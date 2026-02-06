@@ -1271,9 +1271,7 @@ Try:
         // ===== Local Chat Runtime Functions =====
 
         // Conversation history for the SLM chat
-        let slmChatMessages = [];
-
-        // Refresh chat health status
+        // Refresh chat health status (uses agent endpoint for tool calling)
         async function refreshChatHealth() {
             const btn = document.getElementById('chat-health-btn');
             const status = document.getElementById('chat-health-status');
@@ -1282,14 +1280,14 @@ Try:
             btn.textContent = 'Checking...';
 
             try {
-                const response = await fetch('/api/chat/health');
+                const response = await fetch('/api/agent/health');
                 const data = await response.json();
 
                 let statusHtml = '';
                 if (data.ok) {
-                    statusHtml += '<span style="color: #34C759;">&#10004; Runtime available</span>';
+                    statusHtml += '<span style="color: #34C759;">&#10004; Agent available (with tools)</span>';
                 } else {
-                    statusHtml += '<span style="color: #FF3B30;">&#10008; Runtime unavailable</span>';
+                    statusHtml += '<span style="color: #FF3B30;">&#10008; Agent unavailable</span>';
                 }
 
                 statusHtml += `<br><span style="font-size: 0.85rem; color: #666;">Provider: ${escapeHtml(data.provider || 'none')}`;
@@ -1314,7 +1312,7 @@ Try:
             }
         }
 
-        // Send SLM chat message
+        // Send chat message via agent endpoint (with tool calling)
         async function sendSlmChat() {
             const btn = document.getElementById('slm-send-btn');
             const input = document.getElementById('slm-chat-input');
@@ -1323,9 +1321,6 @@ Try:
 
             const text = input.value.trim();
             if (!text) return;
-
-            // Add user message to history
-            slmChatMessages.push({ role: 'user', content: text });
 
             // Add user message to UI
             log.innerHTML += `
@@ -1337,14 +1332,14 @@ Try:
 
             input.value = '';
             btn.disabled = true;
-            btn.textContent = '...';
+            btn.textContent = 'Thinking...';
             error.classList.add('hidden');
 
             try {
-                const response = await fetch('/api/chat', {
+                const response = await fetch('/api/agent', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ messages: slmChatMessages })
+                    body: JSON.stringify({ message: text })
                 });
 
                 const data = await response.json();
@@ -1353,21 +1348,24 @@ Try:
                     throw new Error(data.error || 'Chat failed');
                 }
 
-                // Add assistant message to history
-                slmChatMessages.push({ role: 'assistant', content: data.reply });
+                // Show tool calls if any
+                let toolInfo = '';
+                if (data.tool_calls && data.tool_calls.length > 0) {
+                    const toolNames = data.tool_calls.map(tc => tc.tool_name).join(', ');
+                    toolInfo = `<div style="font-size: 0.8rem; color: #666; margin-bottom: 4px;">[${data.iterations} iteration(s), tools: ${escapeHtml(toolNames)}]</div>`;
+                }
 
                 // Add assistant message to UI
                 log.innerHTML += `
                     <div class="chat-message">
-                        <span class="chat-assistant">Chat:</span>
+                        <span class="chat-assistant">Agent:</span>
+                        ${toolInfo}
                         <div class="chat-content">${escapeHtml(data.reply)}</div>
                     </div>
                 `;
             } catch (err) {
                 error.textContent = err.message;
                 error.classList.remove('hidden');
-                // Remove the failed user message from history
-                slmChatMessages.pop();
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Send';

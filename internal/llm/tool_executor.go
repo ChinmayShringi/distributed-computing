@@ -39,22 +39,47 @@ func NewToolExecutor(grpcAddr string) (*ToolExecutor, error) {
 
 	client := pb.NewOrchestratorServiceClient(conn)
 
-	// Create session
-	sessionResp, err := client.CreateSession(context.Background(), &pb.AuthRequest{
-		DeviceName:  "agent-executor",
-		SecurityKey: "agent-internal",
-	})
-	if err != nil {
+	executor := &ToolExecutor{
+		grpcAddr: grpcAddr,
+		conn:     conn,
+		client:   client,
+	}
+
+	// Create initial session
+	if err := executor.ensureSession(context.Background()); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	return &ToolExecutor{
-		grpcAddr:  grpcAddr,
-		sessionID: sessionResp.SessionId,
-		conn:      conn,
-		client:    client,
-	}, nil
+	return executor, nil
+}
+
+// ensureSession creates a new session if needed
+func (e *ToolExecutor) ensureSession(ctx context.Context) error {
+	sessionResp, err := e.client.CreateSession(ctx, &pb.AuthRequest{
+		DeviceName:  "agent-executor",
+		SecurityKey: "agent-internal",
+	})
+	if err != nil {
+		return fmt.Errorf("CreateSession failed: %w", err)
+	}
+	e.sessionID = sessionResp.SessionId
+	return nil
+}
+
+// refreshSessionOnError checks if the error is a session error and refreshes if needed
+func (e *ToolExecutor) refreshSessionOnError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	if strings.Contains(errStr, "session not found") || strings.Contains(errStr, "Unauthenticated") {
+		// Try to recreate session
+		if refreshErr := e.ensureSession(ctx); refreshErr == nil {
+			return true // Session refreshed, caller should retry
+		}
+	}
+	return false
 }
 
 // Close closes the gRPC connection
@@ -231,13 +256,24 @@ func (e *ToolExecutor) executeShellCmd(ctx context.Context, argsJSON string) (in
 
 	start := time.Now()
 
-	// Call ExecuteRoutedCommand RPC
+	// Call ExecuteRoutedCommand RPC with session retry
 	resp, err := e.client.ExecuteRoutedCommand(execCtx, &pb.RoutedCommandRequest{
 		SessionId: e.sessionID,
 		Policy:    policy,
 		Command:   cmd,
 		Args:      args,
 	})
+
+	// Retry once if session expired
+	if err != nil && e.refreshSessionOnError(ctx, err) {
+		resp, err = e.client.ExecuteRoutedCommand(execCtx, &pb.RoutedCommandRequest{
+			SessionId: e.sessionID,
+			Policy:    policy,
+			Command:   cmd,
+			Args:      args,
+		})
+	}
+
 	if err != nil {
 		return ExecuteShellCmdResult{
 			Command: params.Command,
@@ -311,7 +347,7 @@ func (e *ToolExecutor) executeGetFile(ctx context.Context, argsJSON string) (int
 		maxBytes = 65536
 	}
 
-	// Call ReadFile RPC
+	// Call ReadFile RPC with session retry
 	resp, err := e.client.ReadFile(ctx, &pb.ReadFileRequest{
 		SessionId: e.sessionID,
 		DeviceId:  params.DeviceID,
@@ -321,6 +357,20 @@ func (e *ToolExecutor) executeGetFile(ctx context.Context, argsJSON string) (int
 		Offset:    params.Offset,
 		Length:    params.Length,
 	})
+
+	// Retry once if session expired
+	if err != nil && e.refreshSessionOnError(ctx, err) {
+		resp, err = e.client.ReadFile(ctx, &pb.ReadFileRequest{
+			SessionId: e.sessionID,
+			DeviceId:  params.DeviceID,
+			Path:      params.Path,
+			Mode:      mode,
+			MaxBytes:  maxBytes,
+			Offset:    params.Offset,
+			Length:    params.Length,
+		})
+	}
+
 	if err != nil {
 		return GetFileResult{
 			Path:  params.Path,

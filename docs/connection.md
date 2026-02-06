@@ -3,7 +3,7 @@
 ## Connection Details
 
 ```
-Host: 10.20.38.80
+Host: 10.206.87.35
 User: sshuser
 Pass: root
 ```
@@ -15,7 +15,7 @@ Pass: root
 brew install sshpass
 
 # Connect
-sshpass -p 'root' ssh -o StrictHostKeyChecking=no sshuser@10.20.38.80
+sshpass -p 'root' ssh -o StrictHostKeyChecking=no sshuser@10.206.87.35
 ```
 
 ## Deploying EdgeCLI Server to Windows
@@ -35,14 +35,14 @@ GOOS=windows GOARCH=amd64 go build -o dist/client-windows.exe ./cmd/client
 ```bash
 sshpass -p 'root' scp -o StrictHostKeyChecking=no \
   dist/server-windows.exe dist/client-windows.exe \
-  "sshuser@10.20.38.80:C:/Users/sshuser.Batman/"
+  "sshuser@10.206.87.35:C:/Users/sshuser.Batman/"
 ```
 
 ### 3. Start Windows gRPC Server
 
 ```bash
 # Via SSH - note the special cmd syntax for environment variables
-sshpass -p 'root' ssh sshuser@10.20.38.80 \
+sshpass -p 'root' ssh sshuser@10.206.87.35 \
   'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\sshuser.Batman\server-windows.exe"'
 ```
 
@@ -51,7 +51,7 @@ sshpass -p 'root' ssh sshuser@10.20.38.80 \
 ### 4. Verify Server is Listening
 
 ```bash
-sshpass -p 'root' ssh sshuser@10.20.38.80 'netstat -an | findstr 50051'
+sshpass -p 'root' ssh sshuser@10.206.87.35 'netstat -an | findstr 50051'
 # Expected: TCP 0.0.0.0:50051 LISTENING
 ```
 
@@ -69,7 +69,7 @@ go run ./cmd/server
 
 ```bash
 # In another terminal
-sshpass -p 'root' ssh sshuser@10.20.38.80 \
+sshpass -p 'root' ssh sshuser@10.206.87.35 \
   'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\sshuser.Batman\server-windows.exe"'
 ```
 
@@ -79,7 +79,7 @@ sshpass -p 'root' ssh sshuser@10.20.38.80 \
 # The client auto-generates a unique device ID for remote addresses
 go run ./cmd/client register \
   --name "windows-batman" \
-  --self-addr "10.20.38.80:50051" \
+  --self-addr "10.206.87.35:50051" \
   --platform "windows" \
   --arch "amd64"
 # Output: Generated new device ID for remote device: 23d1b497-...
