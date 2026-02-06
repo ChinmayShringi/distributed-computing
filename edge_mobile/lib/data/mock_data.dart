@@ -1,0 +1,192 @@
+import '../theme/app_colors.dart';
+import 'package:flutter/material.dart';
+
+class MockData {
+  static const List<Map<String, dynamic>> devices = [
+    {
+      'id': 'dev_01',
+      'name': 'Samsung Galaxy S24',
+      'os': 'Android 15',
+      'type': 'mobile',
+      'status': 'online',
+      'cpu': 12,
+      'memory': 45,
+      'isLocal': true,
+      'capabilities': ['cpu', 'gpu', 'npu', 'screen'],
+    },
+    {
+      'id': 'dev_02',
+      'name': 'MacBook Pro M3',
+      'os': 'macOS 14.2',
+      'type': 'desktop',
+      'status': 'online',
+      'cpu': 28,
+      'memory': 60,
+      'isLocal': false,
+      'capabilities': ['cpu', 'gpu', 'screen'],
+    },
+    {
+      'id': 'dev_03',
+      'name': 'Edge Node Alpha',
+      'os': 'Ubuntu 22.04',
+      'type': 'server',
+      'status': 'offline',
+      'cpu': 0,
+      'memory': 0,
+      'isLocal': false,
+      'capabilities': ['cpu'],
+    },
+     {
+      'id': 'dev_04',
+      'name': 'Windows Workstation',
+      'os': 'Windows 11',
+      'type': 'desktop',
+      'status': 'online',
+      'cpu': 15,
+      'memory': 32,
+      'isLocal': false,
+      'capabilities': ['cpu', 'gpu'],
+    },
+  ];
+
+
+  static const List<Map<String, dynamic>> executions = [
+    {
+      'id': 'exec_001',
+      'cmd': 'python train.py --epochs 10',
+      'selected_device_id': 'dev_01',
+      'selected_device_name': 'Samsung Galaxy S24',
+      'executed_locally': true,
+      'host_compute': 'npu',
+      'resource_usage': {
+        'memory_used_mb': 312.5,
+        'memory_total_mb': 512.0,
+        'cpu_percent': 15.2,
+        'gpu_percent': 0.0,
+        'npu_percent': 78.4,
+      },
+      'total_time_ms': 45.7,
+      'exit_code': 0,
+      'time': 'Just now',
+      'output': 'Epoch 1/10\nloss: 0.4523 - accuracy: 0.8921\nTraining complete.',
+    },
+    {
+      'id': 'exec_002',
+      'cmd': 'docker ps -a',
+      'selected_device_id': 'dev_02',
+      'selected_device_name': 'MacBook Pro M3',
+      'executed_locally': false,
+      'host_compute': 'cpu',
+      'resource_usage': {
+        'memory_used_mb': 45.2,
+        'memory_total_mb': 128.0,
+        'cpu_percent': 8.3,
+      },
+      'total_time_ms': 12.34,
+      'exit_code': 0,
+      'time': '3m ago',
+      'output': 'CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES\n3f2a1b4c5d6e   nginx     "nginx"   2 days    Up 2 days 80/tcp    web',
+    },
+    {
+      'id': 'exec_003',
+      'cmd': 'ffmpeg -i video.mp4 -vf scale=1920:1080 output.mp4',
+      'selected_device_id': 'dev_04',
+      'selected_device_name': 'Windows Workstation',
+      'executed_locally': false,
+      'host_compute': 'gpu',
+      'resource_usage': {
+        'memory_used_mb': 1024.0,
+        'memory_total_mb': 2048.0,
+        'cpu_percent': 22.1,
+        'gpu_percent': 85.6,
+      },
+      'total_time_ms': 2340.5,
+      'exit_code': 0,
+      'time': '8m ago',
+      'output': 'frame= 1440 fps= 60 q=28.0 size=   45056kB time=00:00:48.00 bitrate=7680.0kbits/s speed=2.0x',
+    },
+    {
+      'id': 'exec_004',
+      'cmd': 'ls -la /var/log',
+      'selected_device_id': 'dev_03',
+      'selected_device_name': 'Edge Node Alpha',
+      'executed_locally': false,
+      'host_compute': 'cpu',
+      'resource_usage': {
+        'memory_used_mb': 8.5,
+        'memory_total_mb': 64.0,
+        'cpu_percent': 2.1,
+      },
+      'total_time_ms': 5.2,
+      'exit_code': 1,
+      'time': '12m ago',
+      'output': 'ls: cannot access \'/var/log\': Permission denied',
+    },
+    {
+      'id': 'exec_005',
+      'cmd': 'npm run build',
+      'selected_device_id': 'dev_02',
+      'selected_device_name': 'MacBook Pro M3',
+      'executed_locally': false,
+      'host_compute': 'cpu',
+      'resource_usage': {
+        'memory_used_mb': 256.8,
+        'memory_total_mb': 512.0,
+        'cpu_percent': 45.7,
+      },
+      'total_time_ms': 8945.2,
+      'exit_code': 0,
+      'time': '25m ago',
+      'output': 'Building for production...\n✓ 127 modules transformed.\ndist/index.html                  0.45 kB\ndist/assets/index-a3b2c1d4.js  142.35 kB',
+    },
+    {
+      'id': 'exec_006',
+      'cmd': 'python detect.py --model yolov8n.pt',
+      'selected_device_id': 'dev_01',
+      'selected_device_name': 'Samsung Galaxy S24',
+      'executed_locally': true,
+      'host_compute': 'npu',
+      'resource_usage': {
+        'memory_used_mb': 428.3,
+        'memory_total_mb': 512.0,
+        'cpu_percent': 12.5,
+        'npu_percent': 92.1,
+      },
+      'total_time_ms': 67.8,
+      'exit_code': 0,
+      'time': '1h ago',
+      'output': 'Detected 3 objects: person (0.95), car (0.87), dog (0.82)',
+    },
+  ];
+
+  // Legacy alias for backward compatibility
+  static List<Map<String, dynamic>> get recentActivity => executions;
+
+
+  static const List<Map<String, dynamic>> jobs = [
+    {
+      'id': 'job_102',
+      'name': 'Model Training (MobileNet)',
+      'status': 'running',
+      'progress': 0.45,
+      'devices': 3,
+      'usedAi': true,
+    },
+    {
+      'id': 'job_101',
+      'name': 'Log Aggregation',
+      'status': 'completed',
+      'progress': 1.0,
+      'devices': 12,
+      'usedAi': false,
+    },
+     {
+      'id': 'job_103',
+      'name': 'Image Classification Stream',
+      'status': 'pending',
+      'progress': 0.0,
+      'devices': 1,
+      'usedAi': true,
+    },
+  ];
+}
