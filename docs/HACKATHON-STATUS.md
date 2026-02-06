@@ -19,8 +19,9 @@
 | **Auto-Registration** | ✅ LIVE | Devices join mesh automatically with `COORDINATOR_ADDR` env var |
 | **Cross-Device Routing** | ✅ LIVE | Mac coordinator routes tasks to Windows Snapdragon via SSH tunnel |
 | **Distributed Jobs** | ✅ LIVE | Fan-out tasks to all devices in parallel, collect + reduce results |
-| **Cost Estimation** | ✅ LIVE | Predict latency and RAM usage per device, recommend best device |
-| **LLM_GENERATE Handler** | ✅ BUILT | Devices can execute LLM inference tasks (connects to Ollama/LM Studio) |
+| **Smart Plan Generation** | ✅ LIVE | Analyzes user text → creates LLM_GENERATE or SYSINFO tasks intelligently |
+| **Cost Estimation** | ✅ LIVE | Predicts latency (7.2s for 150+200 tokens) & RAM (2GB), recommends device |
+| **LLM_GENERATE Handler** | ✅ LIVE | Devices execute LLM inference (connects to Ollama/LM Studio/QNN runtime) |
 
 ### 2. Qualcomm AI Hub (QAI) Integration ✅
 
@@ -74,6 +75,29 @@
 3. Policy: **REQUIRE_NPU** → routes to Windows Snapdragon (only NPU device)
 4. Policy: **PREFER_REMOTE** → routes away from the Mac
 5. Policy: **BEST_AVAILABLE** → chooses NPU > GPU > CPU
+
+### Demo 2b: Smart Plan Generation ✅ (NEW)
+
+**What it shows**: The orchestrator understands request intent and creates smart plans.
+
+**Test via plan preview API**:
+```bash
+# LLM request → LLM_GENERATE task on NPU device
+curl -X POST http://localhost:8080/api/plan \
+  -H "Content-Type: application/json" \
+  -d '{"text":"summarize this article about AI","max_workers":0}'
+# Returns: kind="LLM_GENERATE", target="windows-snapdragon-qcw31" (NPU)
+
+# Status request → SYSINFO tasks on all devices
+curl -X POST http://localhost:8080/api/plan \
+  -H "Content-Type: application/json" \
+  -d '{"text":"collect status from all devices","max_workers":0}'
+# Returns: kind="SYSINFO" on both devices
+
+# Cost estimation
+curl -X POST http://localhost:8080/api/plan-cost -d '{...plan...}'
+# Returns: predicted_ms=7166ms, recommended_device=..., ram_sufficient=true
+```
 
 ### Demo 3: Qualcomm AI Hub Pipeline ✅
 
