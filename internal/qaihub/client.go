@@ -4,6 +4,7 @@ package qaihub
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -315,6 +316,248 @@ func parseJobID(output string) string {
 	}
 
 	return ""
+}
+
+// ListDevicesResult contains the parsed output of qai-hub list-devices.
+type ListDevicesResult struct {
+	Devices []TargetDevice `json:"devices"`
+	RawText string         `json:"raw_text,omitempty"`
+}
+
+// TargetDevice represents a Qualcomm target device from the cloud catalog.
+type TargetDevice struct {
+	Name    string `json:"name"`
+	OS      string `json:"os"`
+	Vendor  string `json:"vendor"`
+	Type    string `json:"type"`
+	Chipset string `json:"chipset"`
+}
+
+// ListDevices runs "qai-hub list-devices" and returns parsed results.
+func (c *Client) ListDevices(ctx context.Context) (*ListDevicesResult, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("qai-hub binary not found")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, c.Bin, "list-devices")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	c.applyEnv(cmd)
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("list-devices timed out")
+		}
+		return nil, fmt.Errorf("list-devices failed: %w (stderr: %s)", err, stderr.String())
+	}
+
+	raw := stdout.String()
+	devices := parseDeviceTable(raw)
+
+	return &ListDevicesResult{
+		Devices: devices,
+		RawText: raw,
+	}, nil
+}
+
+// parseDeviceTable parses the prettytable output from qai-hub list-devices.
+// Each row has: | Device | OS | Vendor | Type | Chipset | CLI Invocation |
+func parseDeviceTable(output string) []TargetDevice {
+	var devices []TargetDevice
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "+") || strings.HasPrefix(line, "|") && strings.Contains(line, "Device") && strings.Contains(line, "Chipset") {
+			continue // skip borders and header
+		}
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) < 7 {
+			continue
+		}
+		// parts[0] is empty (before first |), parts[1..6] are the columns
+		name := strings.TrimSpace(parts[1])
+		osVer := strings.TrimSpace(parts[2])
+		vendor := strings.TrimSpace(parts[3])
+		devType := strings.TrimSpace(parts[4])
+		chipset := strings.TrimSpace(parts[5])
+
+		if name == "" || name == "Device" {
+			continue
+		}
+		devices = append(devices, TargetDevice{
+			Name:    name,
+			OS:      osVer,
+			Vendor:  vendor,
+			Type:    devType,
+			Chipset: chipset,
+		})
+	}
+	return devices
+}
+
+// JobStatusResult contains the status of a QAI Hub job.
+type JobStatusResult struct {
+	JobID   string `json:"job_id"`
+	Status  string `json:"status"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// GetJobStatus checks the status of a QAI Hub job using the Python SDK.
+// It shells out to a small Python script because the CLI doesn't have a
+// "get-job" command.
+func (c *Client) GetJobStatus(ctx context.Context, jobID string) (*JobStatusResult, error) {
+	if jobID == "" {
+		return nil, fmt.Errorf("job_id is required")
+	}
+
+	// Find Python from the venv
+	pythonBin := c.findVenvPython()
+	if pythonBin == "" {
+		return nil, fmt.Errorf("python not found in venv — cannot check job status")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Inline Python script to check job status
+	script := fmt.Sprintf(`
+import json, sys
+try:
+    import qai_hub as hub
+    job = hub.get_job("%s")
+    st = job.get_status()
+    print(json.dumps({"job_id": "%s", "status": st.message, "success": st.success}))
+except Exception as e:
+    print(json.dumps({"job_id": "%s", "status": "error", "success": False, "error": str(e)}))
+`, jobID, jobID, jobID)
+
+	cmd := exec.CommandContext(ctx, pythonBin, "-c", script)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	c.applyEnv(cmd)
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("job status check timed out")
+		}
+		return nil, fmt.Errorf("job status check failed: %w (stderr: %s)", err, stderr.String())
+	}
+
+	var result JobStatusResult
+	if err := parseJSON(stdout.Bytes(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse job status: %w (raw: %s)", err, stdout.String())
+	}
+	return &result, nil
+}
+
+// SubmitCompileResult contains the results of a compile job submission via the Python SDK.
+type SubmitCompileResult struct {
+	OK     bool   `json:"ok"`
+	JobID  string `json:"job_id,omitempty"`
+	JobURL string `json:"job_url,omitempty"`
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// SubmitCompile submits a compile job using the Python SDK (richer than CLI).
+// modelPath can be a local ONNX file or a QAI Hub model ID.
+func (c *Client) SubmitCompile(ctx context.Context, modelPath, deviceName, options string) (*SubmitCompileResult, error) {
+	pythonBin := c.findVenvPython()
+	if pythonBin == "" {
+		return nil, fmt.Errorf("python not found in venv")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	// Inline Python to submit compile via SDK
+	script := fmt.Sprintf(`
+import json, sys
+try:
+    import qai_hub as hub
+    devices = hub.get_devices(name=%q)
+    if not devices:
+        print(json.dumps({"ok": False, "error": "No device found matching %s"}))
+        sys.exit(0)
+    device = devices[0]
+    model = %q
+    job = hub.submit_compile_job(model=model, device=device, options=%q)
+    job_id = job.job_id if hasattr(job, "job_id") else str(job)
+    print(json.dumps({
+        "ok": True,
+        "job_id": job_id,
+        "job_url": "https://aihub.qualcomm.com/jobs/" + job_id,
+        "status": "submitted"
+    }))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+`, deviceName, deviceName, modelPath, options)
+
+	cmd := exec.CommandContext(ctx, pythonBin, "-c", script)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	c.applyEnv(cmd)
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("compile submission timed out")
+		}
+		// Don't fail hard — the script might have printed JSON before erroring
+	}
+
+	var result SubmitCompileResult
+	if err := parseJSON(stdout.Bytes(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse compile result: %w (raw: %s, stderr: %s)", err, stdout.String(), stderr.String())
+	}
+	return &result, nil
+}
+
+// findVenvPython returns the path to the Python binary in the qai-hub venv.
+func (c *Client) findVenvPython() string {
+	candidates := []string{
+		filepath.Join(".venv-qaihub", "bin", "python3"),         // Unix
+		filepath.Join(".venv-qaihub", "bin", "python"),          // Unix alt
+		filepath.Join(".venv-qaihub", "Scripts", "python.exe"),  // Windows
+		filepath.Join(".venv", "bin", "python3"),                // Generic Unix
+		filepath.Join(".venv", "Scripts", "python.exe"),         // Generic Windows
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			if abs, err := filepath.Abs(p); err == nil {
+				return abs
+			}
+			return p
+		}
+	}
+	// Fall back to system python
+	if p, err := exec.LookPath("python3"); err == nil {
+		return p
+	}
+	if p, err := exec.LookPath("python"); err == nil {
+		return p
+	}
+	return ""
+}
+
+// parseJSON is a small helper to unmarshal JSON.
+func parseJSON(data []byte, v interface{}) error {
+	// Trim any leading/trailing whitespace or non-JSON characters
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return fmt.Errorf("empty response")
+	}
+	return json.Unmarshal(trimmed, v)
 }
 
 // applyEnv sets environment variables for the command.

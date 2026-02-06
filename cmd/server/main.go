@@ -2,7 +2,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -374,6 +376,115 @@ func detectScreenCapture() bool {
 	return err == nil
 }
 
+// autoRegisterWithCoordinator registers this device with a remote coordinator.
+// It retries periodically so that if the coordinator restarts, we re-register.
+func (s *OrchestratorServer) autoRegisterWithCoordinator(coordinatorAddr string) {
+	selfInfo := s.getSelfDeviceInfo()
+
+	// Fix self-address: if we're listening on 0.0.0.0, resolve to our LAN IP
+	// so the coordinator can actually reach us back.
+	if strings.HasPrefix(selfInfo.GrpcAddr, "0.0.0.0:") {
+		port := selfInfo.GrpcAddr[len("0.0.0.0"):]
+		if lanIP := detectLANIP(); lanIP != "" {
+			selfInfo.GrpcAddr = lanIP + port
+			selfInfo.HttpAddr = lanIP + ":" + strings.TrimLeft(s.bulkHTTPAddr, ":")
+			log.Printf("[INFO] Auto-register: resolved self address to %s", selfInfo.GrpcAddr)
+		}
+	}
+
+	// Detect NPU on Windows ARM64 (Snapdragon)
+	if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
+		selfInfo.HasNpu = true
+	}
+
+	for {
+		log.Printf("[INFO] Auto-registering with coordinator at %s ...", coordinatorAddr)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		conn, err := grpc.DialContext(ctx, coordinatorAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock(),
+		)
+		if err != nil {
+			cancel()
+			log.Printf("[WARN] Could not reach coordinator at %s: %v — retrying in 10s", coordinatorAddr, err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		client := pb.NewOrchestratorServiceClient(conn)
+
+		// Register ourselves
+		ack, err := client.RegisterDevice(ctx, selfInfo)
+		cancel()
+		conn.Close()
+
+		if err != nil {
+			log.Printf("[WARN] Registration with coordinator failed: %v — retrying in 10s", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		log.Printf("[INFO] Successfully registered with coordinator at %s (ack=%v)", coordinatorAddr, ack.Ok)
+
+		// Also sync: pull the coordinator's device list and add to our local registry
+		s.syncDevicesFromCoordinator(coordinatorAddr)
+
+		// Re-register periodically (heartbeat) every 30 seconds
+		time.Sleep(30 * time.Second)
+	}
+}
+
+// syncDevicesFromCoordinator pulls the device list from a coordinator and adds
+// them to our local registry. This means any device can see all other devices.
+func (s *OrchestratorServer) syncDevicesFromCoordinator(coordinatorAddr string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, coordinatorAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[WARN] Could not connect to coordinator for sync: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	client := pb.NewOrchestratorServiceClient(conn)
+	resp, err := client.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		log.Printf("[WARN] ListDevices from coordinator failed: %v", err)
+		return
+	}
+
+	added := 0
+	for _, d := range resp.Devices {
+		if d.DeviceId == s.selfDeviceID {
+			continue // Skip ourselves
+		}
+		s.registry.Upsert(d)
+		added++
+	}
+	if added > 0 {
+		log.Printf("[INFO] Synced %d device(s) from coordinator", added)
+	}
+}
+
+// detectLANIP finds the first non-loopback IPv4 address on this machine.
+func detectLANIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+			return ipNet.IP.String()
+		}
+	}
+	return ""
+}
+
 // HealthCheck returns the server's health status
 func (s *OrchestratorServer) HealthCheck(ctx context.Context, req *pb.Empty) (*pb.HealthStatus, error) {
 	return &pb.HealthStatus{
@@ -517,6 +628,23 @@ func (s *OrchestratorServer) RunTask(ctx context.Context, req *pb.TaskRequest) (
 			TimeMs: float64(time.Since(start).Milliseconds()),
 		}, nil
 
+	case "LLM_GENERATE":
+		output, err := s.runLLMGenerate(ctx, req.Input)
+		if err != nil {
+			return &pb.TaskResult{
+				TaskId: req.TaskId,
+				Ok:     false,
+				Error:  fmt.Sprintf("LLM_GENERATE failed: %v", err),
+				TimeMs: float64(time.Since(start).Milliseconds()),
+			}, nil
+		}
+		return &pb.TaskResult{
+			TaskId: req.TaskId,
+			Ok:     true,
+			Output: output,
+			TimeMs: float64(time.Since(start).Milliseconds()),
+		}, nil
+
 	default:
 		return &pb.TaskResult{
 			TaskId: req.TaskId,
@@ -525,6 +653,127 @@ func (s *OrchestratorServer) RunTask(ctx context.Context, req *pb.TaskRequest) (
 			TimeMs: float64(time.Since(start).Milliseconds()),
 		}, nil
 	}
+}
+
+// runLLMGenerate sends a prompt to an OpenAI-compatible endpoint running on
+// this device (Ollama, LM Studio, vLLM, or any /v1/chat/completions server).
+// Configure via LLM_ENDPOINT and LLM_MODEL env vars on each device.
+func (s *OrchestratorServer) runLLMGenerate(ctx context.Context, prompt string) (string, error) {
+	endpoint := os.Getenv("LLM_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:11434" // Ollama default
+	}
+	model := os.Getenv("LLM_MODEL")
+	if model == "" {
+		model = "qwen3:8b" // Default model
+	}
+
+	// Build OpenAI-compatible chat completions request
+	reqBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"temperature": 0.7,
+		"max_tokens":  1024,
+		"stream":      false,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	// Try OpenAI-compatible endpoint first (/v1/chat/completions)
+	url := strings.TrimRight(endpoint, "/") + "/v1/chat/completions"
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		// Fallback: try Ollama native /api/chat endpoint
+		return s.runLLMGenerateOllama(ctx, endpoint, model, prompt)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Fallback to Ollama
+		return s.runLLMGenerateOllama(ctx, endpoint, model, prompt)
+	}
+
+	var chatResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return "", fmt.Errorf("parse response: %w (body: %s)", err, string(respBody[:min(200, len(respBody))]))
+	}
+
+	if len(chatResp.Choices) == 0 {
+		return "", fmt.Errorf("LLM returned 0 choices")
+	}
+
+	result := chatResp.Choices[0].Message.Content
+	log.Printf("[INFO] LLM_GENERATE completed: model=%s prompt_len=%d result_len=%d", model, len(prompt), len(result))
+	return result, nil
+}
+
+// runLLMGenerateOllama is a fallback that uses Ollama's native /api/chat endpoint.
+func (s *OrchestratorServer) runLLMGenerateOllama(ctx context.Context, endpoint, model, prompt string) (string, error) {
+	url := strings.TrimRight(endpoint, "/") + "/api/chat"
+
+	reqBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"stream": false,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal ollama request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create ollama request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("LLM endpoint unreachable at %s: %w (set LLM_ENDPOINT env var)", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ollama returned %d: %s", resp.StatusCode, string(respBody[:min(200, len(respBody))]))
+	}
+
+	var ollamaResp struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(respBody, &ollamaResp); err != nil {
+		return "", fmt.Errorf("parse ollama response: %w", err)
+	}
+
+	log.Printf("[INFO] LLM_GENERATE (ollama) completed: model=%s result_len=%d", model, len(ollamaResp.Message.Content))
+	return ollamaResp.Message.Content, nil
 }
 
 // collectSysInfo gathers system information for this device
@@ -1305,6 +1554,12 @@ func main() {
 
 	// Start bulk HTTP server in a goroutine
 	go orchestrator.startBulkHTTP()
+
+	// Auto-register with coordinator if COORDINATOR_ADDR is set.
+	// This lets any device join the mesh automatically on startup.
+	if coordinatorAddr := os.Getenv("COORDINATOR_ADDR"); coordinatorAddr != "" {
+		go orchestrator.autoRegisterWithCoordinator(coordinatorAddr)
+	}
 
 	// Serve gRPC
 	if err := grpcServer.Serve(lis); err != nil {
