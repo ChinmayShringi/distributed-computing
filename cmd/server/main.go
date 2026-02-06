@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -471,6 +472,78 @@ func (s *OrchestratorServer) syncDevicesFromCoordinator(coordinatorAddr string) 
 	}
 }
 
+// runImageGenerate calls a Stable Diffusion API endpoint to generate an image.
+// Configure via IMAGE_API_ENDPOINT env var (defaults to Automatic1111 WebUI format).
+// Returns the path to the generated image in the shared directory.
+func (s *OrchestratorServer) runImageGenerate(ctx context.Context, prompt string) (string, error) {
+	endpoint := os.Getenv("IMAGE_API_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:7860" // Automatic1111 WebUI default
+	}
+
+	// Build Stable Diffusion txt2img request
+	reqBody := map[string]interface{}{
+		"prompt":  prompt,
+		"steps":   20,
+		"width":   512,
+		"height":  512,
+		"sampler_name": "Euler a",
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := strings.TrimRight(endpoint, "/") + "/sdapi/v1/txt2img"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 180 * time.Second} // 3 min for image gen
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("Image API unreachable at %s: %w (set IMAGE_API_ENDPOINT env var)", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Image API returned %d: %s", resp.StatusCode, string(respBody[:min(200, len(respBody))]))
+	}
+
+	var sdResp struct {
+		Images []string `json:"images"` // base64 encoded images
+	}
+	if err := json.Unmarshal(respBody, &sdResp); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	if len(sdResp.Images) == 0 {
+		return "", fmt.Errorf("no images generated")
+	}
+
+	// Save first image to shared directory
+	imageData := sdResp.Images[0]
+	decoded, err := base64.StdEncoding.DecodeString(imageData)
+	if err != nil {
+		return "", fmt.Errorf("decode image: %w", err)
+	}
+
+	// Generate filename
+	filename := fmt.Sprintf("image_%d.png", time.Now().Unix())
+	imagePath := filepath.Join(s.sharedRoot, filename)
+	
+	if err := os.WriteFile(imagePath, decoded, 0644); err != nil {
+		return "", fmt.Errorf("save image: %w", err)
+	}
+
+	log.Printf("[INFO] IMAGE_GENERATE completed: prompt_len=%d image_saved=%s", len(prompt), imagePath)
+	return imagePath, nil
+}
+
 // detectLANIP finds the first non-loopback IPv4 address on this machine.
 func detectLANIP() string {
 	addrs, err := net.InterfaceAddrs()
@@ -642,6 +715,23 @@ func (s *OrchestratorServer) RunTask(ctx context.Context, req *pb.TaskRequest) (
 			TaskId: req.TaskId,
 			Ok:     true,
 			Output: output,
+			TimeMs: float64(time.Since(start).Milliseconds()),
+		}, nil
+
+	case "IMAGE_GENERATE":
+		imagePath, err := s.runImageGenerate(ctx, req.Input)
+		if err != nil {
+			return &pb.TaskResult{
+				TaskId: req.TaskId,
+				Ok:     false,
+				Error:  fmt.Sprintf("IMAGE_GENERATE failed: %v", err),
+				TimeMs: float64(time.Since(start).Milliseconds()),
+			}, nil
+		}
+		return &pb.TaskResult{
+			TaskId: req.TaskId,
+			Ok:     true,
+			Output: imagePath, // Return path to generated image
 			TimeMs: float64(time.Since(start).Milliseconds()),
 		}, nil
 

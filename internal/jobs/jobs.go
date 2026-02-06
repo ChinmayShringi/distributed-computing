@@ -193,19 +193,62 @@ func (m *Manager) GenerateDefaultPlan(devices []*pb.DeviceInfo) *pb.Plan {
 func (m *Manager) GenerateSmartPlan(userText string, devices []*pb.DeviceInfo) *pb.Plan {
 	textLower := strings.ToLower(userText)
 
-	// Detect if this is an LLM task
-	isLLMTask := strings.Contains(textLower, "summarize") ||
-		strings.Contains(textLower, "generate") ||
+	// Detect if this is an image generation task (check first, higher priority)
+	isImageTask := strings.Contains(textLower, "image") ||
+		strings.Contains(textLower, "picture") ||
+		strings.Contains(textLower, "photo") ||
+		strings.Contains(textLower, "draw") ||
+		strings.Contains(textLower, "painting") ||
+		strings.Contains(textLower, "artwork") ||
+		strings.Contains(textLower, "visualize") ||
+		strings.Contains(textLower, "render")
+
+	// Detect if this is an LLM task (but not image)
+	isLLMTask := !isImageTask && (strings.Contains(textLower, "summarize") ||
 		strings.Contains(textLower, "write") ||
-		strings.Contains(textLower, "create") ||
 		strings.Contains(textLower, "code") ||
 		strings.Contains(textLower, "explain") ||
 		strings.Contains(textLower, "chat") ||
 		strings.Contains(textLower, "answer") ||
-		strings.Contains(textLower, "translate") ||
-		strings.Contains(textLower, "image")
+		strings.Contains(textLower, "translate"))
 
-	if isLLMTask {
+	if isImageTask {
+		// Create IMAGE_GENERATE task routed to best GPU/NPU device
+		var bestDevice *pb.DeviceInfo
+		for _, d := range devices {
+			if d.HasGpu || d.HasNpu {
+				bestDevice = d
+				break
+			}
+		}
+		if bestDevice == nil && len(devices) > 0 {
+			bestDevice = devices[0]
+		}
+
+		// Image gen is heavier than text
+		promptTokens := int32(len(userText) / 4)
+		if promptTokens < 10 {
+			promptTokens = 10
+		}
+
+		task := &pb.TaskSpec{
+			TaskId:          uuid.New().String(),
+			Kind:            "IMAGE_GENERATE",
+			Input:           userText,
+			TargetDeviceId:  "",
+			PromptTokens:    promptTokens,
+			MaxOutputTokens: 100, // output is just the image path
+		}
+		if bestDevice != nil {
+			task.TargetDeviceId = bestDevice.DeviceId
+		}
+
+		return &pb.Plan{
+			Groups: []*pb.TaskGroup{
+				{Index: 0, Tasks: []*pb.TaskSpec{task}},
+			},
+		}
+	} else if isLLMTask {
 		// Create LLM_GENERATE task routed to best device (NPU > GPU > CPU)
 		var bestDevice *pb.DeviceInfo
 		for _, d := range devices {

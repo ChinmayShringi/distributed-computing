@@ -34,9 +34,10 @@ type reduceJSON struct {
 
 // validKinds are the allowed task kinds.
 var validKinds = map[string]bool{
-	"SYSINFO":      true,
-	"ECHO":         true,
-	"LLM_GENERATE": true,
+	"SYSINFO":       true,
+	"ECHO":          true,
+	"LLM_GENERATE":  true,
+	"IMAGE_GENERATE": true,
 }
 
 // ParsePlanJSON parses and validates raw LLM output into proto Plan and ReduceSpec.
@@ -70,7 +71,7 @@ func ParsePlanJSON(raw string) (*pb.Plan, *pb.ReduceSpec, error) {
 
 			kind := strings.ToUpper(t.Kind)
 			if !validKinds[kind] {
-				return nil, nil, fmt.Errorf("group %d task %d (%s): invalid kind %q (allowed: SYSINFO, ECHO, LLM_GENERATE)", gi, ti, t.TaskID, t.Kind)
+				return nil, nil, fmt.Errorf("group %d task %d (%s): invalid kind %q (allowed: SYSINFO, ECHO, LLM_GENERATE, IMAGE_GENERATE)", gi, ti, t.TaskID, t.Kind)
 			}
 
 			// Validate input for path traversal
