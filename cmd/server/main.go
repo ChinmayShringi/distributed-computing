@@ -44,7 +44,7 @@ const (
 	defaultBulkHTTPAddr = ":8081"
 	defaultSharedDir    = "./shared"
 	defaultBulkTTL      = 60
-	remoteDialTimeout   = 2 * time.Second
+	remoteDialTimeout   = 15 * time.Second
 )
 
 // Session represents an authenticated client session
