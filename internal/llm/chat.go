@@ -76,12 +76,17 @@ func NewChatFromEnv() (ChatProvider, error) {
 		cfg.Model = os.Getenv("CHAT_MODEL")                                  // Let the provider use its default if not set
 		return NewOpenAIChat(cfg), nil
 
+	case "tinyllama":
+		cfg.BaseURL = envOrDefault("CHAT_BASE_URL", "http://localhost:3332")
+		cfg.Model = "TinyLlama-1.1B-Chat"
+		return NewTinyLlamaChat(cfg), nil
+
 	case "echo", "mock":
 		// Echo provider for testing when no LLM runtime is available
 		return NewEchoChat(), nil
 
 	default:
-		return nil, fmt.Errorf("unknown chat provider: %s (valid: ollama, openai)", provider)
+		return nil, fmt.Errorf("unknown chat provider: %s (valid: ollama, openai, tinyllama)", provider)
 	}
 }
 
@@ -394,4 +399,126 @@ func (e *EchoChat) Chat(ctx context.Context, messages []ChatMessage) (string, er
 	}
 
 	return fmt.Sprintf("Echo: You said: %q\n\nThis is a mock response. Set CHAT_PROVIDER=ollama or CHAT_PROVIDER=openai for real LLM responses.", lastUserMsg), nil
+}
+
+// TinyLlamaChat implements ChatProvider using the local TinyLlama server.
+// This connects to a Python Flask server running TinyLlama 1.1B via ONNX Runtime.
+type TinyLlamaChat struct {
+	cfg    ChatConfig
+	client *http.Client
+}
+
+// NewTinyLlamaChat creates a new TinyLlama chat provider.
+func NewTinyLlamaChat(cfg ChatConfig) *TinyLlamaChat {
+	return &TinyLlamaChat{
+		cfg: cfg,
+		client: &http.Client{
+			Timeout: time.Duration(cfg.TimeoutSecs) * time.Second,
+		},
+	}
+}
+
+func (t *TinyLlamaChat) Name() string { return "tinyllama" }
+
+func (t *TinyLlamaChat) Health(ctx context.Context) (*HealthResult, error) {
+	result := &HealthResult{
+		Provider: "tinyllama",
+		BaseURL:  t.cfg.BaseURL,
+		Model:    t.cfg.Model,
+	}
+
+	// Check if TinyLlama server is running by hitting the /health endpoint
+	url := strings.TrimRight(t.cfg.BaseURL, "/") + "/health"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to create request: %v", err)
+		return result, nil
+	}
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to connect: %v", err)
+		return result, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		result.Ok = true
+	} else {
+		result.Error = fmt.Sprintf("unexpected status: %d", resp.StatusCode)
+	}
+
+	return result, nil
+}
+
+// tinyLlamaChatRequest is the request body for TinyLlama's /chat endpoint.
+type tinyLlamaChatRequest struct {
+	Message   string `json:"message"`
+	MaxTokens int    `json:"max_tokens"`
+}
+
+// tinyLlamaChatResponse is the response from TinyLlama's /chat endpoint.
+type tinyLlamaChatResponse struct {
+	Response     string  `json:"response"`
+	Tokens       int     `json:"tokens"`
+	Time         float64 `json:"time"`
+	TokensPerSec float64 `json:"tokens_per_sec"`
+}
+
+func (t *TinyLlamaChat) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
+	// Find the last user message (TinyLlama server expects a single message)
+	var userMsg string
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			userMsg = messages[i].Content
+			break
+		}
+	}
+
+	if userMsg == "" {
+		return "", fmt.Errorf("no user message found in conversation")
+	}
+
+	reqBody := tinyLlamaChatRequest{
+		Message:   userMsg,
+		MaxTokens: 256,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := strings.TrimRight(t.cfg.BaseURL, "/") + "/chat"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("http request to %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		snippet := string(respBody)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		return "", fmt.Errorf("TinyLlama returned status %d: %s", resp.StatusCode, snippet)
+	}
+
+	var chatResp tinyLlamaChatResponse
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return "", fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return chatResp.Response, nil
 }
