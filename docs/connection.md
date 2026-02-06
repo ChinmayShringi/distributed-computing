@@ -125,3 +125,55 @@ curl -X POST http://localhost:8080/api/assistant \
 - Device name: Batman (windows-batman when registered)
 - Multi-device routing: PREFER_REMOTE correctly routes to Windows
 - Web UI: Accessible at http://localhost:8080
+
+---
+
+## Snapdragon ARM64 Machine (QAI Workstream)
+
+Added 2026-02-06 by Rahil for the QAI hackathon workstream.
+
+### Connection Details
+
+```
+Host: 10.206.87.35
+User: chinmay
+Pass: root
+```
+
+### Machine Specs
+
+- **Hostname**: QCWorkshop31
+- **OS**: Windows 11 Pro, Build 26100 (24H2)
+- **Architecture**: ARM64 (Snapdragon X Elite)
+- **NPU**: Yes (Qualcomm Hexagon)
+
+### What's Installed
+
+| Component | Path |
+|-----------|------|
+| Python 3.12 | `C:\Users\chinmay\Python312\` |
+| QAI Hub venv | `C:\Users\chinmay\venv-qaihub\` |
+| gRPC Server | `C:\Users\chinmay\server-windows-arm64.exe` |
+| gRPC Client | `C:\Users\chinmay\client-windows-arm64.exe` |
+| Shared dir | `C:\Users\chinmay\shared\` |
+| Server batch | `C:\Users\chinmay\start-server.bat` |
+
+### Building for ARM64
+
+**Important**: This machine is ARM64, not AMD64. Build with:
+
+```bash
+GOOS=windows GOARCH=arm64 go build -o dist/server-windows-arm64.exe ./cmd/server
+GOOS=windows GOARCH=arm64 go build -o dist/client-windows-arm64.exe ./cmd/client
+```
+
+### Firewall Rules Added
+
+```
+EdgeMesh gRPC  - TCP inbound 50051
+EdgeMesh HTTP  - TCP inbound 8081
+```
+
+### Full Setup Guide
+
+See [docs/setup-guide-qai.md](setup-guide-qai.md) for step-by-step instructions.
