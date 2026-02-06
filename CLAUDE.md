@@ -185,7 +185,10 @@ When modifying `proto/orchestrator.proto`:
 | `/api/agent` | POST | LLM agent with tool calling |
 | `/api/agent/health` | GET | Agent health check |
 | `/api/qaihub/doctor` | GET | QAI Hub CLI health check |
-| `/api/qaihub/compile` | POST | Compile model with Qualcomm AI Hub |
+| `/api/qaihub/compile` | POST | Compile model with Qualcomm AI Hub (via CLI) |
+| `/api/qaihub/devices` | GET | List QAI Hub target devices (filter: name, chipset, vendor) |
+| `/api/qaihub/job-status` | GET/POST | Check QAI Hub compile job status (via Python SDK) |
+| `/api/qaihub/submit-compile` | POST | Submit compile job via Python SDK |
 
 ## Environment Variables
 
