@@ -18,6 +18,31 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final _serverController = TextEditingController(text: '192.168.1.10:50051');
   final _keyController = TextEditingController(text: 'dev');
   bool _isObscured = true;
+  bool _isConnecting = false;
+  bool _isConnected = false;
+
+  void _handleConnect() async {
+    setState(() {
+      _isConnecting = true;
+    });
+
+    // Simulate connection handshake
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    if (mounted) {
+      setState(() {
+        _isConnecting = false;
+        _isConnected = true;
+      });
+    }
+
+    // Brief delay to show success state before navigating
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    if (mounted) {
+      context.go('/dashboard');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -130,21 +155,51 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         
                         // Primary Action
                         FilledButton(
-                          onPressed: () => context.go('/dashboard'),
+                          onPressed: (_isConnecting || _isConnected) ? null : _handleConnect,
                           style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.safeGreen,
+                            backgroundColor: _isConnected ? AppColors.safeGreen : AppColors.safeGreen,
                             foregroundColor: AppColors.backgroundDark,
                             padding: const EdgeInsets.symmetric(vertical: 20),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             elevation: 0,
+                            disabledBackgroundColor: _isConnected ? AppColors.safeGreen : AppColors.safeGreen.withOpacity(0.5),
+                            disabledForegroundColor: AppColors.backgroundDark,
                           ),
-                          child: Text(
-                            'INITIALIZE CONNECTION',
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1,
-                            ),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: _isConnected
+                                ? Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(LucideIcons.check, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'CONNECTION ESTABLISHED',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 1,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : _isConnecting
+                                    ? const SizedBox(
+                                        height: 18,
+                                        width: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          color: AppColors.backgroundDark,
+                                        ),
+                                      )
+                                    : Text(
+                                        'INITIALIZE CONNECTION',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 1,
+                                        ),
+                                      ),
                           ),
                         ),
                       ],

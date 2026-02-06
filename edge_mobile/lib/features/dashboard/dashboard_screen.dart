@@ -26,15 +26,32 @@ class DashboardScreen extends StatelessWidget {
             // Standardized Header
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const EdgeMeshWordmark(fontSize: 18),
                     Row(
                       children: [
-                        IconButton(icon: const Icon(LucideIcons.bell, size: 18, color: AppColors.mutedIcon), onPressed: () {}),
-                        IconButton(icon: const Icon(LucideIcons.user, size: 18, color: AppColors.mutedIcon), onPressed: () {}),
+                        IconButton(
+                          icon: const Icon(LucideIcons.bell, size: 18, color: AppColors.mutedIcon),
+                          onPressed: () {},
+                          style: IconButton.styleFrom(
+                            padding: const EdgeInsets.all(8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: const Icon(LucideIcons.user, size: 18, color: AppColors.mutedIcon),
+                          onPressed: () {},
+                          style: IconButton.styleFrom(
+                            padding: const EdgeInsets.all(8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -53,46 +70,45 @@ class DashboardScreen extends StatelessWidget {
             const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
             // KPI Cards
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 140,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  physics: const BouncingScrollPhysics(),
-                  children: const [
-                    _KpiCard(
-                      title: 'CONNECTED NODES',
-                      value: '12',
-                      icon: LucideIcons.laptop,
-                      color: AppColors.safeGreen,
-                      subtitle: '4 ACTIVE SESSIONS',
-                    ),
-                    SizedBox(width: 12),
-                    _KpiCard(
-                      title: 'SECURE TOOLS',
-                      value: '24',
-                      icon: LucideIcons.shieldCheck,
-                      color: AppColors.infoBlue,
-                      subtitle: '8 ELEVATED',
-                    ),
-                    SizedBox(width: 12),
-                    _KpiCard(
-                      title: 'ACTIVE JOBS',
-                      value: '03',
-                      icon: LucideIcons.activity,
-                      color: AppColors.warningAmber,
-                      subtitle: '1 SYNCHRONIZING',
-                    ),
-                  ],
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
+                  childAspectRatio: 0.75,
                 ),
+                delegate: SliverChildListDelegate([
+                  const _KpiCard(
+                    title: 'CONNECTED NODES',
+                    value: '12',
+                    icon: LucideIcons.laptop,
+                    color: AppColors.safeGreen,
+                    subtitle: '4 ACTIVE SESSIONS',
+                  ),
+                  const _KpiCard(
+                    title: 'SECURE TOOLS',
+                    value: '24',
+                    icon: LucideIcons.shieldCheck,
+                    color: AppColors.infoBlue,
+                    subtitle: '8 ELEVATED',
+                  ),
+                  const _KpiCard(
+                    title: 'ACTIVE JOBS',
+                    value: '03',
+                    icon: LucideIcons.activity,
+                    color: AppColors.warningAmber,
+                    subtitle: '1 SYNCHRONIZING',
+                  ),
+                ]),
               ),
             ),
 
             // Execution Host + Utilization Panel
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              sliver: SliverToBoxAdapter(
                 child: ExecutionHostPanel(executions: MockData.executions),
               ),
             ),
@@ -167,52 +183,48 @@ class _KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassContainer(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       borderRadius: 16,
-      child: SizedBox(
-        width: 130,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ThreeDBadgeIcon(icon: icon, accentColor: color, size: 16),
-            const SizedBox(height: 16),
-            Text(
-              value,
-              style: GoogleFonts.jetBrainsMono(
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary,
-                height: 1.0,
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ThreeDBadgeIcon(icon: icon, accentColor: color, size: 20),
+          const SizedBox(height: 16),
+          Text(
+            value,
+            style: GoogleFonts.jetBrainsMono(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+              height: 1.0,
             ),
-            const SizedBox(height: 6),
-            Text(
-              title,
-              style: GoogleFonts.inter(
-                fontSize: 8,
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.5,
-                height: 1.2,
-              ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+              height: 1.2,
             ),
-            const SizedBox(height: 3),
-            Text(
-              subtitle,
-              style: GoogleFonts.inter(
-                fontSize: 8,
-                color: AppColors.mutedIcon,
-                fontWeight: FontWeight.w600,
-                height: 1.2,
-              ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: GoogleFonts.inter(
+              fontSize: 9,
+              color: AppColors.mutedIcon,
+              fontWeight: FontWeight.w600,
+              height: 1.2,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
-
 }
 
 class _ActivityItem extends StatelessWidget {
@@ -249,8 +261,8 @@ class _ActivityItem extends StatelessWidget {
             ),
           ),
           subtitle: Text(
-            '${item['device'].toUpperCase()} • ${item['time'].toUpperCase()}',
-            style: GoogleFonts.inter(fontSize: 9, color: AppColors.textSecondary, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+            '${(item['selected_device_name'] ?? 'UNKNOWN').toUpperCase()} • ${item['time'].toUpperCase()}',
+            style: GoogleFonts.inter(fontSize: 10, color: AppColors.textSecondary, fontWeight: FontWeight.w700, letterSpacing: 0.5),
           ),
           trailing: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
