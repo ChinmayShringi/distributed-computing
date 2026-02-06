@@ -8,7 +8,7 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X github.com/edgecli/edgecli/cmd/edgecli/commands.Version=$(VERSION) \
 	-X github.com/edgecli/edgecli/cmd/edgecli/commands.Commit=$(COMMIT)"
 
-.PHONY: all build install clean test lint fmt help proto server web qaihub-example
+.PHONY: all build install clean test lint fmt help proto server web qaihub-example qaihub-download-models
 
 all: build
 
@@ -109,6 +109,15 @@ ifeq ($(OS),Windows_NT)
 else
 	@echo "QAI Hub compile example requires Windows."
 	@echo "Run the Python helper directly: python scripts/qaihub_download_job.py --job <id> --out <dir>"
+endif
+
+## qaihub-download-models: Download/export models from qai_hub_models (Windows only)
+qaihub-download-models:
+ifeq ($(OS),Windows_NT)
+	powershell -ExecutionPolicy Bypass -File scripts/windows/qaihub_download_models.ps1
+else
+	@echo "QAI Hub model download requires Windows with Snapdragon."
+	@echo "Run directly: python scripts/qaihub_download_models.py --help"
 endif
 
 ## build-server: Build the gRPC server binary

@@ -182,6 +182,64 @@ EdgeMesh gRPC  - TCP inbound 50051
 EdgeMesh HTTP  - TCP inbound 8081
 ```
 
+### Ollama Setup (Local LLM)
+
+Ollama is installed on this machine for local chat and agent functionality.
+
+**Installation:**
+```powershell
+winget install Ollama.Ollama
+```
+
+**Available Models:**
+| Model | Size | Use Case |
+|-------|------|----------|
+| `llama3.2:3b` | 2.0GB | Chat + tool calling (agent) |
+| `phi3:mini` | 2.2GB | Fast chat only (no tool support) |
+| `mistral:7b` | 4.1GB | High quality chat + tools |
+
+**Starting Ollama:**
+```powershell
+# Start Ollama service (runs in background)
+ollama serve
+
+# Verify it's running
+curl http://localhost:11434
+# Returns: "Ollama is running"
+```
+
+**Starting EdgeCLI with Ollama:**
+```powershell
+# Terminal 1 - gRPC Server
+cd C:\Users\chinmay\Desktop\edgecli
+set GRPC_ADDR=:50051
+set CHAT_PROVIDER=ollama
+set CHAT_MODEL=llama3.2:3b
+server-windows.exe
+
+# Terminal 2 - Web UI
+cd C:\Users\chinmay\Desktop\edgecli
+set WEB_ADDR=0.0.0.0:8080
+set GRPC_ADDR=localhost:50051
+set CHAT_PROVIDER=ollama
+set CHAT_MODEL=llama3.2:3b
+web-windows.exe
+```
+
+**Verify Chat & Agent:**
+```bash
+# From Mac
+curl http://10.206.87.35:8080/api/chat/health
+# {"ok":true,"provider":"ollama","model":"llama3.2:3b"}
+
+curl http://10.206.87.35:8080/api/agent/health
+# {"ok":true,"provider":"openai","model":"llama3.2:3b"}
+
+curl -X POST http://10.206.87.35:8080/api/agent \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What devices are in the mesh?"}'
+```
+
 ### Full Setup Guide
 
 See [docs/setup-guide-qai.md](setup-guide-qai.md) for step-by-step instructions.

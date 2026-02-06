@@ -1,6 +1,6 @@
 # EdgeMesh Hackathon Status — Team EdgeMesh (QAI Workstream)
 
-**Last updated**: 2026-02-06 15:10 EST  
+**Last updated**: 2026-02-06 18:55 EST  
 **Branch**: `rahil-qai`  
 **Owner**: Rahil Singhi  
 **Coordinator**: Rahil's Mac at `10.206.187.34:50051`
@@ -167,14 +167,16 @@ curl "http://localhost:8080/api/qaihub/job-status?job_id=jpyd4k40p"
 
 ### High Priority (Next 12 Hours)
 
-| Task | Why | Estimate |
+| Task | Why | Status |
 |---|---|---|
-| **Get ONNX models** | Need Qwen3-8B.onnx, Gemma-4B.onnx, QwenCode-14B.onnx | Find/export |
-| **Submit 3 compile jobs** | Show QAI Hub compiling for Snapdragon | 30 min |
-| **Test LLM_GENERATE end-to-end** | Install Ollama on Windows, test inference | 1 hour |
-| **Model routing logic** | Map request → model (summarize→Qwen3, code→QwenCode, img→Gemma) | 2 hours |
-| **Deploy compiled models** | Push .bin to Windows shared/ dir | 30 min |
-| **Update Web UI** | QAI Hub card with device catalog, job submission form | 2 hours |
+| **Get ONNX models** | Need Qwen3-8B.onnx, Gemma-4B.onnx, QwenCode-14B.onnx | Pending |
+| **Submit 3 compile jobs** | Show QAI Hub compiling for Snapdragon | Pending |
+| ~~Test LLM_GENERATE end-to-end~~ | ~~Install Ollama on Windows, test inference~~ | ✅ DONE |
+| **Model routing logic** | Map request → model (summarize→Qwen3, code→QwenCode, img→Gemma) | Pending |
+| **Deploy compiled models** | Push .bin to Windows shared/ dir | Pending |
+| **Update Web UI** | QAI Hub card with device catalog, job submission form | Pending |
+
+**Ollama on Windows**: Installed via `winget install Ollama.Ollama`. Models: `llama3.2:3b` (tool calling), `phi3:mini` (fast chat). Agent tool calling verified working.
 
 ### Medium Priority (If Time Permits)
 
@@ -223,7 +225,23 @@ ssh -f -N -L 50052:127.0.0.1:50051 chinmay@10.206.87.35
 
 **On Windows (QCWorkshop31)**:
 ```cmd
-C:\Users\chinmay\start-server.bat
+# Terminal 1: Ollama service
+ollama serve
+
+# Terminal 2: EdgeCLI Server (with Ollama chat)
+cd C:\Users\chinmay\Desktop\edgecli
+set GRPC_ADDR=:50051
+set CHAT_PROVIDER=ollama
+set CHAT_MODEL=llama3.2:3b
+server-windows.exe
+
+# Terminal 3: Web UI (optional, if running locally)
+cd C:\Users\chinmay\Desktop\edgecli
+set WEB_ADDR=0.0.0.0:8080
+set GRPC_ADDR=localhost:50051
+set CHAT_PROVIDER=ollama
+set CHAT_MODEL=llama3.2:3b
+web-windows.exe
 ```
 
 **On Teammates' Macs** (when they join):
@@ -247,9 +265,20 @@ COORDINATOR_ADDR=10.206.187.34:50051 GRPC_ADDR=0.0.0.0:50051 go run ./cmd/server
 
 ## Next Steps (Immediate)
 
-1. **Get the 3 ONNX models** (Qwen3-8B, Gemma-4B, QwenCode-14B) — do you have these or need to export them?
-2. **Install Ollama on Windows** — so `LLM_GENERATE` tasks can actually run inference
+1. ~~**Install Ollama on Windows**~~ — ✅ DONE (`llama3.2:3b` + `phi3:mini` installed, agent working)
+2. **Get the 3 ONNX models** (Qwen3-8B, Gemma-4B, QwenCode-14B) — do you have these or need to export them?
 3. **Submit compile jobs** — compile all 3 models for Samsung Galaxy S24 via QAI Hub
 4. **Test end-to-end inference** — send text prompt → Windows Snapdragon runs model → returns result
 
-Which do you want to tackle first?
+**Ollama Verified Working (2026-02-06)**:
+```bash
+# Chat health
+curl http://10.206.87.35:8080/api/chat/health
+# {"ok":true,"provider":"ollama","model":"llama3.2:3b"}
+
+# Agent with tool calling
+curl -X POST http://10.206.87.35:8080/api/agent \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What devices are in the mesh?"}'
+# Returns device info after calling get_capabilities tool
+```
