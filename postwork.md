@@ -32,11 +32,11 @@ If you changed platform-specific code (`_windows.go` / `_stub.go`), verify both 
 
 ## 4. Deploy and Test on Windows (if applicable)
 
-If changes affect the server binary and the Windows machine (10.20.38.80) is reachable:
+If changes affect the server binary and the Windows machine (10.206.87.35) is reachable:
 
 ```bash
 # Quick connectivity check
-ssh sshuser@10.20.38.80 "echo ok"
+sshpass -p 'root' ssh -o StrictHostKeyChecking=no chinmay@10.206.87.35 "echo ok"
 
 # Full deploy
 ./deploy-windows.sh
@@ -50,10 +50,10 @@ If you changed `brain/windows-ai-cli/`:
 
 ```bash
 # Build on Windows via SSH
-ssh sshuser@10.20.38.80 "cd C:\Users\sshuser.Batman\windows-ai-cli && dotnet build -c Release"
+sshpass -p 'root' ssh chinmay@10.206.87.35 "cd C:\Users\chinmay\Desktop\edgecli\windows-ai-cli && dotnet build -c Release"
 
 # Test commands
-ssh sshuser@10.20.38.80 "C:\Users\sshuser.Batman\windows-ai-cli\bin\Release\net8.0-windows10.0.22621.0\win-x64\WindowsAiCli.exe capabilities"
+sshpass -p 'root' ssh chinmay@10.206.87.35 "C:\Users\chinmay\Desktop\edgecli\windows-ai-cli\bin\Release\net8.0-windows10.0.22621.0\win-arm64\WindowsAiCli.exe capabilities"
 ```
 
 ## 6. Local Integration Test

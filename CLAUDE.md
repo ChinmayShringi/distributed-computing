@@ -19,7 +19,7 @@ make build-all      # Cross-platform builds (darwin/linux/windows)
 
 **Deploy to Windows:**
 ```bash
-./deploy-windows.sh  # Build, copy, and start server on Windows machine (10.20.38.80)
+./deploy-windows.sh  # Build, copy, and start server on Windows machine (10.206.87.35)
 ```
 
 This script:
@@ -220,9 +220,10 @@ When modifying `proto/orchestrator.proto`:
 ## Windows Machine
 
 ```
-Host: 10.20.38.80
-User: sshuser
+Host: 10.206.87.35
+User: chinmay
 Pass: root
+EdgeCLI dir: C:\Users\chinmay\Desktop\edgecli\
 ```
 
 See `docs/connection.md` for full details.

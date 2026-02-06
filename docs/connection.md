@@ -1,11 +1,12 @@
-# Windows Machine Setup
+# Windows Snapdragon Device Setup
 
 ## Connection Details
 
 ```
 Host: 10.206.87.35
-User: sshuser
+User: chinmay
 Pass: root
+Hardware: Snapdragon (ARM64) with NPU + GPU
 ```
 
 ## Using sshpass (recommended)
@@ -15,19 +16,19 @@ Pass: root
 brew install sshpass
 
 # Connect
-sshpass -p 'root' ssh -o StrictHostKeyChecking=no sshuser@10.206.87.35
+sshpass -p 'root' ssh -o StrictHostKeyChecking=no chinmay@10.206.87.35
 ```
 
 ## Deploying EdgeCLI Server to Windows
 
 **Important:** Use native Windows binaries, not WSL. WSL2 uses NAT networking which makes external access unreliable.
 
-### 1. Build Windows binaries on Mac
+### 1. Build Windows ARM64 binaries on Mac
 
 ```bash
 cd /path/to/project
-GOOS=windows GOARCH=amd64 go build -o dist/server-windows.exe ./cmd/server
-GOOS=windows GOARCH=amd64 go build -o dist/client-windows.exe ./cmd/client
+GOOS=windows GOARCH=arm64 go build -o dist/server-windows.exe ./cmd/server
+GOOS=windows GOARCH=arm64 go build -o dist/client-windows.exe ./cmd/client
 ```
 
 ### 2. Copy to Windows
@@ -35,15 +36,15 @@ GOOS=windows GOARCH=amd64 go build -o dist/client-windows.exe ./cmd/client
 ```bash
 sshpass -p 'root' scp -o StrictHostKeyChecking=no \
   dist/server-windows.exe dist/client-windows.exe \
-  "sshuser@10.206.87.35:C:/Users/sshuser.Batman/"
+  "chinmay@10.206.87.35:C:/Users/chinmay/Desktop/edgecli/"
 ```
 
 ### 3. Start Windows gRPC Server
 
 ```bash
 # Via SSH - note the special cmd syntax for environment variables
-sshpass -p 'root' ssh sshuser@10.206.87.35 \
-  'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\sshuser.Batman\server-windows.exe"'
+sshpass -p 'root' ssh chinmay@10.206.87.35 \
+  'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\chinmay\Desktop\edgecli\server-windows.exe"'
 ```
 
 **Note:** The `&&` must immediately follow the env value (no space) or cmd eats the colon.
@@ -51,7 +52,7 @@ sshpass -p 'root' ssh sshuser@10.206.87.35 \
 ### 4. Verify Server is Listening
 
 ```bash
-sshpass -p 'root' ssh sshuser@10.206.87.35 'netstat -an | findstr 50051'
+sshpass -p 'root' ssh chinmay@10.206.87.35 'netstat -an | findstr 50051'
 # Expected: TCP 0.0.0.0:50051 LISTENING
 ```
 
@@ -68,20 +69,22 @@ go run ./cmd/server
 ### Step 2: Start Windows gRPC Server
 
 ```bash
-# In another terminal
-sshpass -p 'root' ssh sshuser@10.206.87.35 \
-  'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\sshuser.Batman\server-windows.exe"'
+# In another terminal - use the batch script
+sshpass -p 'root' ssh chinmay@10.206.87.35 \
+  'C:\Users\chinmay\Desktop\edgecli\start-server.bat'
 ```
 
-### Step 3: Register Windows with Mac
+### Step 3: Register Windows Snapdragon with Mac
 
 ```bash
 # The client auto-generates a unique device ID for remote addresses
 go run ./cmd/client register \
-  --name "windows-batman" \
+  --name "windows-snapdragon" \
   --self-addr "10.206.87.35:50051" \
   --platform "windows" \
-  --arch "amd64"
+  --arch "arm64" \
+  --has-npu \
+  --has-gpu
 # Output: Generated new device ID for remote device: 23d1b497-...
 ```
 
@@ -117,12 +120,13 @@ curl -X POST http://localhost:8080/api/assistant \
   -d '{"text":"list devices"}'
 ```
 
-## Verified Configuration (2026-02-03)
+## Verified Configuration (2026-02-06)
 
 - SSH connection: Working
-- Native Windows binary: server-windows.exe
+- Native Windows ARM64 binary: server-windows.exe
 - gRPC server: Listening on 0.0.0.0:50051
-- Device name: Batman (windows-batman when registered)
+- Device name: windows-snapdragon
+- Hardware: Snapdragon NPU + GPU
 - Multi-device routing: PREFER_REMOTE correctly routes to Windows
 - Web UI: Accessible at http://localhost:8080
 
@@ -153,10 +157,14 @@ Pass: root
 |-----------|------|
 | Python 3.12 | `C:\Users\chinmay\Python312\` |
 | QAI Hub venv | `C:\Users\chinmay\venv-qaihub\` |
-| gRPC Server | `C:\Users\chinmay\server-windows-arm64.exe` |
-| gRPC Client | `C:\Users\chinmay\client-windows-arm64.exe` |
-| Shared dir | `C:\Users\chinmay\shared\` |
-| Server batch | `C:\Users\chinmay\start-server.bat` |
+| **EdgeCLI dir** | `C:\Users\chinmay\Desktop\edgecli\` |
+| gRPC Server | `C:\Users\chinmay\Desktop\edgecli\server-windows-arm64.exe` |
+| gRPC Client | `C:\Users\chinmay\Desktop\edgecli\client-windows-arm64.exe` |
+| Web Server | `C:\Users\chinmay\Desktop\edgecli\web-windows.exe` |
+| Shared dir | `C:\Users\chinmay\Desktop\edgecli\shared\` |
+| Device ID | `C:\Users\chinmay\Desktop\edgecli\.edgemesh\` |
+| Server batch | `C:\Users\chinmay\Desktop\edgecli\start-server.bat` |
+| Web batch | `C:\Users\chinmay\Desktop\edgecli\start-web.bat` |
 
 ### Building for ARM64
 
