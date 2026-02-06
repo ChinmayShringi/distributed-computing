@@ -363,6 +363,9 @@ func main() {
 	// QAI Hub endpoints
 	http.HandleFunc("/api/qaihub/doctor", server.handleQaihubDoctor)
 	http.HandleFunc("/api/qaihub/compile", server.handleQaihubCompile)
+	http.HandleFunc("/api/qaihub/devices", server.handleQaihubDevices)
+	http.HandleFunc("/api/qaihub/job-status", server.handleQaihubJobStatus)
+	http.HandleFunc("/api/qaihub/submit-compile", server.handleQaihubSubmitCompile)
 
 	// Chat endpoints
 	http.HandleFunc("/api/chat", server.handleChat)
@@ -1472,6 +1475,158 @@ func (s *WebServer) handleQaihubCompile(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		log.Printf("[ERROR] handleQaihubCompile: %v", err)
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Compile failed: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleQaihubDevices returns the QAI Hub cloud device catalog
+func (s *WebServer) handleQaihubDevices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !s.qaihubClient.IsAvailable() {
+		s.writeError(w, http.StatusServiceUnavailable, "qai-hub CLI is not available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	result, err := s.qaihubClient.ListDevices(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubDevices: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("ListDevices failed: %v", err))
+		return
+	}
+
+	// Optional filtering via query params
+	nameFilter := r.URL.Query().Get("name")
+	chipsetFilter := r.URL.Query().Get("chipset")
+	vendorFilter := r.URL.Query().Get("vendor")
+
+	devices := result.Devices
+	if nameFilter != "" {
+		var filtered []qaihub.TargetDevice
+		for _, d := range devices {
+			if strings.Contains(strings.ToLower(d.Name), strings.ToLower(nameFilter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		devices = filtered
+	}
+	if chipsetFilter != "" {
+		var filtered []qaihub.TargetDevice
+		for _, d := range devices {
+			if strings.Contains(strings.ToLower(d.Chipset), strings.ToLower(chipsetFilter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		devices = filtered
+	}
+	if vendorFilter != "" {
+		var filtered []qaihub.TargetDevice
+		for _, d := range devices {
+			if strings.Contains(strings.ToLower(d.Vendor), strings.ToLower(vendorFilter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		devices = filtered
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"count":   len(devices),
+		"devices": devices,
+	})
+}
+
+// QaihubJobStatusRequest is the JSON request for /api/qaihub/job-status
+type QaihubJobStatusRequest struct {
+	JobID string `json:"job_id"`
+}
+
+// handleQaihubJobStatus checks the status of a QAI Hub compile job
+func (s *WebServer) handleQaihubJobStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var jobID string
+	if r.Method == http.MethodGet {
+		jobID = r.URL.Query().Get("job_id")
+	} else {
+		var req QaihubJobStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+			return
+		}
+		jobID = req.JobID
+	}
+
+	if jobID == "" {
+		s.writeError(w, http.StatusBadRequest, "job_id is required")
+		return
+	}
+
+	if !s.qaihubClient.IsAvailable() {
+		s.writeError(w, http.StatusServiceUnavailable, "qai-hub CLI is not available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := s.qaihubClient.GetJobStatus(ctx, jobID)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubJobStatus: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Job status check failed: %v", err))
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// QaihubSubmitCompileRequest is the JSON request for /api/qaihub/submit-compile
+type QaihubSubmitCompileRequest struct {
+	Model      string `json:"model"`       // ONNX path or QAI Hub model ID
+	DeviceName string `json:"device_name"` // e.g. "Samsung Galaxy S24 (Family)"
+	Options    string `json:"options"`     // extra compile options
+}
+
+// handleQaihubSubmitCompile submits a compile job via the Python SDK
+func (s *WebServer) handleQaihubSubmitCompile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req QaihubSubmitCompileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.Model == "" {
+		s.writeError(w, http.StatusBadRequest, "model is required (ONNX path or model ID)")
+		return
+	}
+	if req.DeviceName == "" {
+		req.DeviceName = "Samsung Galaxy S24 (Family)"
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	log.Printf("[INFO] handleQaihubSubmitCompile: model=%s device=%s", req.Model, req.DeviceName)
+
+	result, err := s.qaihubClient.SubmitCompile(ctx, req.Model, req.DeviceName, req.Options)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubSubmitCompile: %v", err)
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Compile submission failed: %v", err))
 		return
 	}
 
