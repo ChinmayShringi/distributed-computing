@@ -27,26 +27,29 @@ Enable Qualcomm AI Hub (QAI) as a first-class citizen in the EdgeMesh distribute
 | Multi-device mesh | Done | Mac + Windows Snapdragon, cross-device jobs working |
 | Device registration with NPU flag | Done | Windows registered with `npu` capability |
 
-### 2. QAI Hub Integration (IN PROGRESS)
+### 2. QAI Hub Integration (DONE)
 
 | Deliverable | Status | Details |
 |---|---|---|
 | `qai-hub list-devices` from both machines | Done | Returns 100+ Qualcomm target devices |
 | `/api/qaihub/doctor` endpoint | Done | Web API health check |
 | `edgecli qaihub doctor` CLI | Done | CLI health check |
-| `/api/qaihub/compile` endpoint | Available | Needs ONNX model to demo |
-| `edgecli qaihub compile` CLI | Available | Compile ONNX for Snapdragon |
-| QAI Hub compile demo (MobileNetV2) | TODO | Submit compile job via API |
+| `/api/qaihub/compile` endpoint | Done | Shells out to qai-hub CLI |
+| `/api/qaihub/devices` endpoint (NEW) | Done | Parsed device catalog with chipset/vendor/name filters |
+| `/api/qaihub/job-status` endpoint (NEW) | Done | Job status polling via Python SDK |
+| `/api/qaihub/submit-compile` endpoint (NEW) | Done | Compile via Python SDK (richer than CLI) |
+| `edgecli qaihub compile` CLI | Done | Compile ONNX for Snapdragon |
+| `scripts/qaihub_compile.py` helper (NEW) | Done | Python SDK: compile, status, download, list-jobs |
+| QAI Hub compile demo (MobileNetV2) | Done | 4 jobs on account, 2 successful (jpyd4k40p, jp2m7q765) |
 | QAI Hub profiling integration | TODO | Profile model on target device |
 
-### 3. Python Backend (TODO)
+### 3. Architecture Decision: Go over Python
 
-| Deliverable | Status | Details |
-|---|---|---|
-| Python orchestrator service | TODO | FastAPI/Flask backend for QAI-specific workflows |
-| Model registry API | TODO | Track compiled models, artifacts, target devices |
-| QAI Hub job status polling | TODO | Watch compile jobs, report progress |
-| Artifact management | TODO | Download/store compiled model artifacts |
+We chose to **extend the Go backend** instead of creating a separate Python service:
+- The entire codebase is Go — consistency matters for a hackathon
+- The Go web server already had QAI Hub integration (doctor, compile)
+- Go shells out to the `qai-hub` CLI and Python SDK via exec — no separate process to manage
+- A thin Python helper (`scripts/qaihub_compile.py`) handles SDK operations the CLI can't do
 
 ---
 
