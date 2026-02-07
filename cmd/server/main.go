@@ -2333,6 +2333,7 @@ func callOllamaChat(ctx context.Context, baseURL, model, prompt string) (string,
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
 	return result.Message.Content, nil
 }
 
@@ -2732,7 +2733,6 @@ func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		}
 
 	default:
-<<<<<<< HEAD
 		reply, mode, jobID, planDebug = h.handleAssistantDefault(ctx, req.Message)
 	}
 
@@ -2762,9 +2762,6 @@ func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		mem.SummarizeAsync(h.performSummarization, func() {
 			h.orchestrator.broadcastChatMemory(deviceID)
 		})
-=======
-		reply, mode, jobID, planDebug = h.handleAssistantDefault(ctx, req.Text)
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 	}
 
 	h.writeJSON(w, http.StatusOK, AssistantResponse{
@@ -3915,7 +3912,15 @@ func (h *WebHandler) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
-	reply, err := h.chat.Chat(ctx, req.Messages)
+	llmMsgs := make([]llm.ChatMessage, len(req.Messages))
+	for i, m := range req.Messages {
+		llmMsgs[i] = llm.ChatMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+	}
+
+	reply, err := h.chat.Chat(ctx, llmMsgs)
 	if err != nil {
 		log.Printf("[ERROR] handleChat: %v", err)
 		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Chat failed: %v", err))

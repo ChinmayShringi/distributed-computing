@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-=======
 import 'dart:typed_data';
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../theme/app_colors.dart';
@@ -9,12 +6,9 @@ import '../../shared/widgets/edge_mesh_wordmark.dart';
 import '../../shared/widgets/status_strip.dart';
 import '../../shared/widgets/glass_container.dart';
 import '../../services/grpc_service.dart';
-<<<<<<< HEAD
-=======
 import '../../services/rest_api_client.dart';
 import '../../services/webrtc_stream_service.dart';
 import 'models/stream_models.dart';
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 
 class StreamScreen extends StatefulWidget {
   const StreamScreen({super.key});
@@ -25,12 +19,6 @@ class StreamScreen extends StatefulWidget {
 
 class _StreamScreenState extends State<StreamScreen> {
   final _grpcService = GrpcService();
-<<<<<<< HEAD
-  List<Map<String, dynamic>> _devices = [];
-  Map<String, dynamic>? _selectedDevice;
-  bool _isLoading = true;
-  bool _isStreaming = false;
-=======
   RestApiClient? _restApiClient;
   WebRTCStreamService? _webrtcService;
 
@@ -43,14 +31,10 @@ class _StreamScreenState extends State<StreamScreen> {
   int _fps = 8;
   int _quality = 60;
   int _monitorIndex = 0;
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 
   @override
   void initState() {
     super.initState();
-<<<<<<< HEAD
-    _loadDevices();
-=======
     _initServices();
   }
 
@@ -95,28 +79,20 @@ class _StreamScreenState extends State<StreamScreen> {
 
   void _onFrameCountChanged() {
     if (mounted) setState(() {});
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
   }
 
   Future<void> _loadDevices() async {
     try {
       final devices = await _grpcService.listDevices();
-<<<<<<< HEAD
-=======
       // Filter to devices that can screen capture
       final capableDevices = devices.where((d) {
         return d['can_screen_capture'] == true;
       }).toList();
 
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
       if (mounted) {
         setState(() {
           _devices = devices;
           _isLoading = false;
-<<<<<<< HEAD
-          if (_selectedDevice == null && devices.isNotEmpty) {
-            _selectedDevice = devices.first;
-=======
           // Select first capable device, or first device
           if (_selectedDevice == null) {
             if (capableDevices.isNotEmpty) {
@@ -124,14 +100,10 @@ class _StreamScreenState extends State<StreamScreen> {
             } else if (devices.isNotEmpty) {
               _selectedDevice = devices.first;
             }
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
           }
         });
       }
     } catch (e) {
-<<<<<<< HEAD
-      if (mounted) setState(() { _devices = []; _isLoading = false; });
-=======
       debugPrint('Error loading devices: $e');
       if (mounted) {
         setState(() {
@@ -139,7 +111,6 @@ class _StreamScreenState extends State<StreamScreen> {
           _isLoading = false;
         });
       }
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
     }
   }
 
@@ -151,28 +122,6 @@ class _StreamScreenState extends State<StreamScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-<<<<<<< HEAD
-      builder: (ctx) => ListView.builder(
-        shrinkWrap: true,
-        itemCount: _devices.length,
-        itemBuilder: (_, i) {
-          final d = _devices[i];
-          final isSelected = _selectedDevice?['device_id'] == d['device_id'];
-          return ListTile(
-            leading: Icon(
-              (d['platform']?.toString().toLowerCase().contains('android') ?? false) ? LucideIcons.smartphone : LucideIcons.laptop,
-              color: isSelected ? AppColors.safeGreen : AppColors.textSecondary,
-            ),
-            title: Text(d['device_name']?.toString() ?? 'Unknown'),
-            subtitle: Text('${d['platform']} ${d['arch']}'),
-            trailing: isSelected ? const Icon(LucideIcons.check, color: AppColors.safeGreen) : null,
-            onTap: () {
-              setState(() => _selectedDevice = d);
-              Navigator.pop(ctx);
-            },
-          );
-        },
-=======
       builder: (ctx) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -250,35 +199,17 @@ class _StreamScreenState extends State<StreamScreen> {
             ),
           ),
         ],
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
       ),
     );
   }
 
-<<<<<<< HEAD
-  void _initializeStream() {
-    if (_selectedDevice == null) {
-=======
   Future<void> _startStream() async {
     if (_selectedDevice == null || _webrtcService == null) {
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a source device first')),
       );
       return;
     }
-<<<<<<< HEAD
-    setState(() => _isStreaming = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Stream from ${_selectedDevice!['device_name']} - Start stream from the orchestrator on your laptop to view.'),
-        backgroundColor: AppColors.infoBlue,
-      ),
-    );
-    setState(() => _isStreaming = false);
-  }
-
-=======
 
     try {
       await _webrtcService!.startStream(
@@ -324,47 +255,23 @@ class _StreamScreenState extends State<StreamScreen> {
   bool get _isConnecting => _streamState == WebRTCStreamState.connecting;
   bool get _isStreaming => _streamState == WebRTCStreamState.connected;
 
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
           color: AppColors.backgroundDark,
-<<<<<<< HEAD
-          image: DecorationImage(
-            image: NetworkImage('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=2670&ixlib=rb-4.0.3'),
-            fit: BoxFit.cover,
-            opacity: 0.03,
-          ),
-=======
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
         ),
         child: SafeArea(
           child: Column(
             children: [
-<<<<<<< HEAD
-               Padding(
-=======
               // Header
               Padding(
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const EdgeMeshWordmark(fontSize: 20),
-<<<<<<< HEAD
-                    const Icon(LucideIcons.activity, color: AppColors.primaryRed, size: 20),
-                  ],
-                ),
-              ),
-              const StatusStrip(
-                isConnected: true,
-                serverAddress: '192.168.1.10:50051',
-                isDangerous: false,
-              ),
-=======
                     Row(
                       children: [
                         if (_isStreaming)
@@ -415,7 +322,6 @@ class _StreamScreenState extends State<StreamScreen> {
                 isDangerous: false,
               ),
 
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
               // Stream Viewport
               Expanded(
                 child: Padding(
@@ -425,28 +331,6 @@ class _StreamScreenState extends State<StreamScreen> {
                     borderRadius: 20,
                     child: Stack(
                       children: [
-<<<<<<< HEAD
-                        // Simulated Feed
-                        Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(LucideIcons.monitorOff, size: 48, color: Colors.white.withOpacity(0.1)),
-                              const SizedBox(height: 16),
-                              Text(
-                                'NO ACTIVE ENCRYPTED FEED',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.2),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        
-=======
                         // Frame Display or Placeholder
                         if (_isStreaming && _webrtcService != null)
                           StreamBuilder<Uint8List>(
@@ -469,7 +353,6 @@ class _StreamScreenState extends State<StreamScreen> {
                         else
                           _buildPlaceholder(),
 
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                         // Status Overlay
                         Positioned(
                           top: 16,
@@ -477,14 +360,6 @@ class _StreamScreenState extends State<StreamScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-<<<<<<< HEAD
-                              _OverlayPill(label: 'ENCRYPTED', color: AppColors.primaryRed, icon: LucideIcons.lock),
-                              const SizedBox(height: 8),
-                              _OverlayPill(label: '4K • 60FPS', color: Colors.white.withOpacity(0.5), icon: LucideIcons.activity),
-                            ],
-                          ),
-                        ),
-=======
                               _OverlayPill(
                                 label: _isStreaming
                                     ? 'STREAMING'
@@ -535,7 +410,6 @@ class _StreamScreenState extends State<StreamScreen> {
                               icon: LucideIcons.laptop,
                             ),
                           ),
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                       ],
                     ),
                   ),
@@ -548,29 +422,6 @@ class _StreamScreenState extends State<StreamScreen> {
                 child: GlassContainer(
                   child: Column(
                     children: [
-<<<<<<< HEAD
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(LucideIcons.laptop, color: AppColors.primaryRed),
-                        title: const Text('Source Node', style: TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: const Text('Node-Alpha-7 (Samsung S24)'),
-                        trailing: const Icon(LucideIcons.chevronDown, size: 16),
-                        onTap: () {},
-                      ),
-                      const Divider(color: Colors.white10),
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        onPressed: () {},
-                        icon: _isStreaming ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(LucideIcons.play, size: 16),
-                        label: Text(_isStreaming ? 'INITIALIZING...' : 'INITIALIZE STREAM'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.primaryRed,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(double.infinity, 54),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-=======
                       // Device Selector
                       ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -669,7 +520,6 @@ class _StreamScreenState extends State<StreamScreen> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                         ),
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                     ],
                   ),
                 ),
@@ -680,8 +530,6 @@ class _StreamScreenState extends State<StreamScreen> {
       ),
     );
   }
-<<<<<<< HEAD
-=======
 
   Widget _buildPlaceholder() {
     return Center(
@@ -742,7 +590,6 @@ class _StreamScreenState extends State<StreamScreen> {
       ),
     );
   }
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 }
 
 class _OverlayPill extends StatelessWidget {

@@ -337,8 +337,6 @@ class GrpcService {
       throw Exception('Failed to get activity: ${e.message}');
     }
   }
-<<<<<<< HEAD
-=======
 
   /// Submit a distributed job across devices
   /// Returns: job_id, created_at, summary
@@ -386,5 +384,4 @@ class GrpcService {
       throw Exception('Failed to get device metrics: ${e.message}');
     }
   }
->>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 }
