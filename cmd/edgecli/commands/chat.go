@@ -9,37 +9,28 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/edgecli/edgecli/internal/ui"
 	"github.com/spf13/cobra"
 )
 
-var chatCmd = &cobra.Command{
-	Use:   "chat [message]",
-	Short: "Interactive LLM chat with tool calling",
-	Long: `Start an interactive chat session with the LLM that can call tools
-to interact with devices in the mesh.
-
-Available tools:
-  - get_capabilities: List all devices and their capabilities
-  - execute_shell_cmd: Run shell commands on devices
-  - get_file: Read files from devices
-
-Examples:
-  # Interactive mode
-  edgecli chat
-
-  # Single message mode
-  edgecli chat "show disk usage on all devices"
-
-  # Custom web server address
-  edgecli chat --web-addr localhost:8080 "list devices"
-`,
-	RunE: runChat,
-}
-
-var chatWebAddr string
+var (
+	chatCmd = &cobra.Command{
+		Use:   "chat [message]",
+		Short: "Interactive LLM chat with tool calling",
+		Long: `Start an interactive chat session with the LLM that can call tools
+to interact with devices in the mesh.`,
+		RunE: runChat,
+	}
+	
+	chatWebAddr     string
+	lastMessageCount int
+	isChatting      atomic.Bool
+	printMutex      sync.Mutex
+)
 
 func init() {
 	chatCmd.Flags().StringVar(&chatWebAddr, "web-addr", "localhost:8080", "Web server address")
@@ -64,6 +55,18 @@ type chatResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// chatMemoryResponse matches the JSON structure from /api/chat/memory
+type chatMemoryResponse struct {
+	Version       int `json:"version"`
+	LastUpdatedMs int64 `json:"last_updated_ms"`
+	Summary       string `json:"summary"`
+	Messages      []struct {
+		Role        string `json:"role"`
+		Content     string `json:"content"`
+		TimestampMs int64  `json:"timestamp_ms"`
+	} `json:"messages"`
+}
+
 func runChat(cmd *cobra.Command, args []string) error {
 	// If a message is provided as argument, run in single-shot mode
 	if len(args) > 0 {
@@ -81,6 +84,14 @@ func runChat(cmd *cobra.Command, args []string) error {
 	header := ui.RenderHeader("EdgeMesh", "1.0", currentUser, chatWebAddr, cwd)
 	fmt.Print(header)
 	fmt.Print(ui.RenderHelpLines())
+
+	// Fetch and display history
+	fetchAndDisplayHistory()
+
+	// Start background polling
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go pollChatHistory(ctx)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -105,39 +116,69 @@ func runChat(cmd *cobra.Command, args []string) error {
 			printChatTools()
 			continue
 		case "clear":
-			// Clear screen
 			fmt.Print("\033[H\033[2J")
-			header := ui.RenderHeader("EdgeMesh", "1.0", currentUser, chatWebAddr, cwd)
 			fmt.Print(header)
 			fmt.Print(ui.RenderHelpLines())
 			continue
 		}
 
-		// Handle shell commands with !
+		// Handle shell commands
 		if strings.HasPrefix(input, "!") {
 			shellCmd := strings.TrimPrefix(input, "!")
 			fmt.Println(ui.RenderDim(fmt.Sprintf("Running: %s", shellCmd)))
-			// Note: actual shell execution would go here
 			fmt.Println(ui.RenderDim("(Shell execution not implemented in chat mode)"))
 			continue
 		}
 
-		if err := sendChatMessage(input, true); err != nil {
+		isChatting.Store(true)
+		reply, err := sendChatMessageWithReply(input, true)
+		isChatting.Store(false)
+		
+		if err != nil {
 			fmt.Println(ui.RenderError(err))
+		} else {
+			// Explicitly print the interaction to ensure it's visible (handling spinner line clearing)
+			// and that the reply is shown (since syncAndPrintNew skips it)
+			fmt.Println(ui.RenderUserPrompt() + input)
+			fmt.Println(ui.RenderAssistantPrefix() + reply)
+
+			// Sync and skip our own message and reply
+			syncAndPrintNew(input, reply)
 		}
-		fmt.Println() // Add spacing after response
+		fmt.Println() 
 	}
 
 	return scanner.Err()
 }
 
+func fetchAndDisplayHistory() {
+	// Re-use syncAndPrintNew logic for initial load, but maybe add summary support later
+	// For now, just treating it as a sync from 0 works perfectly to display all messages.
+	syncAndPrintNew("", "")
+}
+
 func sendChatMessage(message string, interactive bool) error {
+	reply, err := sendChatMessageWithReply(message, interactive)
+	if err != nil {
+		return err
+	}
+	if interactive {
+		// In interactive mode, the runChat loop handles printing via syncAndPrintNew
+		// to ensure deduplication. We don't print here.
+	} else {
+		// In single-shot mode, we must print the reply.
+		fmt.Println(reply)
+	}
+	return nil
+}
+
+func sendChatMessageWithReply(message string, interactive bool) (string, error) {
 	url := fmt.Sprintf("http://%s/api/agent", chatWebAddr)
 
 	reqBody := chatRequest{Message: message}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
+		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -145,7 +186,7 @@ func sendChatMessage(message string, interactive bool) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(bodyBytes)))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -157,7 +198,7 @@ func sendChatMessage(message string, interactive bool) error {
 	spinner.Stop()
 
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return "", fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -166,22 +207,22 @@ func sendChatMessage(message string, interactive bool) error {
 			Error string `json:"error"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != "" {
-			return fmt.Errorf("server error: %s", errResp.Error)
+			return "", fmt.Errorf("server error: %s", errResp.Error)
 		}
-		return fmt.Errorf("server returned status %d", resp.StatusCode)
+		return "", fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
 	var chatResp chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Display results
+	// Returns error string as error
 	if chatResp.Error != "" {
-		return fmt.Errorf("%s", chatResp.Error)
+		return "", fmt.Errorf("%s", chatResp.Error)
 	}
 
-	// Show tool calls info if any
+	// Show tool calls info if any (Side effect: prints to stdout)
 	if len(chatResp.ToolCalls) > 0 {
 		toolInfo := fmt.Sprintf("[%d tool call(s) in %d iteration(s)]", len(chatResp.ToolCalls), chatResp.Iterations)
 		fmt.Println(ui.RenderDim(toolInfo))
@@ -191,14 +232,85 @@ func sendChatMessage(message string, interactive bool) error {
 		fmt.Println()
 	}
 
-	// Show reply with assistant prefix
-	if interactive {
-		fmt.Print(ui.RenderAssistantPrefix())
-	}
-	fmt.Println(chatResp.Reply)
-
-	return nil
+	return chatResp.Reply, nil
 }
+
+func pollChatHistory(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !isChatting.Load() {
+				syncAndPrintNew("", "")
+			}
+		}
+	}
+}
+
+func syncAndPrintNew(skipUser, skipAgent string) {
+	printMutex.Lock()
+	defer printMutex.Unlock()
+
+	url := fmt.Sprintf("http://%s/api/chat/memory", chatWebAddr)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	
+	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	var mem chatMemoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&mem); err != nil {
+		return
+	}
+
+	if len(mem.Messages) > lastMessageCount {
+		newMsgs := mem.Messages[lastMessageCount:]
+		for _, msg := range newMsgs {
+			// Dedup check
+			if skipUser != "" && msg.Role == "user" && strings.TrimSpace(msg.Content) == strings.TrimSpace(skipUser) {
+				continue
+			}
+			if skipAgent != "" && msg.Role == "assistant" && strings.TrimSpace(msg.Content) == strings.TrimSpace(skipAgent) {
+				continue
+			}
+
+			// Print new message
+			// We need to clear current line to avoid mess with prompt?
+			// Ideally yes, but tricky. We'll just print newline.
+			fmt.Println() 
+			if msg.Role == "user" {
+				fmt.Print(ui.RenderUserPrompt() + msg.Content + "\n")
+			} else {
+				fmt.Print(ui.RenderAssistantPrefix() + msg.Content + "\n")
+			}
+		}
+		
+		// If we printed something via background polling, prompt might be buried. 
+		// Ideally we reprint prompt.
+		if skipUser == "" && skipAgent == "" && len(newMsgs) > 0 {
+			fmt.Print(ui.RenderUserPrompt()) 
+		}
+
+		lastMessageCount = len(mem.Messages)
+	}
+}
+
 
 func printChatHelp() {
 	fmt.Println()

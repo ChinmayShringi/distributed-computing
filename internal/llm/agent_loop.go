@@ -116,13 +116,17 @@ type ToolCallInfo struct {
 	ResultLen int    `json:"result_len"`
 }
 
-// Run executes the agent loop for a user message
-func (a *AgentLoop) Run(ctx context.Context, userMessage string) (*AgentResponse, error) {
-	// Initialize conversation with system prompt and user message
+// Run executes the agent loop for a user message, with history
+func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []ToolChatMessage) (*AgentResponse, error) {
+	// Initialize conversation with system prompt
 	messages := []ToolChatMessage{
 		{Role: "system", Content: a.systemPrompt},
-		{Role: "user", Content: userMessage},
 	}
+	// Append history
+	messages = append(messages, history...)
+	
+	// Append current user message
+	messages = append(messages, ToolChatMessage{Role: "user", Content: userMessage})
 
 	tools := GetToolDefinitions()
 	var toolCallLog []ToolCallInfo
@@ -195,7 +199,7 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string) (*AgentResponse
 
 // RunSimple is a convenience method that returns just the reply string
 func (a *AgentLoop) RunSimple(ctx context.Context, userMessage string) (string, error) {
-	resp, err := a.Run(ctx, userMessage)
+	resp, err := a.Run(ctx, userMessage, nil)
 	if err != nil {
 		return "", err
 	}
