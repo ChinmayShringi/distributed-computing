@@ -44,7 +44,9 @@ export const ActivityPage = () => {
   } = useActivityPolling({ enabled: false, includeMetricsHistory: true });
 
   const runningTasks = data?.activity?.running_tasks || [];
-  const deviceActivities = data?.activity?.device_activities || [];
+  const deviceActivities = (data?.activity?.device_activities || [])
+    .slice()
+    .sort((a, b) => a.device_id.localeCompare(b.device_id));
   const deviceMetrics = data?.device_metrics || {};
 
   return (
@@ -204,9 +206,8 @@ export const ActivityPage = () => {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.05 }}
-                className={`p-4 rounded-lg border border-outline bg-surface-2 ${
-                  task.state === 'RUNNING' ? 'animate-pulse' : ''
-                }`}
+                className={`p-4 rounded-lg border border-outline bg-surface-2 ${task.state === 'RUNNING' ? 'animate-pulse' : ''
+                  }`}
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">

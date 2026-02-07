@@ -5,6 +5,7 @@
 set -e
 ARDUINO_IP="${ARDUINO_IP:-10.206.56.57}"
 ARDUINO_USER="${ARDUINO_USER:-arduino}"
+ARDUINO_PASS="${ARDUINO_PASS:-edgemesh}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -15,62 +16,77 @@ MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/q
 # Local temp dir
 mkdir -p dist/arduino-deploy
 cd dist/arduino-deploy
+# Helper for SSH/SCP with pass
+function run_ssh() {
+    sshpass -p "$ARDUINO_PASS" ssh -o StrictHostKeyChecking=no "$@"
+}
+function run_scp() {
+    sshpass -p "$ARDUINO_PASS" scp -o StrictHostKeyChecking=no "$@"
+}
 
 echo "=== Preparing Deployment for Dragonwing ($ARDUINO_IP) ==="
 
-# 1. Download llama.cpp binary (if not exists)
+# 1. Cleaning up old processes
+echo "Cleaning up old processes on device..."
+run_ssh "$ARDUINO_USER@$ARDUINO_IP" "killall -9 llama-server edgemesh-server-linux-arm64 || true"
+
+# 2. Download llama.cpp binary (if not exists)
 if [ ! -f "llama-bin.tar.gz" ]; then
     echo "Downloading llama.cpp binary..."
     curl -L -o llama-bin.tar.gz "$LLAMA_URL"
 fi
 
-# 2. Extract and prepare binary
+# 3. Extract and prepare binary
 if [ ! -f "llama-server" ]; then
     echo "Extracting llama-server..."
     tar -xzf llama-bin.tar.gz
-    # The tar might contain a folder or direct binaries. We need 'llama-server'.
-    # Adjust based on tarball structure. Assuming standard structure:
-    if [ -f "bin/llama-server" ]; then
-        cp bin/llama-server .
-    elif [ -f "llama-server" ]; then
-        : # It's here
-    else
-        # Try finding it
-        find . -name "llama-server" -exec cp {} . \;
-    fi
+    
+    # Find and copy llama-server
+    find . -name "llama-server" -exec cp {} . \;
 fi
 
-# 3. Download Model (if not exists)
+# Always ensure .so files are copied (they might be missing from previous partial runs)
+if [ ! -f "libllama.so" ]; then
+    echo "Extracting shared libraries..."
+    tar -xzf llama-bin.tar.gz 2>/dev/null || true
+    find . -name "*.so*" -exec cp {} . \; 2>/dev/null || true
+fi
+
+# 4. Download Model (if not exists)
 if [ ! -f "qwen2.5-0.5b-instruct-q4_k_m.gguf" ]; then
     echo "Downloading Qwen-0.5B model..."
     curl -L -o qwen2.5-0.5b-instruct-q4_k_m.gguf "$MODEL_URL"
 fi
 
-# 4. Build EdgeMesh server for Linux ARM64
+# 5. Build EdgeMesh server for Linux ARM64
 echo "Building EdgeMesh Server..."
 cd "$PROJECT_ROOT"
 GOOS=linux GOARCH=arm64 go build -o dist/arduino-deploy/edgemesh-server-linux-arm64 ./cmd/server
 cd dist/arduino-deploy
 
-# 5. Push to Device
+# 6. Push to Device
 echo "Copying files to device (this may take a minute)..."
 # Create remote directory
-ssh "$ARDUINO_USER@$ARDUINO_IP" "mkdir -p /tmp/edgemesh"
+run_ssh "$ARDUINO_USER@$ARDUINO_IP" "mkdir -p /tmp/edgemesh"
 
-# SCP files
-scp llama-server \
+# SCP files (including libs)
+run_scp llama-server \
+    *.so* \
     qwen2.5-0.5b-instruct-q4_k_m.gguf \
     edgemesh-server-linux-arm64 \
     "$ARDUINO_USER@$ARDUINO_IP:/tmp/edgemesh/"
 
-# 6. Start Services
+# 7. Start Services
 echo "Starting services on device..."
 
 # Generate startup script on device
-ssh "$ARDUINO_USER@$ARDUINO_IP" "cat > /tmp/edgemesh/start.sh << 'EOF'
+run_ssh "$ARDUINO_USER@$ARDUINO_IP" "cat > /tmp/edgemesh/start.sh << 'EOF'
 #!/bin/bash
 cd /tmp/edgemesh
 chmod +x llama-server edgemesh-server-linux-arm64
+
+# Add current dir to library path
+export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:.
 
 # Start llama-server
 echo 'Starting llama-server...'
@@ -95,6 +111,7 @@ export LLM_ENDPOINT=http://127.0.0.1:8080
 export LLM_MODEL=qwen2.5-0.5b-instruct-q4_k_m.gguf
 export DEVICE_ID=dragonwing-arduino
 export SHARED_DIR=/tmp/edgemesh/shared
+export WEB_ADDR=0.0.0.0:8090
 mkdir -p \$SHARED_DIR
 
 nohup ./edgemesh-server-linux-arm64 > edgemesh.log 2>&1 &
@@ -105,8 +122,8 @@ EOF
 "
 
 # Execute startup script
-ssh "$ARDUINO_USER@$ARDUINO_IP" "bash /tmp/edgemesh/start.sh"
+run_ssh "$ARDUINO_USER@$ARDUINO_IP" "bash /tmp/edgemesh/start.sh"
 
 echo "=== Deployment Complete ==="
 echo "Register the device from your Mac:"
-echo "go run ./cmd/client register --id dragonwing-arduino --name DragonwingAI --self-addr $ARDUINO_IP:50051 --platform linux --arch arm64 --has-npu"
+echo "go run ./cmd/client register --id dragonwing-arduino --name DragonwingAI --self-addr $ARDUINO_IP:50051 --platform linux --arch arm64 -npu"

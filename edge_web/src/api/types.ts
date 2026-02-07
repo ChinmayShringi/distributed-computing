@@ -28,6 +28,7 @@ export function hasCapability(device: Device, cap: 'gpu' | 'npu' | 'cpu'): boole
 }
 
 
+
 // Command execution types
 export interface RoutedCommandRequest {
   cmd: string;
