@@ -180,7 +180,7 @@ GOOS=windows GOARCH=arm64 go build -o dist/client-windows-arm64.exe ./cmd/client
 ```
 EdgeMesh gRPC  - TCP inbound 50051
 EdgeMesh HTTP  - TCP inbound 8081
-EdgeMesh Discovery - UDP inbound 50050 (for P2P mode)
+EdgeMesh Discovery - UDP inbound 50051 (for P2P mode)
 ```
 
 ### P2P Discovery (Automatic Mesh) - Enabled by Default
@@ -223,7 +223,7 @@ P2P_DISCOVERY=false go run ./cmd/server
 ```
 
 **How it works:**
-1. Each device broadcasts presence on UDP port 50050 every 5 seconds
+1. Each device broadcasts presence on UDP port 50051 every 5 seconds
 2. Other devices receive broadcasts and add to their local registry
 3. Devices removed after 30s of no broadcasts (stale timeout)
 4. Graceful shutdown sends LEAVE message
@@ -232,7 +232,7 @@ P2P_DISCOVERY=false go run ./cmd/server
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `P2P_DISCOVERY` | `true` | UDP broadcast discovery (set `false` to disable) |
-| `DISCOVERY_PORT` | `50050` | UDP port for broadcasts |
+| `DISCOVERY_PORT` | `50051` | UDP port for broadcasts |
 | `SEED_PEERS` | (empty) | Comma-separated IPs for cross-subnet discovery |
 
 **Cross-Subnet Discovery:**
@@ -248,7 +248,7 @@ Each device sends announcements directly to all seed peers, enabling discovery a
 
 **Windows Firewall (PowerShell Admin):**
 ```powershell
-New-NetFirewallRule -DisplayName "EdgeCLI Discovery" -Direction Inbound -Protocol UDP -LocalPort 50050 -Action Allow
+New-NetFirewallRule -DisplayName "EdgeCLI Discovery" -Direction Inbound -Protocol UDP -LocalPort 50051 -Action Allow
 ```
 
 **Verify Discovery:**
