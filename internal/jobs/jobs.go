@@ -2,6 +2,7 @@
 package jobs
 
 import (
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -250,23 +251,35 @@ func (m *Manager) GenerateSmartPlan(userText string, devices []*pb.DeviceInfo) *
 		}
 	} else if isLLMTask {
 		// Create LLM_GENERATE task routed to best device (NPU > GPU > CPU)
+		// First, filter for devices that actually have LLM capability
+		llmDevices := FilterLLMDevices(devices)
+
 		var bestDevice *pb.DeviceInfo
-		for _, d := range devices {
-			if d.HasNpu {
-				bestDevice = d
-				break
-			}
-		}
-		if bestDevice == nil {
+		if len(llmDevices) > 0 {
+			// Use smart LLM device selection (NPU > GPU > CPU, fastest prefill)
+			bestDevice = SelectBestLLMDevice(llmDevices)
+			log.Printf("[INFO] GenerateSmartPlan: LLM task routed to %s (has_npu=%v, has_gpu=%v, prefill_tps=%.1f)",
+				bestDevice.DeviceName, bestDevice.HasNpu, bestDevice.HasGpu, bestDevice.LlmPrefillToksPerS)
+		} else {
+			// Fallback: no LLM devices, use NPU/GPU/CPU priority (old behavior)
+			log.Printf("[WARN] GenerateSmartPlan: No LLM-capable devices found, falling back to hardware priority")
 			for _, d := range devices {
-				if d.HasGpu {
+				if d.HasNpu {
 					bestDevice = d
 					break
 				}
 			}
-		}
-		if bestDevice == nil && len(devices) > 0 {
-			bestDevice = devices[0]
+			if bestDevice == nil {
+				for _, d := range devices {
+					if d.HasGpu {
+						bestDevice = d
+						break
+					}
+				}
+			}
+			if bestDevice == nil && len(devices) > 0 {
+				bestDevice = devices[0]
+			}
 		}
 
 		// Estimate tokens (rough: 4 chars per token)
