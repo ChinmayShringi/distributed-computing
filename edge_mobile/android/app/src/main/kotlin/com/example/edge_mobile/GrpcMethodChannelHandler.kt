@@ -36,6 +36,10 @@ class GrpcMethodChannelHandler(
             "requestScreenCapture" -> handleRequestScreenCapture(result)
             "sendAssistantMessage" -> handleSendAssistantMessage(call, result)
             "getActivity" -> handleGetActivity(call, result)
+            "submitJob" -> handleSubmitJob(call, result)
+            "getJobDetail" -> handleGetJobDetail(call, result)
+            "getDeviceMetrics" -> handleGetDeviceMetrics(call, result)
+            "getConnectionStatus" -> handleGetConnectionStatus(result)
             else -> result.notImplemented()
         }
     }
@@ -245,6 +249,82 @@ class GrpcMethodChannelHandler(
             } catch (e: Exception) {
                 result.error("GET_ACTIVITY_ERROR", e.message, e.toString())
             }
+        }
+    }
+
+    /**
+     * Handle submitting a distributed job
+     */
+    private fun handleSubmitJob(call: MethodCall, result: MethodChannel.Result) {
+        scope.launch {
+            try {
+                val prompt = call.argument<String>("prompt")
+                if (prompt == null) {
+                    result.error("INVALID_ARGUMENT", "prompt is required", null)
+                    return@launch
+                }
+
+                val maxWorkers = call.argument<Int>("max_workers") ?: 0
+
+                val jobResult = grpcClient.submitJob(prompt, maxWorkers)
+                result.success(jobResult)
+            } catch (e: Exception) {
+                result.error("SUBMIT_JOB_ERROR", e.message, e.toString())
+            }
+        }
+    }
+
+    /**
+     * Handle getting detailed job status with task timing
+     */
+    private fun handleGetJobDetail(call: MethodCall, result: MethodChannel.Result) {
+        scope.launch {
+            try {
+                val jobId = call.argument<String>("job_id")
+                if (jobId == null) {
+                    result.error("INVALID_ARGUMENT", "job_id is required", null)
+                    return@launch
+                }
+
+                val jobDetail = grpcClient.getJobDetail(jobId)
+                result.success(jobDetail)
+            } catch (e: Exception) {
+                result.error("GET_JOB_DETAIL_ERROR", e.message, e.toString())
+            }
+        }
+    }
+
+    /**
+     * Handle getting device metrics history
+     */
+    private fun handleGetDeviceMetrics(call: MethodCall, result: MethodChannel.Result) {
+        scope.launch {
+            try {
+                val deviceId = call.argument<String>("device_id")
+                if (deviceId == null) {
+                    result.error("INVALID_ARGUMENT", "device_id is required", null)
+                    return@launch
+                }
+
+                val sinceMs = call.argument<Long>("since_ms") ?: 0L
+
+                val metrics = grpcClient.getDeviceMetrics(deviceId, sinceMs)
+                result.success(metrics)
+            } catch (e: Exception) {
+                result.error("GET_DEVICE_METRICS_ERROR", e.message, e.toString())
+            }
+        }
+    }
+
+    /**
+     * Handle getting connection status
+     */
+    private fun handleGetConnectionStatus(result: MethodChannel.Result) {
+        try {
+            val status = grpcClient.getConnectionStatus()
+            result.success(status)
+        } catch (e: Exception) {
+            result.error("GET_CONNECTION_STATUS_ERROR", e.message, e.toString())
         }
     }
 }
