@@ -219,7 +219,7 @@ func NewToolChatFromEnv() (ToolChatProvider, error) {
 		return NewEchoToolChat(), nil
 
 	default:
-		return nil, fmt.Errorf("unknown chat provider for tool calling: %s (valid: openai, ollama)", provider)
+		return nil, fmt.Errorf("unknown chat provider for tool calling: %s (valid: openai, ollama, echo)", provider)
 	}
 }
 
