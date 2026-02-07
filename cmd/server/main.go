@@ -3528,6 +3528,16 @@ func main() {
 		devKey = defaultDevKey
 	}
 
+	// Start gRPC server in a goroutine
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("Failed to serve gRPC: %v", err)
+		}
+	}()
+
+	// Give gRPC server a moment to start before agent initialization
+	time.Sleep(1 * time.Second)
+
 	// Initialize LLM provider (optional)
 	llmProvider, err := llm.NewFromEnv()
 	if err != nil {
@@ -3551,7 +3561,6 @@ func main() {
 	}
 
 	// Initialize Agent (LLM tool-calling)
-	// Extract port from addr (e.g., "0.0.0.0:50051" -> ":50051")
 	agentGRPCAddr := "localhost:50051"
 	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
 		agentGRPCAddr = "localhost" + addr[idx:]
@@ -3621,19 +3630,6 @@ func main() {
 		webAddr = defaultWebAddr
 	}
 
-	go func() {
-		log.Printf("[INFO] HTTP Web UI listening on %s", webAddr)
-		// Extract port for localhost URL (e.g., "0.0.0.0:8080" -> ":8080")
-		webPort := webAddr
-		if idx := strings.LastIndex(webAddr, ":"); idx >= 0 {
-			webPort = webAddr[idx:]
-		}
-		log.Printf("[INFO] Open http://localhost%s in your browser", webPort)
-		if err := http.ListenAndServe(webAddr, httpMux); err != nil {
-			log.Fatalf("[FATAL] HTTP server failed: %v", err)
-		}
-	}()
-
 	// P2P Discovery: enabled by default, use UDP broadcast to find peers on LAN
 	// Set P2P_DISCOVERY=false to disable
 	if os.Getenv("P2P_DISCOVERY") != "false" {
@@ -3691,9 +3687,16 @@ func main() {
 		go orchestrator.autoRegisterWithCoordinator(coordinatorAddr)
 	}
 
-	// Serve gRPC
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+	// Start HTTP Web UI server (blocking)
+	log.Printf("[INFO] HTTP Web UI listening on %s", webAddr)
+	// Extract port for localhost URL (e.g., "0.0.0.0:8080" -> ":8080")
+	webPort := webAddr
+	if idx := strings.LastIndex(webAddr, ":"); idx >= 0 {
+		webPort = webAddr[idx:]
+	}
+	log.Printf("[INFO] Open http://localhost%s in your browser", webPort)
+	if err := http.ListenAndServe(webAddr, httpMux); err != nil {
+		log.Fatalf("[FATAL] HTTP server failed: %v", err)
 	}
 }
 
