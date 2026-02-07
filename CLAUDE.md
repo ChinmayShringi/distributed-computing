@@ -8,8 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make build          # Build CLI binary
-make server         # Run gRPC server (go run ./cmd/server)
-make web            # Run web UI server (go run ./cmd/web)
+make server         # Run unified server (gRPC :50051 + HTTP Web UI :8080)
 make proto          # Generate gRPC code from proto/orchestrator.proto
 make test           # Run tests (go test -v ./...)
 make lint           # Run golangci-lint
@@ -19,14 +18,14 @@ make build-all      # Cross-platform builds (darwin/linux/windows)
 
 **Deploy to Windows:**
 ```bash
-./deploy-windows.sh  # Build, copy, and start server on Windows machine (10.20.38.80)
+./deploy-windows.sh  # Build, copy, and start server on Windows machine (10.206.87.35)
 ```
 
 This script:
 1. Builds `dist/server-windows.exe`
 2. Stops existing server on Windows
 3. Copies binary via SCP
-4. Starts server with `GRPC_ADDR=0.0.0.0:50051`
+4. Starts server with `GRPC_ADDR=0.0.0.0:50051` and `WEB_ADDR=0.0.0.0:8080`
 5. Verifies server is listening
 
 See `docs/connection.md` for detailed Windows machine setup (SSH credentials, manual deployment, multi-device demo).
@@ -46,8 +45,7 @@ EdgeCLI is a distributed orchestration system with a gRPC control plane for mult
 
 | Binary | Purpose | Default Port |
 |--------|---------|--------------|
-| `cmd/server` | gRPC orchestrator (device registry, job management, task routing, WebRTC streaming, bulk HTTP file server) | `:50051` (gRPC), `:8081` (HTTP bulk) |
-| `cmd/web` | HTTP server with embedded web UI (REST-to-gRPC bridge) | `:8080` |
+| `cmd/server` | Unified server: gRPC orchestrator + HTTP Web UI (device registry, job management, task routing, WebRTC streaming, LLM chat/agent, QAI Hub) | `:50051` (gRPC), `:8080` (HTTP), `:8081` (bulk download) |
 | `cmd/client` | CLI client for device registration and commands | - |
 | `cmd/edgecli` | Main CLI with safe/dangerous mode execution | - |
 | `brain/windows-ai-cli` | C#/.NET CLI for AI-powered plan generation (Windows only, separate `dotnet build`) | - |
@@ -55,18 +53,22 @@ EdgeCLI is a distributed orchestration system with a gRPC control plane for mult
 ### Control Flow
 
 ```
-┌─────────────┐     HTTP      ┌─────────────┐     gRPC      ┌─────────────┐
-│   Browser   │──────────────▶│  Web Server  │──────────────▶│   Server    │
-│             │               │  (cmd/web)   │               │(coordinator)│
-└─────────────┘               └──────────────┘               └──────┬──────┘
-                                                                    │
-                                                     ┌──────────────┼──────────────┐
-                                                     │              │              │
-                                                     ▼              ▼              ▼
-                                               ┌──────────┐  ┌──────────┐  ┌────────────┐
-                                               │ Worker A  │  │ Worker B │  │  Brain CLI │
-                                               │ (remote)  │  │ (remote) │  │ (Windows)  │
-                                               └──────────┘  └──────────┘  └────────────┘
+┌─────────────┐     HTTP      ┌───────────────────────────────────┐
+│   Browser   │──────────────▶│         Unified Server            │
+│             │               │         (cmd/server)              │
+└─────────────┘               │  ┌─────────────┬─────────────┐   │
+                              │  │ HTTP Handler │ gRPC Handler│   │
+                              │  │  (in-process call)         │   │
+                              │  └─────────────┴─────────────┘   │
+                              └───────────────┬───────────────────┘
+                                              │
+                               ┌──────────────┼──────────────┐
+                               │              │              │
+                               ▼              ▼              ▼
+                         ┌──────────┐  ┌──────────┐  ┌────────────┐
+                         │ Worker A  │  │ Worker B │  │  Brain CLI │
+                         │ (remote)  │  │ (remote) │  │ (Windows)  │
+                         └──────────┘  └──────────┘  └────────────┘
 ```
 
 ### Key Flows
@@ -85,6 +87,8 @@ Commands can be routed to devices using policies:
 - `BEST_AVAILABLE` - NPU > GPU > CPU preference
 - `PREFER_REMOTE` - Prefer non-local devices
 - `REQUIRE_NPU` - Fail if no NPU device
+- `PREFER_LOCAL_MODEL` - Prefer device with local LLM model (Ollama)
+- `REQUIRE_LOCAL_MODEL` - Fail if no device has local LLM model
 - `FORCE_DEVICE_ID` - Target specific device
 
 ### Job Execution Model
@@ -119,7 +123,8 @@ Plan generation priority:
 | `internal/tools` | Tool registry interface |
 | `internal/webrtcstream` | WebRTC screen streaming with pion/webrtc |
 | `internal/transfer` | Download ticket manager (one-time-use tokens, TTL, crypto/rand) |
-| `internal/sysinfo` | Host metrics sampling (CPU, memory) |
+| `internal/sysinfo` | Host metrics sampling (CPU, memory, GPU, NPU) with platform-specific implementations |
+| `internal/metrics` | In-memory metrics history storage for activity tracking |
 | `internal/deviceid` | Device ID persistence (`~/.edgemesh/device_id`) |
 | `brain/windows-ai-cli` | C#/.NET CLI tool wrapping Windows AI APIs (Windows only, separate build) |
 
@@ -138,11 +143,11 @@ When modifying `proto/orchestrator.proto`:
 1. Run `make proto` to regenerate
 2. Generated files go to `proto/*.pb.go`
 3. Update corresponding handlers in `cmd/server/main.go`
-4. Update REST bridge in `cmd/web/main.go` if new RPC is web-exposed
-5. Update `cmd/web/index.html` if new UI needed
+4. Update REST handlers in `cmd/server/main.go` (WebHandler) if new RPC is web-exposed
+5. Update `cmd/server/index.html` if new UI needed
 6. Update `docs/features/grpc.md`
 
-### Current gRPC RPCs (16 total)
+### Current gRPC RPCs (20 total)
 
 | RPC | Purpose |
 |-----|---------|
@@ -151,28 +156,35 @@ When modifying `proto/orchestrator.proto`:
 | `ExecuteCommand` | Run allowed command on server |
 | `RegisterDevice` | Register device in registry |
 | `ListDevices` | List all registered devices |
-| `GetDeviceStatus` | Get device metrics |
+| `GetDeviceStatus` | Get device metrics (CPU, memory, GPU, NPU) |
 | `RunAITask` | Route AI task to best device (stub) |
 | `ExecuteRoutedCommand` | Run command on best available device via policy |
 | `SubmitJob` | Submit distributed job across devices |
 | `GetJob` | Get job status and results |
+| `GetJobDetail` | Get enhanced job details with task timing |
+| `GetActivity` | Get running tasks and device activity |
+| `GetDeviceMetrics` | Get metrics history for a device |
 | `PreviewPlan` | Preview execution plan without creating a job |
 | `PreviewPlanCost` | Estimate execution cost for a plan before running |
 | `RunTask` | Execute a task locally (worker RPC) |
+| `RunLLMTask` | Execute LLM inference on device's local model (Ollama) |
 | `CreateDownloadTicket` | Create one-time-use file download token |
 | `ReadFile` | Read file from device (for LLM tool calling) |
 | `StartWebRTC` / `CompleteWebRTC` / `StopWebRTC` | Screen streaming via WebRTC |
 | `HealthCheck` | Server health status |
 
-### Current REST Endpoints (18 total)
+### Current REST Endpoints (22 total)
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/` | GET | Serve embedded web UI |
-| `/api/devices` | GET | List devices (includes `can_screen_capture`) |
+| `/api/devices` | GET | List devices (includes `can_screen_capture`, `has_local_model`) |
 | `/api/routed-cmd` | POST | Execute routed command |
 | `/api/submit-job` | POST | Submit distributed job |
 | `/api/job?id=` | GET | Get job status |
+| `/api/job-detail?id=` | GET | Get enhanced job details with task timing |
+| `/api/activity` | GET | Get running tasks and device activity (Activity Panel) |
+| `/api/device-metrics?device_id=` | GET | Get metrics history for a device |
 | `/api/plan` | POST | Preview execution plan |
 | `/api/plan-cost` | POST | Estimate execution cost for a plan |
 | `/api/assistant` | POST | Natural language interface |
@@ -182,6 +194,7 @@ When modifying `proto/orchestrator.proto`:
 | `/api/stream/stop` | POST | Stop stream |
 | `/api/chat/health` | GET | Chat runtime health check |
 | `/api/chat` | POST | Send chat message (local LLM) |
+| `/api/llm-task` | POST | Route LLM task to device with local model |
 | `/api/agent` | POST | LLM agent with tool calling |
 | `/api/agent/health` | GET | Agent health check |
 | `/api/qaihub/doctor` | GET | QAI Hub CLI health check |
@@ -205,7 +218,7 @@ When modifying `proto/orchestrator.proto`:
 | `SHARED_DIR` | `./shared` | Directory served for bulk file downloads |
 | `CHAT_PROVIDER` | `ollama` | Chat provider: `ollama`, `openai`, or `echo` |
 | `CHAT_BASE_URL` | `http://localhost:11434` | Chat API base URL (Ollama default) |
-| `CHAT_MODEL` | `llama2` | Model name for chat |
+| `CHAT_MODEL` | `llama3.2:3b` | Model name for chat (use tool-capable model for agent) |
 | `CHAT_API_KEY` | (empty) | API key (optional, for OpenAI-compatible) |
 | `CHAT_TIMEOUT_SECONDS` | `60` | Chat request timeout |
 | `AGENT_MAX_ITERATIONS` | `8` | Max tool calling iterations for agent |
@@ -215,20 +228,21 @@ When modifying `proto/orchestrator.proto`:
 
 ## Multi-Device Setup
 
-1. Start coordinator: `make server`
-2. Start web UI: `make web`
-3. Register remote device: `go run ./cmd/client register --name "device-name" --self-addr "IP:50051" --platform "windows" --arch "amd64"`
-4. Open http://localhost:8080
+1. Start server: `make server` (starts both gRPC and HTTP Web UI)
+2. Register remote device: `go run ./cmd/client register --name "device-name" --self-addr "IP:50051" --platform "windows" --arch "amd64"`
+3. Open http://localhost:8080
 
 ## Windows Machine
 
 ```
-Host: 10.20.38.80
-User: sshuser
+Host: 192.168.1.38
+User: chinmay
 Pass: root
+EdgeCLI dir: C:\Users\chinmay\Desktop\edgecli\
+Ollama: Installed (llama3.2:3b, phi3:mini)
 ```
 
-See `docs/connection.md` for full details.
+See `docs/connection.md` for full details (including Ollama setup).
 
 ## Execution Modes
 

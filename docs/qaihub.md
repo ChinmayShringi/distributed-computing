@@ -128,6 +128,56 @@ REST endpoints:
 
 For local chat/inference on Mac, use Ollama or LM Studio instead (see [chat.md](chat.md)).
 
+## Local LLM Inference on Snapdragon
+
+For running LLMs locally on Snapdragon X Elite/Plus devices, use llama.cpp with GGUF models.
+
+### Setup (on Windows Snapdragon device)
+
+1. **Download llama.cpp ARM64 binary**:
+   ```powershell
+   curl -L -o llama-cpp.zip https://github.com/ggml-org/llama.cpp/releases/download/b7957/llama-b7957-bin-win-cpu-arm64.zip
+   Expand-Archive -Force llama-cpp.zip -DestinationPath llama-cpp
+   ```
+
+2. **Download a GGUF model** (e.g., Qwen2.5-3B-Instruct):
+   ```powershell
+   curl -L -o qwen2.5-3b-instruct-q4_k_m.gguf "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf?download=true"
+   ```
+
+3. **Run inference**:
+   ```powershell
+   llama-cpp\llama-cli.exe -m qwen2.5-3b-instruct-q4_k_m.gguf -p "What is the capital of France?" -n 50
+   ```
+
+   Or use the convenience script:
+   ```cmd
+   run-qwen.bat
+   ```
+
+### Performance (Snapdragon X ARM64 CPU)
+
+| Metric | Value |
+|--------|-------|
+| Prefill | 292 tok/s |
+| Generation | 48 tok/s |
+| Model | Qwen2.5-3B-Instruct Q4_K_M |
+
+### Available Models
+
+- Qwen2.5-3B-Instruct (2.1GB)
+- Qwen2.5-7B-Instruct (4.7GB)
+- Llama-3.2-3B-Instruct (2GB)
+- Phi-3.5-Mini-Instruct (2.8GB)
+
+Download from [Hugging Face GGUF collections](https://huggingface.co/models?search=gguf).
+
+### Resources
+
+- [Qualcomm AI Hub Models](https://aihub.qualcomm.com/models)
+- [llama.cpp Snapdragon Docs](https://github.com/qualcomm/llama.cpp/blob/main/docs/backend/snapdragon/windows.md)
+- [LM Studio for Snapdragon](https://lmstudio.ai/snapdragon)
+
 ## What This Is For
 
 - **Compiling** models for Qualcomm chipsets (Snapdragon, etc.)

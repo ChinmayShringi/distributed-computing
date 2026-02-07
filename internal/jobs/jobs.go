@@ -2,6 +2,8 @@
 package jobs
 
 import (
+	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,7 +44,9 @@ type Task struct {
 	State      TaskState
 	Result     string
 	Error      string
-	GroupIndex int // which group this task belongs to
+	GroupIndex int   // which group this task belongs to
+	StartedAt  int64 // Unix milliseconds when task started running
+	EndedAt    int64 // Unix milliseconds when task completed/failed
 }
 
 // ReduceSpec specifies how to combine results
@@ -54,6 +58,8 @@ type ReduceSpec struct {
 type Job struct {
 	ID           string
 	CreatedAt    time.Time
+	StartedAt    time.Time // when job started running
+	EndedAt      time.Time // when job completed/failed
 	State        JobState
 	Tasks        []*Task
 	FinalResult  string
@@ -76,8 +82,8 @@ func NewManager() *Manager {
 }
 
 // CreateJob creates a new job with tasks distributed across devices
-// If no plan provided, auto-generates a default plan with one SYSINFO task per device
-func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int, plan *pb.Plan, reduce *pb.ReduceSpec) (*Job, error) {
+// If no plan provided, auto-generates a smart plan based on userText
+func (m *Manager) CreateJob(userText string, devices []*pb.DeviceInfo, maxWorkers int, plan *pb.Plan, reduce *pb.ReduceSpec) (*Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -110,9 +116,13 @@ func (m *Manager) CreateJob(devices []*pb.DeviceInfo, maxWorkers int, plan *pb.P
 		deviceMap[d.DeviceId] = d
 	}
 
-	// If no plan provided, generate default plan
+	// If no plan provided, generate smart plan based on user request
 	if plan == nil || len(plan.Groups) == 0 {
-		plan = m.GenerateDefaultPlan(selectedDevices)
+		if userText != "" {
+			plan = m.GenerateSmartPlan(userText, selectedDevices)
+		} else {
+			plan = m.GenerateDefaultPlan(selectedDevices)
+		}
 	}
 
 	job.TotalGroups = len(plan.Groups)
@@ -182,6 +192,139 @@ func (m *Manager) GenerateDefaultPlan(devices []*pb.DeviceInfo) *pb.Plan {
 	}
 }
 
+// GenerateSmartPlan analyzes the user's request and creates an intelligent plan.
+// For LLM-related requests (summarize, chat, code), it creates LLM_GENERATE tasks.
+// For status/info requests, it creates SYSINFO tasks.
+func (m *Manager) GenerateSmartPlan(userText string, devices []*pb.DeviceInfo) *pb.Plan {
+	textLower := strings.ToLower(userText)
+
+	// Detect if this is an image generation task (check first, higher priority)
+	isImageTask := strings.Contains(textLower, "image") ||
+		strings.Contains(textLower, "picture") ||
+		strings.Contains(textLower, "photo") ||
+		strings.Contains(textLower, "draw") ||
+		strings.Contains(textLower, "painting") ||
+		strings.Contains(textLower, "artwork") ||
+		strings.Contains(textLower, "visualize") ||
+		strings.Contains(textLower, "render")
+
+	// Detect if this is an LLM task (but not image)
+	isLLMTask := !isImageTask && (strings.Contains(textLower, "summarize") ||
+		strings.Contains(textLower, "write") ||
+		strings.Contains(textLower, "code") ||
+		strings.Contains(textLower, "explain") ||
+		strings.Contains(textLower, "chat") ||
+		strings.Contains(textLower, "answer") ||
+		strings.Contains(textLower, "translate"))
+
+	if isImageTask {
+		// Create IMAGE_GENERATE task routed to best GPU/NPU device
+		var bestDevice *pb.DeviceInfo
+		for _, d := range devices {
+			if d.HasGpu || d.HasNpu {
+				bestDevice = d
+				break
+			}
+		}
+		if bestDevice == nil && len(devices) > 0 {
+			bestDevice = devices[0]
+		}
+
+		// Image gen is heavier than text
+		promptTokens := int32(len(userText) / 4)
+		if promptTokens < 10 {
+			promptTokens = 10
+		}
+
+		task := &pb.TaskSpec{
+			TaskId:          uuid.New().String(),
+			Kind:            "IMAGE_GENERATE",
+			Input:           userText,
+			TargetDeviceId:  "",
+			PromptTokens:    promptTokens,
+			MaxOutputTokens: 100, // output is just the image path
+		}
+		if bestDevice != nil {
+			task.TargetDeviceId = bestDevice.DeviceId
+		}
+
+		return &pb.Plan{
+			Groups: []*pb.TaskGroup{
+				{Index: 0, Tasks: []*pb.TaskSpec{task}},
+			},
+		}
+	} else if isLLMTask {
+		// Create LLM_GENERATE task routed to best device (NPU > GPU > CPU)
+		// First, filter for devices that actually have LLM capability
+		llmDevices := FilterLLMDevices(devices)
+
+		var bestDevice *pb.DeviceInfo
+		if len(llmDevices) > 0 {
+			// Use smart LLM device selection (NPU > GPU > CPU, fastest prefill)
+			bestDevice = SelectBestLLMDevice(llmDevices)
+			log.Printf("[INFO] GenerateSmartPlan: LLM task routed to %s (has_npu=%v, has_gpu=%v, prefill_tps=%.1f)",
+				bestDevice.DeviceName, bestDevice.HasNpu, bestDevice.HasGpu, bestDevice.LlmPrefillToksPerS)
+		} else {
+			// Fallback: no LLM devices, use NPU/GPU/CPU priority (old behavior)
+			log.Printf("[WARN] GenerateSmartPlan: No LLM-capable devices found, falling back to hardware priority")
+			for _, d := range devices {
+				if d.HasNpu {
+					bestDevice = d
+					break
+				}
+			}
+			if bestDevice == nil {
+				for _, d := range devices {
+					if d.HasGpu {
+						bestDevice = d
+						break
+					}
+				}
+			}
+			if bestDevice == nil && len(devices) > 0 {
+				bestDevice = devices[0]
+			}
+		}
+
+		// Estimate tokens (rough: 4 chars per token)
+		promptTokens := int32(len(userText) / 4)
+		if promptTokens < 10 {
+			promptTokens = 10
+		}
+
+		// Output tokens based on task type
+		maxOutput := int32(300) // default
+		if strings.Contains(textLower, "summarize") {
+			maxOutput = 200
+		} else if strings.Contains(textLower, "code") || strings.Contains(textLower, "write") {
+			maxOutput = 500
+		} else if strings.Contains(textLower, "image") {
+			maxOutput = 100 // just a description
+		}
+
+		task := &pb.TaskSpec{
+			TaskId:          uuid.New().String(),
+			Kind:            "LLM_GENERATE",
+			Input:           userText,
+			TargetDeviceId:  "",
+			PromptTokens:    promptTokens,
+			MaxOutputTokens: maxOutput,
+		}
+		if bestDevice != nil {
+			task.TargetDeviceId = bestDevice.DeviceId
+		}
+
+		return &pb.Plan{
+			Groups: []*pb.TaskGroup{
+				{Index: 0, Tasks: []*pb.TaskSpec{task}},
+			},
+		}
+	}
+
+	// Fall back to SYSINFO for status/info requests
+	return m.GenerateDefaultPlan(devices)
+}
+
 // Get retrieves a job by ID
 func (m *Manager) Get(jobID string) (*Job, bool) {
 	m.mu.RLock()
@@ -198,6 +341,7 @@ func (m *Manager) SetJobRunning(jobID string) {
 
 	if job, ok := m.jobs[jobID]; ok {
 		job.State = JobRunning
+		job.StartedAt = time.Now()
 	}
 }
 
@@ -211,11 +355,38 @@ func (m *Manager) UpdateTask(jobID, taskID string, state TaskState, result, errM
 		return
 	}
 
+	now := time.Now().UnixMilli()
 	for _, task := range job.Tasks {
 		if task.ID == taskID {
 			task.State = state
 			task.Result = result
 			task.Error = errMsg
+			// Update timing based on state
+			if state == TaskRunning && task.StartedAt == 0 {
+				task.StartedAt = now
+			} else if state == TaskDone || state == TaskFailed {
+				task.EndedAt = now
+			}
+			break
+		}
+	}
+}
+
+// SetTaskRunning marks a task as running with start time
+func (m *Manager) SetTaskRunning(jobID, taskID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	for _, task := range job.Tasks {
+		if task.ID == taskID {
+			task.State = TaskRunning
+			task.StartedAt = now
 			break
 		}
 	}
@@ -229,6 +400,7 @@ func (m *Manager) SetJobDone(jobID, finalResult string) {
 	if job, ok := m.jobs[jobID]; ok {
 		job.State = JobDone
 		job.FinalResult = finalResult
+		job.EndedAt = time.Now()
 	}
 }
 
@@ -240,6 +412,7 @@ func (m *Manager) SetJobFailed(jobID, errMsg string) {
 	if job, ok := m.jobs[jobID]; ok {
 		job.State = JobFailed
 		job.FinalResult = "Job failed: " + errMsg
+		job.EndedAt = time.Now()
 	}
 }
 
@@ -327,4 +500,89 @@ func (m *Manager) GetGroupResults(jobID string, groupIndex int) []string {
 		}
 	}
 	return results
+}
+
+// GetRunningTasks returns all currently running tasks across all jobs
+func (m *Manager) GetRunningTasks() []*Task {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var running []*Task
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			for _, task := range job.Tasks {
+				if task.State == TaskRunning {
+					running = append(running, task)
+				}
+			}
+		}
+	}
+	return running
+}
+
+// GetActiveDeviceIDs returns device IDs that have running tasks
+func (m *Manager) GetActiveDeviceIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	deviceSet := make(map[string]bool)
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			for _, task := range job.Tasks {
+				if task.State == TaskRunning && task.DeviceID != "" {
+					deviceSet[task.DeviceID] = true
+				}
+			}
+		}
+	}
+
+	devices := make([]string, 0, len(deviceSet))
+	for id := range deviceSet {
+		devices = append(devices, id)
+	}
+	return devices
+}
+
+// GetRunningTaskCountByDevice returns the number of running tasks per device
+func (m *Manager) GetRunningTaskCountByDevice() map[string]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	counts := make(map[string]int)
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			for _, task := range job.Tasks {
+				if task.State == TaskRunning && task.DeviceID != "" {
+					counts[task.DeviceID]++
+				}
+			}
+		}
+	}
+	return counts
+}
+
+// GetAllJobs returns all jobs
+func (m *Manager) GetAllJobs() []*Job {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	jobs := make([]*Job, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		jobs = append(jobs, job)
+	}
+	return jobs
+}
+
+// GetRunningJobs returns all currently running jobs
+func (m *Manager) GetRunningJobs() []*Job {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var running []*Job
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			running = append(running, job)
+		}
+	}
+	return running
 }

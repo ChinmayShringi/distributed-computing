@@ -20,10 +20,12 @@ type taskGroupJSON struct {
 }
 
 type taskSpecJSON struct {
-	TaskID         string `json:"task_id"`
-	Kind           string `json:"kind"`
-	Input          string `json:"input"`
-	TargetDeviceID string `json:"target_device_id"`
+	TaskID          string `json:"task_id"`
+	Kind            string `json:"kind"`
+	Input           string `json:"input"`
+	TargetDeviceID  string `json:"target_device_id"`
+	PromptTokens    int32  `json:"prompt_tokens,omitempty"`
+	MaxOutputTokens int32  `json:"max_output_tokens,omitempty"`
 }
 
 type reduceJSON struct {
@@ -32,8 +34,10 @@ type reduceJSON struct {
 
 // validKinds are the allowed task kinds.
 var validKinds = map[string]bool{
-	"SYSINFO": true,
-	"ECHO":    true,
+	"SYSINFO":        true,
+	"ECHO":           true,
+	"LLM_GENERATE":   true,
+	"IMAGE_GENERATE": true,
 }
 
 // ParsePlanJSON parses and validates raw LLM output into proto Plan and ReduceSpec.
@@ -67,7 +71,7 @@ func ParsePlanJSON(raw string) (*pb.Plan, *pb.ReduceSpec, error) {
 
 			kind := strings.ToUpper(t.Kind)
 			if !validKinds[kind] {
-				return nil, nil, fmt.Errorf("group %d task %d (%s): invalid kind %q (allowed: SYSINFO, ECHO)", gi, ti, t.TaskID, t.Kind)
+				return nil, nil, fmt.Errorf("group %d task %d (%s): invalid kind %q (allowed: SYSINFO, ECHO, LLM_GENERATE, IMAGE_GENERATE)", gi, ti, t.TaskID, t.Kind)
 			}
 
 			// Validate input for path traversal
@@ -89,10 +93,12 @@ func ParsePlanJSON(raw string) (*pb.Plan, *pb.ReduceSpec, error) {
 		tasks := make([]*pb.TaskSpec, len(g.Tasks))
 		for j, t := range g.Tasks {
 			tasks[j] = &pb.TaskSpec{
-				TaskId:         t.TaskID,
-				Kind:           strings.ToUpper(t.Kind),
-				Input:          t.Input,
-				TargetDeviceId: t.TargetDeviceID,
+				TaskId:          t.TaskID,
+				Kind:            strings.ToUpper(t.Kind),
+				Input:           t.Input,
+				TargetDeviceId:  t.TargetDeviceID,
+				PromptTokens:    t.PromptTokens,
+				MaxOutputTokens: t.MaxOutputTokens,
 			}
 		}
 		protoGroups[i] = &pb.TaskGroup{

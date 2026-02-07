@@ -2,6 +2,8 @@
 package cost
 
 import (
+	"strings"
+
 	pb "github.com/edgecli/edgecli/proto"
 )
 
@@ -135,6 +137,8 @@ func (e *Estimator) estimateStep(task *pb.TaskSpec, device *pb.DeviceInfo) *pb.S
 	switch task.Kind {
 	case "LLM_GENERATE":
 		return e.estimateLLMStep(task, device)
+	case "IMAGE_GENERATE":
+		return e.estimateImageStep(task, device)
 	case "SYSINFO", "ECHO":
 		// Fast local operations - minimal cost
 		return &pb.StepCostEstimate{
@@ -146,6 +150,43 @@ func (e *Estimator) estimateStep(task *pb.TaskSpec, device *pb.DeviceInfo) *pb.S
 		}
 	default:
 		return e.estimateUnknownStep(task)
+	}
+}
+
+// estimateImageStep calculates cost for IMAGE_GENERATE tasks.
+// Image generation is typically 10-30 seconds on GPU, 30-60s on CPU.
+func (e *Estimator) estimateImageStep(task *pb.TaskSpec, device *pb.DeviceInfo) *pb.StepCostEstimate {
+	var latencyMS float64
+	var memoryMB float64
+	var notes string
+
+	// Estimate based on device capabilities
+	if device.HasGpu || device.HasNpu {
+		// GPU/NPU accelerated: ~15 seconds for 512x512, 20 steps
+		latencyMS = 15000
+		memoryMB = 4096 // 4GB for Stable Diffusion
+		notes = "GPU/NPU accelerated image generation"
+	} else {
+		// CPU only: much slower
+		latencyMS = 45000 // 45 seconds
+		memoryMB = 4096
+		notes = "CPU-only image generation (slower)"
+	}
+
+	// Adjust for TinyML on Arduino (if we detect it)
+	if device.Platform == "arduino" || strings.Contains(strings.ToLower(device.DeviceName), "arduino") {
+		latencyMS = 5000 // TinyML is faster but lower quality
+		memoryMB = 256   // Much smaller models
+		notes = "TinyML image generation (lower quality)"
+	}
+
+	return &pb.StepCostEstimate{
+		TaskId:            task.TaskId,
+		Kind:              task.Kind,
+		PredictedMs:       latencyMS,
+		PredictedMemoryMb: memoryMB,
+		UnknownCost:       false,
+		Notes:             notes,
 	}
 }
 

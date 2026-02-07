@@ -1,11 +1,12 @@
-# Windows Machine Setup
+# Windows Snapdragon Device Setup
 
 ## Connection Details
 
 ```
 Host: 10.206.87.35
-User: sshuser
+User: chinmay
 Pass: root
+Hardware: Snapdragon (ARM64) with NPU + GPU
 ```
 
 ## Using sshpass (recommended)
@@ -15,19 +16,19 @@ Pass: root
 brew install sshpass
 
 # Connect
-sshpass -p 'root' ssh -o StrictHostKeyChecking=no sshuser@10.206.87.35
+sshpass -p 'root' ssh -o StrictHostKeyChecking=no chinmay@10.206.87.35
 ```
 
 ## Deploying EdgeCLI Server to Windows
 
 **Important:** Use native Windows binaries, not WSL. WSL2 uses NAT networking which makes external access unreliable.
 
-### 1. Build Windows binaries on Mac
+### 1. Build Windows ARM64 binaries on Mac
 
 ```bash
 cd /path/to/project
-GOOS=windows GOARCH=amd64 go build -o dist/server-windows.exe ./cmd/server
-GOOS=windows GOARCH=amd64 go build -o dist/client-windows.exe ./cmd/client
+GOOS=windows GOARCH=arm64 go build -o dist/server-windows.exe ./cmd/server
+GOOS=windows GOARCH=arm64 go build -o dist/client-windows.exe ./cmd/client
 ```
 
 ### 2. Copy to Windows
@@ -35,15 +36,15 @@ GOOS=windows GOARCH=amd64 go build -o dist/client-windows.exe ./cmd/client
 ```bash
 sshpass -p 'root' scp -o StrictHostKeyChecking=no \
   dist/server-windows.exe dist/client-windows.exe \
-  "sshuser@10.206.87.35:C:/Users/sshuser.Batman/"
+  "chinmay@10.206.87.35:C:/Users/chinmay/Desktop/edgecli/"
 ```
 
 ### 3. Start Windows gRPC Server
 
 ```bash
 # Via SSH - note the special cmd syntax for environment variables
-sshpass -p 'root' ssh sshuser@10.206.87.35 \
-  'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\sshuser.Batman\server-windows.exe"'
+sshpass -p 'root' ssh chinmay@10.206.87.35 \
+  'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\chinmay\Desktop\edgecli\server-windows.exe"'
 ```
 
 **Note:** The `&&` must immediately follow the env value (no space) or cmd eats the colon.
@@ -51,7 +52,7 @@ sshpass -p 'root' ssh sshuser@10.206.87.35 \
 ### 4. Verify Server is Listening
 
 ```bash
-sshpass -p 'root' ssh sshuser@10.206.87.35 'netstat -an | findstr 50051'
+sshpass -p 'root' ssh chinmay@10.206.87.35 'netstat -an | findstr 50051'
 # Expected: TCP 0.0.0.0:50051 LISTENING
 ```
 
@@ -68,20 +69,22 @@ go run ./cmd/server
 ### Step 2: Start Windows gRPC Server
 
 ```bash
-# In another terminal
-sshpass -p 'root' ssh sshuser@10.206.87.35 \
-  'cmd /c "set GRPC_ADDR=0.0.0.0:50051&& C:\Users\sshuser.Batman\server-windows.exe"'
+# In another terminal - use the batch script
+sshpass -p 'root' ssh chinmay@10.206.87.35 \
+  'C:\Users\chinmay\Desktop\edgecli\start-server.bat'
 ```
 
-### Step 3: Register Windows with Mac
+### Step 3: Register Windows Snapdragon with Mac
 
 ```bash
 # The client auto-generates a unique device ID for remote addresses
 go run ./cmd/client register \
-  --name "windows-batman" \
+  --name "windows-snapdragon" \
   --self-addr "10.206.87.35:50051" \
   --platform "windows" \
-  --arch "amd64"
+  --arch "arm64" \
+  --has-npu \
+  --has-gpu
 # Output: Generated new device ID for remote device: 23d1b497-...
 ```
 
@@ -117,12 +120,13 @@ curl -X POST http://localhost:8080/api/assistant \
   -d '{"text":"list devices"}'
 ```
 
-## Verified Configuration (2026-02-03)
+## Verified Configuration (2026-02-06)
 
 - SSH connection: Working
-- Native Windows binary: server-windows.exe
+- Native Windows ARM64 binary: server-windows.exe
 - gRPC server: Listening on 0.0.0.0:50051
-- Device name: Batman (windows-batman when registered)
+- Device name: windows-snapdragon
+- Hardware: Snapdragon NPU + GPU
 - Multi-device routing: PREFER_REMOTE correctly routes to Windows
 - Web UI: Accessible at http://localhost:8080
 
@@ -153,10 +157,14 @@ Pass: root
 |-----------|------|
 | Python 3.12 | `C:\Users\chinmay\Python312\` |
 | QAI Hub venv | `C:\Users\chinmay\venv-qaihub\` |
-| gRPC Server | `C:\Users\chinmay\server-windows-arm64.exe` |
-| gRPC Client | `C:\Users\chinmay\client-windows-arm64.exe` |
-| Shared dir | `C:\Users\chinmay\shared\` |
-| Server batch | `C:\Users\chinmay\start-server.bat` |
+| **EdgeCLI dir** | `C:\Users\chinmay\Desktop\edgecli\` |
+| gRPC Server | `C:\Users\chinmay\Desktop\edgecli\server-windows-arm64.exe` |
+| gRPC Client | `C:\Users\chinmay\Desktop\edgecli\client-windows-arm64.exe` |
+| Web Server | `C:\Users\chinmay\Desktop\edgecli\web-windows.exe` |
+| Shared dir | `C:\Users\chinmay\Desktop\edgecli\shared\` |
+| Device ID | `C:\Users\chinmay\Desktop\edgecli\.edgemesh\` |
+| Server batch | `C:\Users\chinmay\Desktop\edgecli\start-server.bat` |
+| Web batch | `C:\Users\chinmay\Desktop\edgecli\start-web.bat` |
 
 ### Building for ARM64
 
@@ -179,15 +187,34 @@ EdgeMesh Discovery - UDP inbound 50051 (for P2P mode)
 
 Automatic peer discovery via UDP broadcast on LAN. No coordinator needed - devices find each other automatically.
 
-**Just start the server:**
+**Configuration via .env file:**
+
+Both server and web load `.env` from the current directory automatically.
+
+```bash
+# .env (copy to C:\Users\chinmay\Desktop\edgecli\ on Windows)
+GRPC_ADDR=:50051
+WEB_ADDR=:8080
+CHAT_PROVIDER=ollama
+CHAT_BASE_URL=http://localhost:11434
+CHAT_MODEL=llama3.2:3b
+CHAT_TIMEOUT_SECONDS=120
+AGENT_MAX_ITERATIONS=8
+```
+
+**Just start the servers:**
 ```powershell
-# Windows
-server-windows.exe
+# Windows - cd to folder with .env
+cd C:\Users\chinmay\Desktop\edgecli
+ollama serve              # Terminal 1
+.\server-windows.exe      # Terminal 2
+.\web-windows.exe         # Terminal 3
 ```
 
 ```bash
-# Mac/Linux
+# Mac/Linux - from project root (uses .env automatically)
 go run ./cmd/server
+go run ./cmd/web
 ```
 
 **To disable P2P discovery:**
@@ -233,6 +260,143 @@ P2P_DISCOVERY=true GRPC_ADDR=:50052 go run ./cmd/server &
 # Each should show "[INFO] discovery: found new device..."
 ```
 
+### Ollama Setup (Local LLM)
+
+Ollama is installed on this machine for local chat and agent functionality.
+
+**Installation:**
+```powershell
+winget install Ollama.Ollama
+```
+
+**Available Models:**
+| Model | Size | Use Case |
+|-------|------|----------|
+| `llama3.2:3b` | 2.0GB | Chat + tool calling (agent) |
+| `phi3:mini` | 2.2GB | Fast chat only (no tool support) |
+| `mistral:7b` | 4.1GB | High quality chat + tools |
+
+**Starting Ollama:**
+```powershell
+# Start Ollama service (runs in background)
+ollama serve
+
+# Verify it's running
+curl http://localhost:11434
+# Returns: "Ollama is running"
+```
+
+**Starting EdgeCLI with Ollama:**
+
+The `.env` file is pre-configured for Ollama. Just run:
+
+```powershell
+cd C:\Users\chinmay\Desktop\edgecli
+ollama serve              # Terminal 1
+.\server-windows.exe      # Terminal 2 (loads .env automatically)
+.\web-windows.exe         # Terminal 3 (loads .env automatically)
+```
+
+**Verify Chat & Agent:**
+```bash
+# From Mac
+curl http://10.206.87.35:8080/api/chat/health
+# {"ok":true,"provider":"ollama","model":"llama3.2:3b"}
+
+curl http://10.206.87.35:8080/api/agent/health
+# {"ok":true,"provider":"openai","model":"llama3.2:3b"}
+
+curl -X POST http://10.206.87.35:8080/api/agent \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What devices are in the mesh?"}'
+```
+
 ### Full Setup Guide
 
 See [docs/setup-guide-qai.md](setup-guide-qai.md) for step-by-step instructions.
+
+---
+
+## Arduino UNO Q (Dragonwing) — EdgeMeshArduino
+
+Added 2026-02-06 for multi-device image-generation demo.
+
+### Board Details
+
+| Setting | Value |
+|---------|-------|
+| **Board name** | EdgeMeshArduino |
+| **IP address** | `10.206.56.57` |
+| **WiFi password** | edgemesh |
+| **Board model** | Arduino UNO Q (Qualcomm Dragonwing QRB2210) |
+| **gRPC port** | 50051 (same as all mesh devices) |
+| **Status** | WiFi connected, software updated |
+
+### Finding the Arduino's IP Address
+
+The Arduino runs Linux (Dragonwing). With shell access (`arduino@EdgeMeshArduino`), run:
+
+```bash
+ip addr
+# or: hostname -I
+```
+
+Look for the `inet` address on `wlan0`.
+
+### Deploy and Run EdgeMesh Server on Arduino
+
+All devices on the mesh run the gRPC server on port 50051.
+
+**Step 1: Build the Linux ARM64 binary** (on Mac):
+
+```bash
+cd /path/to/distributed-computing
+GOOS=linux GOARCH=arm64 go build -o dist/edgemesh-server-linux-arm64 ./cmd/server
+```
+
+**Step 2: Copy the binary to the Arduino** (requires SSH):
+
+```bash
+scp dist/edgemesh-server-linux-arm64 arduino@10.206.56.57:/tmp/edgemesh-server
+```
+
+**Step 3: Start the server on the Arduino** (via SSH or Arduino shell):
+
+```bash
+ssh arduino@10.206.56.57
+chmod +x /tmp/edgemesh-server
+GRPC_ADDR=0.0.0.0:50051 /tmp/edgemesh-server
+```
+
+Or run in background:
+
+```bash
+GRPC_ADDR=0.0.0.0:50051 nohup /tmp/edgemesh-server > /tmp/edgemesh.log 2>&1 &
+```
+
+**One-liner script** (from project root):
+
+```bash
+./scripts/deploy-arduino.sh
+# Uses ARDUINO_IP=10.206.56.57, ARDUINO_USER=arduino by default
+# Override: ARDUINO_IP=10.206.56.57 ARDUINO_USER=arduino ./scripts/deploy-arduino.sh
+```
+
+**SSH prerequisite:** Ensure you can `ssh arduino@10.206.56.57` (password or key-based). If you use the Arduino IDE / USB shell instead, copy the binary manually (e.g. via USB storage or serial file transfer) and run the server commands in that shell.
+
+### Register Arduino on the Mesh
+
+From your Mac (with coordinator running and Arduino server started):
+
+```bash
+go run ./cmd/client register \
+  --id "edgemesh-arduino" \
+  --name "EdgeMeshArduino" \
+  --self-addr "10.206.56.57:50051" \
+  --platform "arduino" \
+  --arch "arm64"
+```
+
+### Arduino HTTP Endpoint (TinyML — Optional)
+
+For IMAGE_GENERATE tasks with a TinyML model, the Arduino can expose an HTTP endpoint. See [docs/IMAGE-GEN-SETUP.md](IMAGE-GEN-SETUP.md) for the sketch pattern.
