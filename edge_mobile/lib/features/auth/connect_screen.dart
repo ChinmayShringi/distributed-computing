@@ -40,7 +40,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     await Future.delayed(const Duration(milliseconds: 800));
 
     if (mounted) {
-      context.go('/dashboard');
+      context.go('/chat');
     }
   }
 

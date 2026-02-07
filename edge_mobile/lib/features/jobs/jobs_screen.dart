@@ -26,19 +26,6 @@ class JobsScreen extends StatelessWidget {
         child: SafeArea(
           child: Column(
             children: [
-               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const EdgeMeshWordmark(fontSize: 20),
-                    IconButton(
-                      icon: const Icon(LucideIcons.listFilter, size: 20),
-                      onPressed: () {},
-                    ),
-                  ],
-                ),
-              ),
               const StatusStrip(
                 isConnected: true,
                 serverAddress: '192.168.1.10:50051',

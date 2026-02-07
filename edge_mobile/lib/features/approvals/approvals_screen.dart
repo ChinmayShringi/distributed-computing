@@ -31,7 +31,7 @@ class ApprovalsScreen extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const EdgeMeshWordmark(fontSize: 20),
+                    const EdgeMeshWordmark(size: 20),
                     const ThreeDBadgeIcon(
                       icon: LucideIcons.shield,
                       accentColor: AppColors.primaryRed,
