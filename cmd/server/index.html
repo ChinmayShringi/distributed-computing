@@ -139,6 +139,11 @@
             color: white;
         }
 
+        .cap-badge.llm {
+            background: #8BC34A;
+            color: white;
+        }
+
         pre {
             background: #f0f0f0;
             padding: 12px;
@@ -298,6 +303,8 @@
                 <option value="BEST_AVAILABLE">Best Available (NPU > GPU > CPU)</option>
                 <option value="PREFER_REMOTE">Prefer Remote</option>
                 <option value="REQUIRE_NPU">Require NPU</option>
+                <option value="PREFER_LOCAL_MODEL">Prefer Local Model</option>
+                <option value="REQUIRE_LOCAL_MODEL">Require Local Model</option>
                 <option value="FORCE_DEVICE_ID">Force Device ID</option>
             </select>
         </div>
@@ -537,6 +544,7 @@
                         `<span class="cap-badge ${cap}">${cap}</span>`
                     ).join('')}
                                 ${device.can_screen_capture ? '<span class="cap-badge" style="background:#2196F3;color:white;">screen</span>' : ''}
+                                ${device.has_local_model ? `<span class="cap-badge llm">LLM: ${escapeHtml(device.local_model_name || 'unknown')}</span>` : ''}
                             </div>
                         </div>
                     `).join('');

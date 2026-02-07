@@ -20,16 +20,19 @@ type DiscoveryMessage struct {
 
 // DeviceAnnounce contains device information for discovery
 type DeviceAnnounce struct {
-	DeviceID         string `json:"device_id"`
-	DeviceName       string `json:"device_name"`
-	GrpcAddr         string `json:"grpc_addr"`
-	HttpAddr         string `json:"http_addr"`
-	Platform         string `json:"platform"`
-	Arch             string `json:"arch"`
-	HasCPU           bool   `json:"has_cpu"`
-	HasGPU           bool   `json:"has_gpu"`
-	HasNPU           bool   `json:"has_npu"`
-	CanScreenCapture bool   `json:"can_screen_capture"`
+	DeviceID          string `json:"device_id"`
+	DeviceName        string `json:"device_name"`
+	GrpcAddr          string `json:"grpc_addr"`
+	HttpAddr          string `json:"http_addr"`
+	Platform          string `json:"platform"`
+	Arch              string `json:"arch"`
+	HasCPU            bool   `json:"has_cpu"`
+	HasGPU            bool   `json:"has_gpu"`
+	HasNPU            bool   `json:"has_npu"`
+	CanScreenCapture  bool   `json:"can_screen_capture"`
+	HasLocalModel     bool   `json:"has_local_model,omitempty"`
+	LocalModelName    string `json:"local_model_name,omitempty"`
+	LocalChatEndpoint string `json:"local_chat_endpoint,omitempty"`
 }
 
 // MaxMessageSize is the maximum UDP payload size (stay under MTU)
