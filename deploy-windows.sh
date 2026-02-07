@@ -42,6 +42,8 @@ echo -e "\n${YELLOW}[4/4] Uploading start script...${NC}"
 cat > /tmp/edgecli-start-server.bat << 'BATCHEOF'
 @echo off
 set "GRPC_ADDR=0.0.0.0:50051"
+set "WEB_ADDR=0.0.0.0:8080"
+set "BULK_HTTP_ADDR=0.0.0.0:8081"
 set "SHARED_DIR=C:\Users\chinmay\Desktop\edgecli\shared"
 C:\Users\chinmay\Desktop\edgecli\server-windows.exe
 BATCHEOF

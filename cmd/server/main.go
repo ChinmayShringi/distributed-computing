@@ -1,9 +1,10 @@
-// Package main implements the gRPC orchestrator server
+// Package main implements the gRPC orchestrator server with embedded HTTP web UI
 package main
 
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -31,11 +32,13 @@ import (
 	"github.com/edgecli/edgecli/internal/allowlist"
 	"github.com/edgecli/edgecli/internal/brain"
 	"github.com/edgecli/edgecli/internal/chatmem"
-	"github.com/edgecli/edgecli/internal/discovery"
 	"github.com/edgecli/edgecli/internal/cost"
 	"github.com/edgecli/edgecli/internal/deviceid"
+	"github.com/edgecli/edgecli/internal/discovery"
 	"github.com/edgecli/edgecli/internal/exec"
 	"github.com/edgecli/edgecli/internal/jobs"
+	"github.com/edgecli/edgecli/internal/llm"
+	"github.com/edgecli/edgecli/internal/qaihub"
 	"github.com/edgecli/edgecli/internal/registry"
 	"github.com/edgecli/edgecli/internal/sysinfo"
 	"github.com/edgecli/edgecli/internal/transfer"
@@ -43,12 +46,18 @@ import (
 	pb "github.com/edgecli/edgecli/proto"
 )
 
+//go:embed index.html
+var staticFS embed.FS
+
 const (
 	defaultAddr         = ":50051"
+	defaultWebAddr      = ":8080"
 	defaultBulkHTTPAddr = ":8081"
 	defaultSharedDir    = "./shared"
 	defaultBulkTTL      = 60
+	defaultDevKey       = "dev"
 	remoteDialTimeout   = 15 * time.Second
+	webRequestTimeout   = 30 * time.Second
 )
 
 // Session represents an authenticated client session
@@ -75,6 +84,248 @@ type OrchestratorServer struct {
 	ticketManager *transfer.Manager
 	sharedRoot    string
 	bulkHTTPAddr  string
+}
+
+// WebHandler handles HTTP requests using in-process calls to OrchestratorServer
+type WebHandler struct {
+	orchestrator *OrchestratorServer
+	devKey       string
+	llm          llm.Provider     // nil if disabled
+	chat         llm.ChatProvider // nil if disabled
+	agent        *llm.AgentLoop   // LLM tool-calling agent (nil if disabled)
+	qaihubClient *qaihub.Client   // qai-hub CLI wrapper
+}
+
+// ---- HTTP Request/Response Types ----
+
+// DeviceResponse is the JSON response for /api/devices
+type DeviceResponse struct {
+	DeviceID         string   `json:"device_id"`
+	DeviceName       string   `json:"device_name"`
+	Platform         string   `json:"platform"`
+	Arch             string   `json:"arch"`
+	Capabilities     []string `json:"capabilities"`
+	GRPCAddr         string   `json:"grpc_addr"`
+	CanScreenCapture bool     `json:"can_screen_capture"`
+	HttpAddr         string   `json:"http_addr"`
+}
+
+// RoutedCmdRequest is the JSON request for /api/routed-cmd
+type RoutedCmdRequest struct {
+	Cmd           string   `json:"cmd"`
+	Args          []string `json:"args"`
+	Policy        string   `json:"policy"`
+	ForceDeviceID string   `json:"force_device_id"`
+}
+
+// RoutedCmdResponse is the JSON response for /api/routed-cmd
+type RoutedCmdResponse struct {
+	SelectedDeviceName string  `json:"selected_device_name"`
+	SelectedDeviceID   string  `json:"selected_device_id"`
+	SelectedDeviceAddr string  `json:"selected_device_addr"`
+	ExecutedLocally    bool    `json:"executed_locally"`
+	TotalTimeMs        float64 `json:"total_time_ms"`
+	ExitCode           int32   `json:"exit_code"`
+	Stdout             string  `json:"stdout"`
+	Stderr             string  `json:"stderr"`
+}
+
+// AssistantRequest is the JSON request for /api/assistant
+type AssistantRequest struct {
+	Text string `json:"text"`
+}
+
+// AssistantResponse is the JSON response for /api/assistant
+type AssistantResponse struct {
+	Reply string      `json:"reply"`
+	Raw   interface{} `json:"raw,omitempty"`
+	Mode  string      `json:"mode,omitempty"`
+	JobID string      `json:"job_id,omitempty"`
+	Plan  interface{} `json:"plan,omitempty"`
+}
+
+// ErrorResponse is the JSON error response
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// PreviewPlanRequest is the JSON request for /api/plan
+type PreviewPlanRequest struct {
+	Text       string `json:"text"`
+	MaxWorkers int32  `json:"max_workers"`
+}
+
+// PreviewPlanResponse is the JSON response for /api/plan
+type PreviewPlanResponse struct {
+	UsedAi    bool        `json:"used_ai"`
+	Notes     string      `json:"notes"`
+	Rationale string      `json:"rationale"`
+	Plan      interface{} `json:"plan"`
+	Reduce    interface{} `json:"reduce"`
+}
+
+// PlanCostRequest is the JSON request for /api/plan-cost
+type PlanCostRequest struct {
+	Plan      interface{} `json:"plan"`
+	DeviceIDs []string    `json:"device_ids"`
+}
+
+// StepCostResponse is the cost for a single step
+type StepCostResponse struct {
+	TaskID            string  `json:"task_id"`
+	Kind              string  `json:"kind"`
+	PredictedMs       float64 `json:"predicted_ms"`
+	PredictedMemoryMB float64 `json:"predicted_memory_mb"`
+	UnknownCost       bool    `json:"unknown_cost"`
+	Notes             string  `json:"notes,omitempty"`
+}
+
+// DeviceCostResponse is the cost breakdown for a single device
+type DeviceCostResponse struct {
+	DeviceID           string             `json:"device_id"`
+	DeviceName         string             `json:"device_name"`
+	TotalMs            float64            `json:"total_ms"`
+	StepCosts          []StepCostResponse `json:"step_costs"`
+	EstimatedPeakRAMMB uint64             `json:"estimated_peak_ram_mb"`
+	RAMSufficient      bool               `json:"ram_sufficient"`
+}
+
+// PlanCostResponse is the JSON response for /api/plan-cost
+type PlanCostResponse struct {
+	TotalPredictedMs      float64              `json:"total_predicted_ms"`
+	DeviceCosts           []DeviceCostResponse `json:"device_costs"`
+	RecommendedDeviceID   string               `json:"recommended_device_id"`
+	RecommendedDeviceName string               `json:"recommended_device_name"`
+	HasUnknownCosts       bool                 `json:"has_unknown_costs"`
+	Warning               string               `json:"warning,omitempty"`
+}
+
+// DownloadRequest is the JSON request for /api/request-download
+type DownloadRequest struct {
+	DeviceID string `json:"device_id"`
+	Path     string `json:"path"`
+}
+
+// DownloadResponse is the JSON response for /api/request-download
+type DownloadResponse struct {
+	DownloadURL   string `json:"download_url"`
+	Filename      string `json:"filename"`
+	SizeBytes     int64  `json:"size_bytes"`
+	ExpiresUnixMs int64  `json:"expires_unix_ms"`
+}
+
+// SubmitJobRequest is the JSON request for /api/submit-job
+type SubmitJobRequest struct {
+	Text       string `json:"text"`
+	MaxWorkers int32  `json:"max_workers"`
+}
+
+// JobInfoResponse is the JSON response for /api/submit-job
+type JobInfoResponse struct {
+	JobID     string `json:"job_id"`
+	CreatedAt int64  `json:"created_at"`
+	Summary   string `json:"summary"`
+}
+
+// TaskStatusResponse represents a task in the job status
+type TaskStatusResponse struct {
+	TaskID             string `json:"task_id"`
+	AssignedDeviceID   string `json:"assigned_device_id"`
+	AssignedDeviceName string `json:"assigned_device_name"`
+	State              string `json:"state"`
+	Result             string `json:"result"`
+	Error              string `json:"error"`
+}
+
+// JobStatusResponse is the JSON response for /api/job
+type JobStatusResponse struct {
+	JobID        string               `json:"job_id"`
+	State        string               `json:"state"`
+	Tasks        []TaskStatusResponse `json:"tasks"`
+	FinalResult  string               `json:"final_result"`
+	CurrentGroup int32                `json:"current_group"`
+	TotalGroups  int32                `json:"total_groups"`
+}
+
+// StreamStartRequest is the JSON request for /api/stream/start
+type StreamStartRequest struct {
+	Policy        string `json:"policy"`
+	ForceDeviceID string `json:"force_device_id"`
+	FPS           int32  `json:"fps"`
+	Quality       int32  `json:"quality"`
+	MonitorIndex  int32  `json:"monitor_index"`
+}
+
+// StreamStartResponse is the JSON response for /api/stream/start
+type StreamStartResponse struct {
+	SelectedDeviceID   string `json:"selected_device_id"`
+	SelectedDeviceName string `json:"selected_device_name"`
+	SelectedDeviceAddr string `json:"selected_device_addr"`
+	StreamID           string `json:"stream_id"`
+	OfferSDP           string `json:"offer_sdp"`
+}
+
+// StreamAnswerRequest is the JSON request for /api/stream/answer
+type StreamAnswerRequest struct {
+	SelectedDeviceAddr string `json:"selected_device_addr"`
+	StreamID           string `json:"stream_id"`
+	AnswerSDP          string `json:"answer_sdp"`
+}
+
+// StreamStopRequest is the JSON request for /api/stream/stop
+type StreamStopRequest struct {
+	SelectedDeviceAddr string `json:"selected_device_addr"`
+	StreamID           string `json:"stream_id"`
+}
+
+// CompileRequest is the JSON request for /api/qaihub/compile
+type CompileRequest struct {
+	ONNXPath string `json:"onnx_path"`
+	Target   string `json:"target"`
+	Runtime  string `json:"runtime"`
+}
+
+// ChatRequest is the JSON request for /api/chat
+type ChatRequest struct {
+	Messages []llm.ChatMessage `json:"messages"`
+}
+
+// ChatResponse is the JSON response for /api/chat
+type ChatResponse struct {
+	Reply string `json:"reply"`
+}
+
+// AgentRequest is the JSON request for /api/agent
+type AgentRequest struct {
+	Message string `json:"message"`
+}
+
+// AgentToolCallInfo records a tool call made during agent execution
+type AgentToolCallInfo struct {
+	Iteration int    `json:"iteration"`
+	ToolName  string `json:"tool_name"`
+	Arguments string `json:"arguments"`
+	ResultLen int    `json:"result_len"`
+}
+
+// AgentResponseJSON is the JSON response for /api/agent
+type AgentResponseJSON struct {
+	Reply      string              `json:"reply"`
+	Iterations int                 `json:"iterations"`
+	ToolCalls  []AgentToolCallInfo `json:"tool_calls,omitempty"`
+	Error      string              `json:"error,omitempty"`
+}
+
+// QaihubJobStatusRequest is the JSON request for /api/qaihub/job-status
+type QaihubJobStatusRequest struct {
+	JobID string `json:"job_id"`
+}
+
+// QaihubSubmitCompileRequest is the JSON request for /api/qaihub/submit-compile
+type QaihubSubmitCompileRequest struct {
+	Model      string `json:"model"`
+	DeviceName string `json:"device_name"`
+	Options    string `json:"options"`
 }
 
 // NewOrchestratorServer creates a new server instance
@@ -1750,6 +2001,1487 @@ func (s *OrchestratorServer) AddChatMessage(role, content string) {
 	go s.broadcastChatMemory()
 }
 
+// CreateInternalSession creates a session for internal web handler use
+func (s *OrchestratorServer) CreateInternalSession(name string) string {
+	sessionID := uuid.New().String()
+	session := &Session{
+		ID:          sessionID,
+		DeviceName:  name,
+		HostName:    "internal",
+		ConnectedAt: time.Now(),
+	}
+	s.mu.Lock()
+	s.sessions[sessionID] = session
+	s.mu.Unlock()
+	return sessionID
+}
+
+// ---- WebHandler HTTP Methods ----
+
+// handleIndex serves the embedded index.html
+func (h *WebHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	content, err := staticFS.ReadFile("index.html")
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
+}
+
+// handleDevices returns all registered devices
+func (h *WebHandler) handleDevices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	resp, err := h.orchestrator.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		log.Printf("[ERROR] ListDevices failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("gRPC error: %v", err))
+		return
+	}
+
+	devices := make([]DeviceResponse, 0, len(resp.Devices))
+	for _, d := range resp.Devices {
+		caps := []string{"cpu"}
+		if d.HasGpu {
+			caps = append(caps, "gpu")
+		}
+		if d.HasNpu {
+			caps = append(caps, "npu")
+		}
+
+		devices = append(devices, DeviceResponse{
+			DeviceID:         d.DeviceId,
+			DeviceName:       d.DeviceName,
+			Platform:         d.Platform,
+			Arch:             d.Arch,
+			Capabilities:     caps,
+			GRPCAddr:         d.GrpcAddr,
+			CanScreenCapture: d.CanScreenCapture,
+			HttpAddr:         d.HttpAddr,
+		})
+	}
+
+	h.writeJSON(w, http.StatusOK, devices)
+}
+
+// handleRoutedCmd executes a command on the best available device
+func (h *WebHandler) handleRoutedCmd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req RoutedCmdRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.Cmd == "" {
+		h.writeError(w, http.StatusBadRequest, "cmd is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	sessionID := h.orchestrator.CreateInternalSession("web-ui")
+
+	policy := &pb.RoutingPolicy{
+		Mode: pb.RoutingPolicy_BEST_AVAILABLE,
+	}
+
+	switch strings.ToUpper(req.Policy) {
+	case "PREFER_REMOTE":
+		policy.Mode = pb.RoutingPolicy_PREFER_REMOTE
+	case "REQUIRE_NPU":
+		policy.Mode = pb.RoutingPolicy_REQUIRE_NPU
+	case "FORCE_DEVICE_ID":
+		policy.Mode = pb.RoutingPolicy_FORCE_DEVICE_ID
+		policy.DeviceId = req.ForceDeviceID
+	}
+
+	cmdResp, err := h.orchestrator.ExecuteRoutedCommand(ctx, &pb.RoutedCommandRequest{
+		SessionId: sessionID,
+		Policy:    policy,
+		Command:   req.Cmd,
+		Args:      req.Args,
+	})
+	if err != nil {
+		log.Printf("[ERROR] ExecuteRoutedCommand failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Command error: %v", err))
+		return
+	}
+
+	resp := RoutedCmdResponse{
+		SelectedDeviceName: cmdResp.SelectedDeviceName,
+		SelectedDeviceID:   cmdResp.SelectedDeviceId,
+		SelectedDeviceAddr: cmdResp.SelectedDeviceAddr,
+		ExecutedLocally:    cmdResp.ExecutedLocally,
+		TotalTimeMs:        cmdResp.TotalTimeMs,
+		ExitCode:           cmdResp.Output.ExitCode,
+		Stdout:             cmdResp.Output.Stdout,
+		Stderr:             cmdResp.Output.Stderr,
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleAssistant processes natural language commands
+func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req AssistantRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	text := strings.ToLower(strings.TrimSpace(req.Text))
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	var reply string
+	var raw interface{}
+	var mode string
+	var jobID string
+	var planDebug interface{}
+
+	switch {
+	case strings.Contains(text, "list devices") || strings.Contains(text, "show devices") || strings.Contains(text, "devices"):
+		resp, err := h.orchestrator.ListDevices(ctx, &pb.ListDevicesRequest{})
+		if err != nil {
+			reply = fmt.Sprintf("Error listing devices: %v", err)
+		} else if len(resp.Devices) == 0 {
+			reply = "No devices registered."
+		} else {
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("Found %d device(s):\n", len(resp.Devices)))
+			for i, d := range resp.Devices {
+				caps := "cpu"
+				if d.HasGpu {
+					caps += ",gpu"
+				}
+				if d.HasNpu {
+					caps += ",npu"
+				}
+				sb.WriteString(fmt.Sprintf("%d. %s (%s/%s) [%s] - %s\n",
+					i+1, d.DeviceName, d.Platform, d.Arch, caps, d.GrpcAddr))
+			}
+			reply = sb.String()
+			raw = resp.Devices
+		}
+
+	case strings.Contains(text, "pwd"):
+		reply, raw = h.executeAssistantCommand(ctx, "pwd", nil)
+
+	case strings.Contains(text, "ls") || strings.Contains(text, "list files"):
+		reply, raw = h.executeAssistantCommand(ctx, "ls", nil)
+
+	case strings.Contains(text, "cat"):
+		parts := strings.Fields(text)
+		var filePath string
+		for i, p := range parts {
+			if p == "cat" && i+1 < len(parts) {
+				filePath = parts[i+1]
+				break
+			}
+		}
+		if filePath != "" {
+			reply, raw = h.executeAssistantCommand(ctx, "cat", []string{filePath})
+		} else {
+			reply = "Please specify a file path. Example: 'cat ./shared/test.txt'"
+		}
+
+	default:
+		reply, mode, jobID, planDebug = h.handleAssistantDefault(ctx, req.Text)
+	}
+
+	h.writeJSON(w, http.StatusOK, AssistantResponse{
+		Reply: reply,
+		Raw:   raw,
+		Mode:  mode,
+		JobID: jobID,
+		Plan:  planDebug,
+	})
+}
+
+// executeAssistantCommand runs a command and returns formatted output
+func (h *WebHandler) executeAssistantCommand(ctx context.Context, cmd string, args []string) (string, interface{}) {
+	sessionID := h.orchestrator.CreateInternalSession("web-ui-assistant")
+
+	cmdResp, err := h.orchestrator.ExecuteRoutedCommand(ctx, &pb.RoutedCommandRequest{
+		SessionId: sessionID,
+		Policy:    &pb.RoutingPolicy{Mode: pb.RoutingPolicy_BEST_AVAILABLE},
+		Command:   cmd,
+		Args:      args,
+	})
+	if err != nil {
+		return fmt.Sprintf("Command error: %v", err), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Executed on: %s\n", cmdResp.SelectedDeviceName))
+	sb.WriteString(fmt.Sprintf("Time: %.2f ms\n", cmdResp.TotalTimeMs))
+	sb.WriteString("---\n")
+
+	if cmdResp.Output.Stdout != "" {
+		sb.WriteString(cmdResp.Output.Stdout)
+	}
+	if cmdResp.Output.Stderr != "" {
+		sb.WriteString("\n[stderr]\n")
+		sb.WriteString(cmdResp.Output.Stderr)
+	}
+	if cmdResp.Output.ExitCode != 0 {
+		sb.WriteString(fmt.Sprintf("\n[exit code: %d]", cmdResp.Output.ExitCode))
+	}
+
+	return sb.String(), cmdResp
+}
+
+// handleAssistantDefault handles the default case in the assistant
+func (h *WebHandler) handleAssistantDefault(ctx context.Context, userText string) (reply, mode, jobID string, planDebug interface{}) {
+	devicesResp, err := h.orchestrator.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		return fmt.Sprintf("Error listing devices: %v", err), "", "", nil
+	}
+	if len(devicesResp.Devices) == 0 {
+		return "No devices registered. Register a device first.", "", "", nil
+	}
+
+	if h.llm != nil {
+		type deviceCompact struct {
+			DeviceID string `json:"device_id"`
+			Name     string `json:"name"`
+			HasNPU   bool   `json:"has_npu"`
+			HasGPU   bool   `json:"has_gpu"`
+			HasCPU   bool   `json:"has_cpu"`
+		}
+		devList := make([]deviceCompact, len(devicesResp.Devices))
+		for i, d := range devicesResp.Devices {
+			devList[i] = deviceCompact{
+				DeviceID: d.DeviceId,
+				Name:     d.DeviceName,
+				HasNPU:   d.HasNpu,
+				HasGPU:   d.HasGpu,
+				HasCPU:   d.HasCpu,
+			}
+		}
+		devJSON, _ := json.MarshalIndent(devList, "", "  ")
+
+		planRaw, err := h.llm.Plan(ctx, userText, string(devJSON))
+		if err != nil {
+			log.Printf("[WARN] LLM plan generation failed: %v — falling back", err)
+		} else {
+			plan, reduce, err := llm.ParsePlanJSON(planRaw)
+			if err != nil {
+				log.Printf("[WARN] LLM plan validation failed: %v — falling back", err)
+			} else {
+				sessionID := h.orchestrator.CreateInternalSession("web-ui-assistant")
+
+				jobResp, err := h.orchestrator.SubmitJob(ctx, &pb.JobRequest{
+					SessionId: sessionID,
+					Text:      userText,
+					Plan:      plan,
+					Reduce:    reduce,
+				})
+				if err != nil {
+					log.Printf("[WARN] LLM plan submit failed: %v — falling back", err)
+				} else {
+					var planJSON interface{}
+					json.Unmarshal([]byte(planRaw), &planJSON)
+
+					return fmt.Sprintf("Job submitted via LLM planner.\nJob ID: %s", jobResp.JobId),
+						"llm", jobResp.JobId, planJSON
+				}
+			}
+		}
+	}
+
+	sessionID := h.orchestrator.CreateInternalSession("web-ui-assistant")
+
+	jobResp, err := h.orchestrator.SubmitJob(ctx, &pb.JobRequest{
+		SessionId: sessionID,
+		Text:      userText,
+	})
+	if err != nil {
+		return fmt.Sprintf("Job submission error: %v", err), "", "", nil
+	}
+
+	return fmt.Sprintf("Job submitted via fallback planner.\nJob ID: %s", jobResp.JobId),
+		"fallback", jobResp.JobId, nil
+}
+
+// handleSubmitJob submits a distributed job to all devices
+func (h *WebHandler) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req SubmitJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	sessionID := h.orchestrator.CreateInternalSession("web-ui")
+
+	jobResp, err := h.orchestrator.SubmitJob(ctx, &pb.JobRequest{
+		SessionId:  sessionID,
+		Text:       req.Text,
+		MaxWorkers: req.MaxWorkers,
+	})
+	if err != nil {
+		log.Printf("[ERROR] SubmitJob failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Job error: %v", err))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, JobInfoResponse{
+		JobID:     jobResp.JobId,
+		CreatedAt: jobResp.CreatedAt,
+		Summary:   jobResp.Summary,
+	})
+}
+
+// handleGetJob returns the status of a job
+func (h *WebHandler) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.URL.Query().Get("id")
+	if jobID == "" {
+		h.writeError(w, http.StatusBadRequest, "id parameter is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	jobResp, err := h.orchestrator.GetJob(ctx, &pb.JobId{JobId: jobID})
+	if err != nil {
+		log.Printf("[ERROR] GetJob failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Job error: %v", err))
+		return
+	}
+
+	tasks := make([]TaskStatusResponse, len(jobResp.Tasks))
+	for i, t := range jobResp.Tasks {
+		tasks[i] = TaskStatusResponse{
+			TaskID:             t.TaskId,
+			AssignedDeviceID:   t.AssignedDeviceId,
+			AssignedDeviceName: t.AssignedDeviceName,
+			State:              t.State,
+			Result:             t.Result,
+			Error:              t.Error,
+		}
+	}
+
+	h.writeJSON(w, http.StatusOK, JobStatusResponse{
+		JobID:        jobResp.JobId,
+		State:        jobResp.State,
+		Tasks:        tasks,
+		FinalResult:  jobResp.FinalResult,
+		CurrentGroup: jobResp.CurrentGroup,
+		TotalGroups:  jobResp.TotalGroups,
+	})
+}
+
+// handlePreviewPlan generates a plan preview without creating a job
+func (h *WebHandler) handlePreviewPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req PreviewPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	sessionID := h.orchestrator.CreateInternalSession("web-ui")
+
+	planResp, err := h.orchestrator.PreviewPlan(ctx, &pb.PlanPreviewRequest{
+		SessionId:  sessionID,
+		Text:       req.Text,
+		MaxWorkers: req.MaxWorkers,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handlePreviewPlan: PreviewPlan failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Plan error: %v", err))
+		return
+	}
+
+	type taskJSON struct {
+		TaskID         string `json:"task_id"`
+		Kind           string `json:"kind"`
+		Input          string `json:"input"`
+		TargetDeviceID string `json:"target_device_id"`
+	}
+	type groupJSON struct {
+		Index int32      `json:"index"`
+		Tasks []taskJSON `json:"tasks"`
+	}
+	type planJSON struct {
+		Groups []groupJSON `json:"groups"`
+	}
+
+	var plan planJSON
+	if planResp.Plan != nil {
+		for _, g := range planResp.Plan.Groups {
+			group := groupJSON{Index: g.Index}
+			for _, t := range g.Tasks {
+				group.Tasks = append(group.Tasks, taskJSON{
+					TaskID:         t.TaskId,
+					Kind:           t.Kind,
+					Input:          t.Input,
+					TargetDeviceID: t.TargetDeviceId,
+				})
+			}
+			plan.Groups = append(plan.Groups, group)
+		}
+	}
+
+	var reduce interface{}
+	if planResp.Reduce != nil {
+		reduce = map[string]string{"kind": planResp.Reduce.Kind}
+	}
+
+	h.writeJSON(w, http.StatusOK, PreviewPlanResponse{
+		UsedAi:    planResp.UsedAi,
+		Notes:     planResp.Notes,
+		Rationale: planResp.Rationale,
+		Plan:      plan,
+		Reduce:    reduce,
+	})
+}
+
+// handlePlanCost estimates execution cost for a plan
+func (h *WebHandler) handlePlanCost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req PlanCostRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	planProto, err := h.convertJSONToPlan(req.Plan)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid plan: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	sessionID := h.orchestrator.CreateInternalSession("web-ui")
+
+	costResp, err := h.orchestrator.PreviewPlanCost(ctx, &pb.PlanCostRequest{
+		SessionId: sessionID,
+		Plan:      planProto,
+		DeviceIds: req.DeviceIDs,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handlePlanCost: PreviewPlanCost failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Cost estimation error: %v", err))
+		return
+	}
+
+	deviceCosts := make([]DeviceCostResponse, len(costResp.DeviceCosts))
+	for i, dc := range costResp.DeviceCosts {
+		stepCosts := make([]StepCostResponse, len(dc.StepCosts))
+		for j, sc := range dc.StepCosts {
+			stepCosts[j] = StepCostResponse{
+				TaskID:            sc.TaskId,
+				Kind:              sc.Kind,
+				PredictedMs:       sc.PredictedMs,
+				PredictedMemoryMB: sc.PredictedMemoryMb,
+				UnknownCost:       sc.UnknownCost,
+				Notes:             sc.Notes,
+			}
+		}
+		deviceCosts[i] = DeviceCostResponse{
+			DeviceID:           dc.DeviceId,
+			DeviceName:         dc.DeviceName,
+			TotalMs:            dc.TotalMs,
+			StepCosts:          stepCosts,
+			EstimatedPeakRAMMB: dc.EstimatedPeakRamMb,
+			RAMSufficient:      dc.RamSufficient,
+		}
+	}
+
+	h.writeJSON(w, http.StatusOK, PlanCostResponse{
+		TotalPredictedMs:      costResp.TotalPredictedMs,
+		DeviceCosts:           deviceCosts,
+		RecommendedDeviceID:   costResp.RecommendedDeviceId,
+		RecommendedDeviceName: costResp.RecommendedDeviceName,
+		HasUnknownCosts:       costResp.HasUnknownCosts,
+		Warning:               costResp.Warning,
+	})
+}
+
+// convertJSONToPlan converts a JSON plan to a proto Plan
+func (h *WebHandler) convertJSONToPlan(planJSON interface{}) (*pb.Plan, error) {
+	jsonBytes, err := json.Marshal(planJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal plan: %v", err)
+	}
+
+	type taskInput struct {
+		TaskID          string `json:"task_id"`
+		Kind            string `json:"kind"`
+		Input           string `json:"input"`
+		TargetDeviceID  string `json:"target_device_id"`
+		PromptTokens    int32  `json:"prompt_tokens"`
+		MaxOutputTokens int32  `json:"max_output_tokens"`
+	}
+	type groupInput struct {
+		Index int32       `json:"index"`
+		Tasks []taskInput `json:"tasks"`
+	}
+	type planInput struct {
+		Groups []groupInput `json:"groups"`
+	}
+
+	var plan planInput
+	if err := json.Unmarshal(jsonBytes, &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan: %v", err)
+	}
+
+	if len(plan.Groups) == 0 {
+		return nil, fmt.Errorf("plan must have at least one group")
+	}
+
+	protoPlan := &pb.Plan{
+		Groups: make([]*pb.TaskGroup, len(plan.Groups)),
+	}
+	for i, g := range plan.Groups {
+		protoGroup := &pb.TaskGroup{
+			Index: g.Index,
+			Tasks: make([]*pb.TaskSpec, len(g.Tasks)),
+		}
+		for j, t := range g.Tasks {
+			protoGroup.Tasks[j] = &pb.TaskSpec{
+				TaskId:          t.TaskID,
+				Kind:            t.Kind,
+				Input:           t.Input,
+				TargetDeviceId:  t.TargetDeviceID,
+				PromptTokens:    t.PromptTokens,
+				MaxOutputTokens: t.MaxOutputTokens,
+			}
+		}
+		protoPlan.Groups[i] = protoGroup
+	}
+
+	return protoPlan, nil
+}
+
+// handleStreamStart initiates a WebRTC stream from a selected device
+func (h *WebHandler) handleStreamStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req StreamStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	sessionID := h.orchestrator.CreateInternalSession("web-stream")
+
+	devicesResp, err := h.orchestrator.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStart: ListDevices failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("ListDevices error: %v", err))
+		return
+	}
+
+	if len(devicesResp.Devices) == 0 {
+		h.writeError(w, http.StatusNotFound, "No devices available")
+		return
+	}
+
+	var selectedDevice *pb.DeviceInfo
+	switch strings.ToUpper(req.Policy) {
+	case "FORCE_DEVICE_ID":
+		for _, d := range devicesResp.Devices {
+			if d.DeviceId == req.ForceDeviceID {
+				selectedDevice = d
+				break
+			}
+		}
+		if selectedDevice == nil {
+			h.writeError(w, http.StatusNotFound, fmt.Sprintf("Device not found: %s", req.ForceDeviceID))
+			return
+		}
+	case "PREFER_REMOTE":
+		for _, d := range devicesResp.Devices {
+			if d.GrpcAddr != "" && d.GrpcAddr != "localhost:50051" && d.GrpcAddr != "127.0.0.1:50051" {
+				selectedDevice = d
+				break
+			}
+		}
+		if selectedDevice == nil {
+			selectedDevice = devicesResp.Devices[0]
+		}
+	default:
+		for _, d := range devicesResp.Devices {
+			if d.HasNpu {
+				selectedDevice = d
+				break
+			}
+		}
+		if selectedDevice == nil {
+			for _, d := range devicesResp.Devices {
+				if d.HasGpu {
+					selectedDevice = d
+					break
+				}
+			}
+		}
+		if selectedDevice == nil {
+			selectedDevice = devicesResp.Devices[0]
+		}
+	}
+
+	log.Printf("[INFO] handleStreamStart: selected device %s (%s)", selectedDevice.DeviceName, selectedDevice.GrpcAddr)
+
+	// For local device, call directly
+	if selectedDevice.DeviceId == h.orchestrator.selfDeviceID {
+		webrtcResp, err := h.orchestrator.StartWebRTC(ctx, &pb.WebRTCConfig{
+			SessionId:    sessionID,
+			TargetFps:    req.FPS,
+			JpegQuality:  req.Quality,
+			MonitorIndex: req.MonitorIndex,
+		})
+		if err != nil {
+			log.Printf("[ERROR] handleStreamStart: StartWebRTC failed: %v", err)
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("StartWebRTC error: %v", err))
+			return
+		}
+
+		h.writeJSON(w, http.StatusOK, StreamStartResponse{
+			SelectedDeviceID:   selectedDevice.DeviceId,
+			SelectedDeviceName: selectedDevice.DeviceName,
+			SelectedDeviceAddr: selectedDevice.GrpcAddr,
+			StreamID:           webrtcResp.StreamId,
+			OfferSDP:           webrtcResp.Sdp,
+		})
+		return
+	}
+
+	// For remote device, dial via gRPC
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, selectedDevice.GrpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStart: failed to dial device %s: %v", selectedDevice.GrpcAddr, err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	webrtcResp, err := deviceClient.StartWebRTC(ctx, &pb.WebRTCConfig{
+		SessionId:    sessionID,
+		TargetFps:    req.FPS,
+		JpegQuality:  req.Quality,
+		MonitorIndex: req.MonitorIndex,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStart: StartWebRTC failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("StartWebRTC error: %v", err))
+		return
+	}
+
+	log.Printf("[INFO] handleStreamStart: stream %s started on %s", webrtcResp.StreamId, selectedDevice.DeviceName)
+
+	h.writeJSON(w, http.StatusOK, StreamStartResponse{
+		SelectedDeviceID:   selectedDevice.DeviceId,
+		SelectedDeviceName: selectedDevice.DeviceName,
+		SelectedDeviceAddr: selectedDevice.GrpcAddr,
+		StreamID:           webrtcResp.StreamId,
+		OfferSDP:           webrtcResp.Sdp,
+	})
+}
+
+// handleStreamAnswer completes the WebRTC handshake with the answer SDP
+func (h *WebHandler) handleStreamAnswer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req StreamAnswerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.SelectedDeviceAddr == "" || req.StreamID == "" || req.AnswerSDP == "" {
+		h.writeError(w, http.StatusBadRequest, "selected_device_addr, stream_id, and answer_sdp are required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	// Check if local
+	if req.SelectedDeviceAddr == h.orchestrator.selfAddr {
+		_, err := h.orchestrator.CompleteWebRTC(ctx, &pb.WebRTCAnswer{
+			StreamId: req.StreamID,
+			Sdp:      req.AnswerSDP,
+		})
+		if err != nil {
+			log.Printf("[ERROR] handleStreamAnswer: CompleteWebRTC failed: %v", err)
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("CompleteWebRTC error: %v", err))
+			return
+		}
+		h.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, req.SelectedDeviceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleStreamAnswer: failed to dial %s: %v", req.SelectedDeviceAddr, err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	_, err = deviceClient.CompleteWebRTC(ctx, &pb.WebRTCAnswer{
+		StreamId: req.StreamID,
+		Sdp:      req.AnswerSDP,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamAnswer: CompleteWebRTC failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("CompleteWebRTC error: %v", err))
+		return
+	}
+
+	log.Printf("[INFO] handleStreamAnswer: stream %s connected", req.StreamID)
+
+	h.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleStreamStop stops an active WebRTC stream
+func (h *WebHandler) handleStreamStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req StreamStopRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.SelectedDeviceAddr == "" || req.StreamID == "" {
+		h.writeError(w, http.StatusBadRequest, "selected_device_addr and stream_id are required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	// Check if local
+	if req.SelectedDeviceAddr == h.orchestrator.selfAddr {
+		_, err := h.orchestrator.StopWebRTC(ctx, &pb.WebRTCStop{
+			StreamId: req.StreamID,
+		})
+		if err != nil {
+			log.Printf("[ERROR] handleStreamStop: StopWebRTC failed: %v", err)
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("StopWebRTC error: %v", err))
+			return
+		}
+		h.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, req.SelectedDeviceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStop: failed to dial %s: %v", req.SelectedDeviceAddr, err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	_, err = deviceClient.StopWebRTC(ctx, &pb.WebRTCStop{
+		StreamId: req.StreamID,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleStreamStop: StopWebRTC failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("StopWebRTC error: %v", err))
+		return
+	}
+
+	log.Printf("[INFO] handleStreamStop: stream %s stopped", req.StreamID)
+
+	h.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleRequestDownload creates a download ticket on a target device and returns a direct URL
+func (h *WebHandler) handleRequestDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req DownloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.DeviceID == "" {
+		h.writeError(w, http.StatusBadRequest, "device_id is required")
+		return
+	}
+	if req.Path == "" {
+		h.writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	devicesResp, err := h.orchestrator.ListDevices(ctx, &pb.ListDevicesRequest{})
+	if err != nil {
+		log.Printf("[ERROR] handleRequestDownload: ListDevices failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("ListDevices error: %v", err))
+		return
+	}
+
+	var targetDevice *pb.DeviceInfo
+	for _, d := range devicesResp.Devices {
+		if d.DeviceId == req.DeviceID {
+			targetDevice = d
+			break
+		}
+	}
+	if targetDevice == nil {
+		h.writeError(w, http.StatusNotFound, fmt.Sprintf("Device not found: %s", req.DeviceID))
+		return
+	}
+	if targetDevice.HttpAddr == "" {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Device %s has no HTTP address configured", targetDevice.DeviceName))
+		return
+	}
+
+	// For local device, call directly
+	if targetDevice.DeviceId == h.orchestrator.selfDeviceID {
+		ticketResp, err := h.orchestrator.CreateDownloadTicket(ctx, &pb.DownloadTicketRequest{
+			Path: req.Path,
+		})
+		if err != nil {
+			log.Printf("[ERROR] handleRequestDownload: CreateDownloadTicket failed: %v", err)
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ticket error: %v", err))
+			return
+		}
+
+		downloadURL := fmt.Sprintf("http://%s/bulk/download/%s", targetDevice.HttpAddr, ticketResp.Token)
+
+		h.writeJSON(w, http.StatusOK, DownloadResponse{
+			DownloadURL:   downloadURL,
+			Filename:      ticketResp.Filename,
+			SizeBytes:     ticketResp.SizeBytes,
+			ExpiresUnixMs: ticketResp.ExpiresUnixMs,
+		})
+		return
+	}
+
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, targetDevice.GrpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		log.Printf("[ERROR] handleRequestDownload: failed to dial device %s: %v", targetDevice.GrpcAddr, err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to connect to device: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	deviceClient := pb.NewOrchestratorServiceClient(conn)
+
+	ticketResp, err := deviceClient.CreateDownloadTicket(ctx, &pb.DownloadTicketRequest{
+		Path: req.Path,
+	})
+	if err != nil {
+		log.Printf("[ERROR] handleRequestDownload: CreateDownloadTicket failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Ticket error: %v", err))
+		return
+	}
+
+	downloadURL := fmt.Sprintf("http://%s/bulk/download/%s", targetDevice.HttpAddr, ticketResp.Token)
+
+	log.Printf("[INFO] handleRequestDownload: ticket for %s on %s, url=%s",
+		req.Path, targetDevice.DeviceName, downloadURL)
+
+	h.writeJSON(w, http.StatusOK, DownloadResponse{
+		DownloadURL:   downloadURL,
+		Filename:      ticketResp.Filename,
+		SizeBytes:     ticketResp.SizeBytes,
+		ExpiresUnixMs: ticketResp.ExpiresUnixMs,
+	})
+}
+
+// handleQaihubDoctor runs qai-hub diagnostics
+func (h *WebHandler) handleQaihubDoctor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	result, err := h.qaihubClient.Doctor(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubDoctor: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Doctor failed: %v", err))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// handleQaihubCompile runs model compilation using qai-hub
+func (h *WebHandler) handleQaihubCompile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req CompileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.ONNXPath == "" {
+		h.writeError(w, http.StatusBadRequest, "onnx_path is required")
+		return
+	}
+	if req.Target == "" {
+		h.writeError(w, http.StatusBadRequest, "target is required")
+		return
+	}
+
+	if !filepath.IsAbs(req.ONNXPath) {
+		h.writeError(w, http.StatusBadRequest, "onnx_path must be an absolute path")
+		return
+	}
+
+	if strings.Contains(req.ONNXPath, "..") {
+		h.writeError(w, http.StatusBadRequest, "onnx_path cannot contain path traversal (..)")
+		return
+	}
+
+	info, err := os.Stat(req.ONNXPath)
+	if os.IsNotExist(err) {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("ONNX file not found: %s", req.ONNXPath))
+		return
+	}
+	if info.IsDir() {
+		h.writeError(w, http.StatusBadRequest, "onnx_path must be a file, not a directory")
+		return
+	}
+
+	if !h.qaihubClient.IsAvailable() {
+		h.writeError(w, http.StatusServiceUnavailable, "qai-hub CLI is not available. Run qaihub doctor for setup instructions.")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	outDir := filepath.Join("artifacts", "qaihub", time.Now().Format("20060102-150405"))
+
+	result, err := h.qaihubClient.Compile(ctx, req.ONNXPath, req.Target, req.Runtime, outDir)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubCompile: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Compile failed: %v", err))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// handleQaihubDevices returns the QAI Hub cloud device catalog
+func (h *WebHandler) handleQaihubDevices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !h.qaihubClient.IsAvailable() {
+		h.writeError(w, http.StatusServiceUnavailable, "qai-hub CLI is not available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	result, err := h.qaihubClient.ListDevices(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubDevices: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("ListDevices failed: %v", err))
+		return
+	}
+
+	nameFilter := r.URL.Query().Get("name")
+	chipsetFilter := r.URL.Query().Get("chipset")
+	vendorFilter := r.URL.Query().Get("vendor")
+
+	devices := result.Devices
+	if nameFilter != "" {
+		var filtered []qaihub.TargetDevice
+		for _, d := range devices {
+			if strings.Contains(strings.ToLower(d.Name), strings.ToLower(nameFilter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		devices = filtered
+	}
+	if chipsetFilter != "" {
+		var filtered []qaihub.TargetDevice
+		for _, d := range devices {
+			if strings.Contains(strings.ToLower(d.Chipset), strings.ToLower(chipsetFilter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		devices = filtered
+	}
+	if vendorFilter != "" {
+		var filtered []qaihub.TargetDevice
+		for _, d := range devices {
+			if strings.Contains(strings.ToLower(d.Vendor), strings.ToLower(vendorFilter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		devices = filtered
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"count":   len(devices),
+		"devices": devices,
+	})
+}
+
+// handleQaihubJobStatus checks the status of a QAI Hub compile job
+func (h *WebHandler) handleQaihubJobStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var jobID string
+	if r.Method == http.MethodGet {
+		jobID = r.URL.Query().Get("job_id")
+	} else {
+		var req QaihubJobStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+			return
+		}
+		jobID = req.JobID
+	}
+
+	if jobID == "" {
+		h.writeError(w, http.StatusBadRequest, "job_id is required")
+		return
+	}
+
+	if !h.qaihubClient.IsAvailable() {
+		h.writeError(w, http.StatusServiceUnavailable, "qai-hub CLI is not available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := h.qaihubClient.GetJobStatus(ctx, jobID)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubJobStatus: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Job status check failed: %v", err))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// handleQaihubSubmitCompile submits a compile job via the Python SDK
+func (h *WebHandler) handleQaihubSubmitCompile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req QaihubSubmitCompileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.Model == "" {
+		h.writeError(w, http.StatusBadRequest, "model is required (ONNX path or model ID)")
+		return
+	}
+	if req.DeviceName == "" {
+		req.DeviceName = "Samsung Galaxy S24 (Family)"
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	log.Printf("[INFO] handleQaihubSubmitCompile: model=%s device=%s", req.Model, req.DeviceName)
+
+	result, err := h.qaihubClient.SubmitCompile(ctx, req.Model, req.DeviceName, req.Options)
+	if err != nil {
+		log.Printf("[ERROR] handleQaihubSubmitCompile: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Compile submission failed: %v", err))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// handleChat handles chat requests using the local LLM runtime
+func (h *WebHandler) handleChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if h.chat == nil {
+		h.writeError(w, http.StatusServiceUnavailable, "Chat provider is not configured. Set CHAT_PROVIDER environment variable.")
+		return
+	}
+
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if len(req.Messages) == 0 {
+		h.writeError(w, http.StatusBadRequest, "messages array is required and must not be empty")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	reply, err := h.chat.Chat(ctx, req.Messages)
+	if err != nil {
+		log.Printf("[ERROR] handleChat: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Chat failed: %v", err))
+		return
+	}
+
+	// Update chat memory
+	if len(req.Messages) > 0 {
+		lastMsg := req.Messages[len(req.Messages)-1]
+		if lastMsg.Role == "user" {
+			h.orchestrator.chatMem.AddMessage("user", lastMsg.Content)
+		}
+	}
+	h.orchestrator.chatMem.AddMessage("assistant", reply)
+
+	// Trigger broadcast
+	go h.orchestrator.broadcastChatMemory()
+
+	// Trigger background summarization if needed
+	h.orchestrator.chatMem.SummarizeAsync(h.performSummarization, func() {
+		h.orchestrator.broadcastChatMemory()
+	})
+
+	h.writeJSON(w, http.StatusOK, ChatResponse{Reply: reply})
+}
+
+// handleChatMemory returns the current chat history
+func (h *WebHandler) handleChatMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jsonStr, err := h.orchestrator.chatMem.ToJSON()
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Failed to serialize memory")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(jsonStr))
+}
+
+// handleChatHealth checks the chat runtime status
+func (h *WebHandler) handleChatHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if h.chat == nil {
+		h.writeJSON(w, http.StatusOK, &llm.HealthResult{
+			Ok:       false,
+			Provider: "none",
+			Error:    "Chat provider is not configured",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := h.chat.Health(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleChatHealth: %v", err)
+		h.writeJSON(w, http.StatusOK, &llm.HealthResult{
+			Ok:       false,
+			Provider: h.chat.Name(),
+			Error:    err.Error(),
+		})
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// handleAgent handles LLM tool-calling agent requests
+func (h *WebHandler) handleAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if h.agent == nil {
+		h.writeError(w, http.StatusServiceUnavailable, "Agent is not available. Check CHAT_PROVIDER configuration and gRPC server connectivity.")
+		return
+	}
+
+	var req AgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if req.Message == "" {
+		h.writeError(w, http.StatusBadRequest, "message is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	log.Printf("[INFO] handleAgent: processing message: %q", truncate(req.Message, 100))
+
+	var history []llm.ToolChatMessage
+
+	summary := h.orchestrator.chatMem.GetSummary()
+	if summary != "" {
+		history = append(history, llm.ToolChatMessage{
+			Role:    "system",
+			Content: fmt.Sprintf("Summary of previous conversation:\n%s", summary),
+		})
+	}
+
+	msgs := h.orchestrator.chatMem.GetMessages()
+	for _, m := range msgs {
+		history = append(history, llm.ToolChatMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
+
+	resp, err := h.agent.Run(ctx, req.Message, history)
+	if err != nil {
+		log.Printf("[ERROR] handleAgent: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Agent error: %v", err))
+		return
+	}
+
+	h.orchestrator.chatMem.AddMessage("user", req.Message)
+	h.orchestrator.chatMem.AddMessage("assistant", resp.Reply)
+	go h.orchestrator.broadcastChatMemory()
+
+	h.orchestrator.chatMem.SummarizeAsync(h.performSummarization, func() {
+		h.orchestrator.broadcastChatMemory()
+	})
+
+	toolCalls := make([]AgentToolCallInfo, len(resp.ToolCalls))
+	for i, tc := range resp.ToolCalls {
+		toolCalls[i] = AgentToolCallInfo{
+			Iteration: tc.Iteration,
+			ToolName:  tc.ToolName,
+			Arguments: tc.Arguments,
+			ResultLen: tc.ResultLen,
+		}
+	}
+
+	log.Printf("[INFO] handleAgent: completed in %d iterations, %d tool calls", resp.Iterations, len(toolCalls))
+
+	h.writeJSON(w, http.StatusOK, AgentResponseJSON{
+		Reply:      resp.Reply,
+		Iterations: resp.Iterations,
+		ToolCalls:  toolCalls,
+		Error:      resp.Error,
+	})
+}
+
+// handleAgentHealth checks the agent health status
+func (h *WebHandler) handleAgentHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if h.agent == nil {
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":       false,
+			"provider": "none",
+			"error":    "Agent is not configured",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := h.agent.HealthCheck(ctx)
+	if err != nil {
+		log.Printf("[ERROR] handleAgentHealth: %v", err)
+		h.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// performSummarization is the callback for rolling summaries
+func (h *WebHandler) performSummarization(currentSummary string, msgs []chatmem.ChatMessage) (string, error) {
+	if h.chat == nil {
+		log.Printf("[WARN] performSummarization: no chat provider available, skipping summary")
+		return "", fmt.Errorf("no chat provider available")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Current summary of the conversation:\n\"\"\"\n")
+	if currentSummary != "" {
+		sb.WriteString(currentSummary)
+	} else {
+		sb.WriteString("(No previous summary)")
+	}
+	sb.WriteString("\n\"\"\"\n\nNew conversation lines to add:\n\"\"\"\n")
+	for _, msg := range msgs {
+		sb.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
+	}
+	sb.WriteString("\"\"\"\n\nPlease update the summary to include the new information, keeping it concise and preserving key details. Return ONLY the updated summary text.")
+
+	prompt := sb.String()
+	log.Printf("[INFO] performSummarization: summarizing %d new messages...", len(msgs))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	messages := []llm.ChatMessage{
+		{Role: "system", Content: "You are an expert conversation summarizer. You update summaries concisely."},
+		{Role: "user", Content: prompt},
+	}
+	summary, err := h.chat.Chat(ctx, messages)
+	if err != nil {
+		log.Printf("[ERROR] Summarization failed: %v", err)
+		return "", err
+	}
+	log.Printf("[INFO] performSummarization: completed successfully. New summary len: %d", len(summary))
+	return strings.TrimSpace(summary), nil
+}
+
+// writeJSON writes a JSON response
+func (h *WebHandler) writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+// writeError writes a JSON error response
+func (h *WebHandler) writeError(w http.ResponseWriter, status int, message string) {
+	h.writeJSON(w, status, ErrorResponse{Error: message})
+}
+
+// truncate shortens a string for logging
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
 func main() {
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
@@ -1787,6 +3519,108 @@ func main() {
 
 	// Start bulk HTTP server in a goroutine
 	go orchestrator.startBulkHTTP()
+
+	// Get dev key from environment
+	devKey := os.Getenv("DEV_KEY")
+	if devKey == "" {
+		devKey = defaultDevKey
+	}
+
+	// Initialize LLM provider (optional)
+	llmProvider, err := llm.NewFromEnv()
+	if err != nil {
+		log.Fatalf("[FATAL] LLM provider init failed: %v", err)
+	}
+	if llmProvider != nil {
+		log.Printf("[INFO] LLM provider: %s", llmProvider.Name())
+	} else {
+		log.Printf("[INFO] LLM provider: disabled")
+	}
+
+	// Initialize Chat provider (optional, defaults to Ollama)
+	chatProvider, err := llm.NewChatFromEnv()
+	if err != nil {
+		log.Printf("[WARN] Chat provider init failed: %v", err)
+	}
+	if chatProvider != nil {
+		log.Printf("[INFO] Chat provider: %s", chatProvider.Name())
+	} else {
+		log.Printf("[INFO] Chat provider: disabled")
+	}
+
+	// Initialize Agent (LLM tool-calling)
+	var agentLoop *llm.AgentLoop
+	agentLoop, err = llm.NewAgentLoop(llm.AgentLoopConfig{
+		GRPCAddr: "localhost" + addr, // dial self for tools
+	})
+	if err != nil {
+		log.Printf("[WARN] Agent init failed: %v — agent endpoint will be disabled", err)
+	} else {
+		log.Printf("[INFO] Agent: enabled (max iterations: 8)")
+	}
+
+	// Initialize QAI Hub client
+	qaihubCli := qaihub.New()
+	if qaihubCli.IsAvailable() {
+		log.Printf("[INFO] QAI Hub CLI: available at %s", qaihubCli.Bin)
+	} else {
+		log.Printf("[INFO] QAI Hub CLI: not available")
+	}
+
+	// Create WebHandler for HTTP routes
+	webHandler := &WebHandler{
+		orchestrator: orchestrator,
+		devKey:       devKey,
+		llm:          llmProvider,
+		chat:         chatProvider,
+		agent:        agentLoop,
+		qaihubClient: qaihubCli,
+	}
+
+	// Setup HTTP routes
+	httpMux := http.NewServeMux()
+	httpMux.HandleFunc("/", webHandler.handleIndex)
+	httpMux.HandleFunc("/api/devices", webHandler.handleDevices)
+	httpMux.HandleFunc("/api/routed-cmd", webHandler.handleRoutedCmd)
+	httpMux.HandleFunc("/api/assistant", webHandler.handleAssistant)
+	httpMux.HandleFunc("/api/submit-job", webHandler.handleSubmitJob)
+	httpMux.HandleFunc("/api/job", webHandler.handleGetJob)
+	httpMux.HandleFunc("/api/plan", webHandler.handlePreviewPlan)
+	httpMux.HandleFunc("/api/plan-cost", webHandler.handlePlanCost)
+	httpMux.HandleFunc("/api/stream/start", webHandler.handleStreamStart)
+	httpMux.HandleFunc("/api/stream/answer", webHandler.handleStreamAnswer)
+	httpMux.HandleFunc("/api/stream/stop", webHandler.handleStreamStop)
+	httpMux.HandleFunc("/api/request-download", webHandler.handleRequestDownload)
+
+	// QAI Hub endpoints
+	httpMux.HandleFunc("/api/qaihub/doctor", webHandler.handleQaihubDoctor)
+	httpMux.HandleFunc("/api/qaihub/compile", webHandler.handleQaihubCompile)
+	httpMux.HandleFunc("/api/qaihub/devices", webHandler.handleQaihubDevices)
+	httpMux.HandleFunc("/api/qaihub/job-status", webHandler.handleQaihubJobStatus)
+	httpMux.HandleFunc("/api/qaihub/submit-compile", webHandler.handleQaihubSubmitCompile)
+
+	// Chat endpoints
+	httpMux.HandleFunc("/api/chat", webHandler.handleChat)
+	httpMux.HandleFunc("/api/chat/health", webHandler.handleChatHealth)
+	httpMux.HandleFunc("/api/chat/memory", webHandler.handleChatMemory)
+
+	// Agent endpoint (LLM tool-calling)
+	httpMux.HandleFunc("/api/agent", webHandler.handleAgent)
+	httpMux.HandleFunc("/api/agent/health", webHandler.handleAgentHealth)
+
+	// Start HTTP Web UI server in goroutine
+	webAddr := os.Getenv("WEB_ADDR")
+	if webAddr == "" {
+		webAddr = defaultWebAddr
+	}
+
+	go func() {
+		log.Printf("[INFO] HTTP Web UI listening on %s", webAddr)
+		log.Printf("[INFO] Open http://localhost%s in your browser", webAddr)
+		if err := http.ListenAndServe(webAddr, httpMux); err != nil {
+			log.Fatalf("[FATAL] HTTP server failed: %v", err)
+		}
+	}()
 
 	// P2P Discovery: enabled by default, use UDP broadcast to find peers on LAN
 	// Set P2P_DISCOVERY=false to disable
