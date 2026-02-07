@@ -47,6 +47,10 @@ service OrchestratorService {
 
   // File reading (for LLM tool calling)
   rpc ReadFile (ReadFileRequest) returns (ReadFileResponse);
+
+  // Chat memory synchronization
+  rpc SyncChatMemory (ChatMemorySync) returns (ChatMemorySyncResponse);
+  rpc GetChatMemory (Empty) returns (ChatMemoryData);
 }
 
 message Empty {}
@@ -358,4 +362,20 @@ message ReadFileResponse {
   bool truncated = 4;
   string error = 5;
   string content_preview = 6;  // first ~2KB decoded if text
+}
+
+// Chat memory synchronization messages
+
+message ChatMemorySync {
+  int64 last_updated_ms = 1;   // timestamp of sender's memory
+  string memory_json = 2;       // full JSON if pushing, empty if pulling
+}
+
+message ChatMemorySyncResponse {
+  bool updated = 1;             // true if receiver's memory was updated
+  string memory_json = 2;       // new JSON if updated, empty otherwise
+}
+
+message ChatMemoryData {
+  string memory_json = 1;       // full chat memory JSON
 }
