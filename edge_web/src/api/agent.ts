@@ -1,8 +1,11 @@
 import { apiGet, apiPost } from './client';
 import type { AgentRequest, AgentResponse, AgentHealthResponse, ChatMemoryResponse } from './types';
 
-export async function sendAgentMessage(message: string): Promise<AgentResponse> {
-  const request: AgentRequest = { message };
+export async function sendAgentMessage(message: string, deviceId?: string): Promise<AgentResponse> {
+  const request: AgentRequest = {
+    message,
+    device_id: deviceId
+  };
   return apiPost<AgentResponse>('/api/agent', request);
 }
 
@@ -10,6 +13,7 @@ export async function getAgentHealth(): Promise<AgentHealthResponse> {
   return apiGet<AgentHealthResponse>('/api/agent/health');
 }
 
-export async function getChatMemory(): Promise<ChatMemoryResponse> {
-  return apiGet<ChatMemoryResponse>('/api/chat/memory');
+export async function getChatMemory(deviceId?: string): Promise<ChatMemoryResponse> {
+  const params = deviceId ? { device_id: deviceId } : {};
+  return apiGet<ChatMemoryResponse>('/api/chat/memory', params);
 }

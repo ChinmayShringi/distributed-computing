@@ -81,7 +81,8 @@ type OrchestratorServer struct {
 	brain         *brain.Brain     // Windows AI CLI planner (platform-specific)
 	llmProvider   llm.Provider     // Cross-platform LLM planner (openai_compat, etc.)
 	chatProvider  llm.ChatProvider // Local chat provider for LLM task execution
-	chatMem       *chatmem.ChatMemory
+	chatMemories  map[string]*chatmem.ChatMemory
+	muChat        sync.RWMutex
 	selfDeviceID  string
 	selfAddr      string
 	ticketManager *transfer.Manager
@@ -139,7 +140,15 @@ type RoutedCmdResponse struct {
 
 // AssistantRequest is the JSON request for /api/assistant
 type AssistantRequest struct {
-	Text string `json:"text"`
+	Message  string `json:"message"`
+	DeviceID string `json:"device_id,omitempty"`
+}
+
+// AgentRequest is the JSON request for /api/agent
+type AgentRequest struct {
+	Message    string `json:"message"`
+	DeviceID   string `json:"device_id,omitempty"`
+	Iterations int    `json:"iterations,omitempty"`
 }
 
 // AssistantResponse is the JSON response for /api/assistant
@@ -292,9 +301,9 @@ type CompileRequest struct {
 	Runtime  string `json:"runtime"`
 }
 
-// ChatRequest is the JSON request for /api/chat
 type ChatRequest struct {
-	Messages []llm.ChatMessage `json:"messages"`
+	Messages []chatmem.ChatMessage `json:"messages"`
+	DeviceID string                `json:"device_id,omitempty"`
 }
 
 // ChatResponse is the JSON response for /api/chat
@@ -302,10 +311,6 @@ type ChatResponse struct {
 	Reply string `json:"reply"`
 }
 
-// AgentRequest is the JSON request for /api/agent
-type AgentRequest struct {
-	Message string `json:"message"`
-}
 
 // AgentToolCallInfo records a tool call made during agent execution
 type AgentToolCallInfo struct {
@@ -379,16 +384,6 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		bulkHTTPAddr = defaultBulkHTTPAddr
 	}
 
-	// Load chat memory from file
-	chatMemPath, _ := chatmem.DefaultFilePath()
-	chatMem, err := chatmem.LoadFromFile(chatMemPath)
-	if err != nil {
-		log.Printf("[WARN] Could not load chat memory from %s: %v", chatMemPath, err)
-		chatMem = chatmem.New()
-	} else {
-		log.Printf("[INFO] Loaded chat memory from %s (%d messages)", chatMemPath, len(chatMem.GetMessages()))
-	}
-
 	return &OrchestratorServer{
 		sessions:      make(map[string]*Session),
 		runner:        exec.NewRunner(),
@@ -396,7 +391,7 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		jobManager:    jobs.NewManager(),
 		webrtcManager: webrtcstream.NewManager(),
 		brain:         brain.New(),
-		chatMem:       chatMem,
+		chatMemories:  make(map[string]*chatmem.ChatMemory),
 		selfDeviceID:  selfID,
 		selfAddr:      selfAddr,
 		ticketManager: transfer.NewManager(time.Duration(bulkTTL) * time.Second),
@@ -2168,6 +2163,11 @@ func (s *OrchestratorServer) startBulkHTTP() {
 // If the sender's memory is newer, we update ours and return updated=true.
 // If our memory is newer, we return our memory for the sender to update.
 func (s *OrchestratorServer) SyncChatMemory(ctx context.Context, req *pb.ChatMemorySync) (*pb.ChatMemorySyncResponse, error) {
+	deviceID := req.DeviceId
+	if deviceID == "" {
+		return nil, status.Error(codes.InvalidArgument, "device_id is required")
+	}
+
 	// If sender is pushing their memory
 	if req.MemoryJson != "" {
 		incoming, err := chatmem.ParseFromJSON(req.MemoryJson)
@@ -2176,15 +2176,20 @@ func (s *OrchestratorServer) SyncChatMemory(ctx context.Context, req *pb.ChatMem
 			return nil, status.Error(codes.InvalidArgument, "invalid memory JSON")
 		}
 
+		mem, err := s.getChatMemoryForDevice(deviceID)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "failed to get memory")
+		}
+
 		// Merge if incoming is newer
-		if s.chatMem.Merge(incoming) {
-			if err := s.chatMem.SaveToFile(); err != nil {
+		if mem.Merge(incoming) {
+			if err := mem.SaveToFile(); err != nil {
 				log.Printf("[WARN] SyncChatMemory: failed to save memory: %v", err)
 			}
-			log.Printf("[INFO] SyncChatMemory: updated local memory from remote (ts=%d)", incoming.GetLastUpdated())
+			log.Printf("[INFO] SyncChatMemory: updated local memory for %s from remote (ts=%d)", deviceID, incoming.GetLastUpdated())
 
 			// Broadcast to all other registered devices
-			go s.broadcastChatMemory()
+			go s.broadcastChatMemory(deviceID)
 
 			return &pb.ChatMemorySyncResponse{
 				Updated:    true,
@@ -2193,29 +2198,33 @@ func (s *OrchestratorServer) SyncChatMemory(ctx context.Context, req *pb.ChatMem
 		}
 	}
 
-	// Our memory is newer or same - return it
-	memJSON, err := s.chatMem.ToJSON()
+	// If sender is pulling or merge returned false, return current state
+	mem, err := s.getChatMemoryForDevice(deviceID)
 	if err != nil {
-		log.Printf("[ERROR] SyncChatMemory: failed to serialize memory: %v", err)
-		return nil, status.Error(codes.Internal, "failed to serialize memory")
+		return nil, status.Error(codes.Internal, "failed to get memory")
 	}
-
+	jsonStr, _ := mem.ToJSON()
 	return &pb.ChatMemorySyncResponse{
 		Updated:    false,
-		MemoryJson: memJSON,
+		MemoryJson: jsonStr,
 	}, nil
 }
 
 // GetChatMemory returns the current chat memory.
 func (s *OrchestratorServer) GetChatMemory(ctx context.Context, req *pb.Empty) (*pb.ChatMemoryData, error) {
-	memJSON, err := s.chatMem.ToJSON()
+	// For gRPC GetChatMemory, we return the local device's memory
+	mem, err := s.getChatMemoryForDevice(s.selfDeviceID)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to get memory")
+	}
+
+	memJSON, err := mem.ToJSON()
 	if err != nil {
 		log.Printf("[ERROR] GetChatMemory: failed to serialize memory: %v", err)
 		return nil, status.Error(codes.Internal, "failed to serialize memory")
 	}
 
-	log.Printf("[DEBUG] GetChatMemory: returning %d messages", len(s.chatMem.GetMessages()))
-
+	log.Printf("[DEBUG] GetChatMemory: returning %d messages", len(mem.GetMessages()))
 	return &pb.ChatMemoryData{
 		MemoryJson: memJSON,
 	}, nil
@@ -2312,60 +2321,100 @@ func callOllamaChat(ctx context.Context, baseURL, model, prompt string) (string,
 	return result.Message.Content, nil
 }
 
-// broadcastChatMemory pushes our chat memory to all registered devices.
-func (s *OrchestratorServer) broadcastChatMemory() {
-	devices := s.registry.List()
-	if len(devices) <= 1 {
-		return // Only self registered
+// getChatMemoryForDevice returns the ChatMemory instance for a specific device, loading it if necessary.
+func (s *OrchestratorServer) getChatMemoryForDevice(deviceID string) (*chatmem.ChatMemory, error) {
+	s.muChat.Lock()
+	defer s.muChat.Unlock()
+
+	// Use normalized "self" for local device
+	if deviceID == "" || deviceID == "self" {
+		deviceID = s.selfDeviceID
 	}
 
-	memJSON, err := s.chatMem.ToJSON()
+	mem, ok := s.chatMemories[deviceID]
+	if ok {
+		return mem, nil
+	}
+
+	// Not in map, try to load from disk
+	path, err := chatmem.DeviceSpecificFilePath(deviceID)
 	if err != nil {
-		log.Printf("[WARN] broadcastChatMemory: failed to serialize: %v", err)
+		return nil, err
+	}
+
+	mem, err = chatmem.LoadFromFile(path)
+	if err != nil {
+		log.Printf("[WARN] getChatMemoryForDevice: Could not load chat memory for %s from %s: %v", deviceID, path, err)
+		mem = chatmem.New()
+	} else {
+		log.Printf("[INFO] getChatMemoryForDevice: Loaded chat memory for %s from %s", deviceID, path)
+	}
+
+	s.chatMemories[deviceID] = mem
+	return mem, nil
+}
+
+func (s *OrchestratorServer) broadcastChatMemory(deviceID string) {
+	if deviceID == "" {
+		deviceID = s.selfDeviceID
+	}
+
+	mem, err := s.getChatMemoryForDevice(deviceID)
+	if err != nil {
 		return
 	}
 
-	for _, device := range devices {
-		if device.DeviceId == s.selfDeviceID {
+	jsonStr, err := mem.ToJSON()
+	if err != nil {
+		return
+	}
+
+	log.Printf("[INFO] Broadcasting chat memory for device %s", deviceID)
+	
+	req := &pb.ChatMemorySync{
+		DeviceId:      deviceID,
+		LastUpdatedMs: mem.GetLastUpdated(),
+		MemoryJson:    jsonStr,
+	}
+
+	for _, info := range s.registry.List() {
+		if info.DeviceId == s.selfDeviceID {
 			continue
 		}
 
-		go func(d *pb.DeviceInfo) {
+		go func(targetID, addr string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			conn, err := grpc.DialContext(ctx, d.GrpcAddr,
+			conn, err := grpc.DialContext(ctx, addr,
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
-				grpc.WithBlock(),
 			)
 			if err != nil {
-				log.Printf("[WARN] broadcastChatMemory: failed to dial %s: %v", d.GrpcAddr, err)
 				return
 			}
 			defer conn.Close()
 
 			client := pb.NewOrchestratorServiceClient(conn)
-			_, err = client.SyncChatMemory(ctx, &pb.ChatMemorySync{
-				LastUpdatedMs: s.chatMem.GetLastUpdated(),
-				MemoryJson:    memJSON,
-			})
+			_, err = client.SyncChatMemory(ctx, req)
 			if err != nil {
-				log.Printf("[WARN] broadcastChatMemory: sync to %s failed: %v", d.DeviceName, err)
-			} else {
-				log.Printf("[INFO] broadcastChatMemory: synced to %s", d.DeviceName)
+				log.Printf("[WARN] broadcastChatMemory: sync to %s failed: %v", targetID, err)
 			}
-		}(device)
+		}(info.DeviceId, info.GrpcAddr)
 	}
 }
 
-// AddChatMessage adds a message to chat memory and broadcasts to all devices.
-// This is called by the web server after LLM responses.
-func (s *OrchestratorServer) AddChatMessage(role, content string) {
-	s.chatMem.AddMessage(role, content)
-	if err := s.chatMem.SaveToFile(); err != nil {
-		log.Printf("[WARN] AddChatMessage: failed to save: %v", err)
+// AddChatMessage adds a message to chat memory for a specific device and broadcasts it.
+func (s *OrchestratorServer) AddChatMessage(deviceID, role, content string) {
+	mem, err := s.getChatMemoryForDevice(deviceID)
+	if err != nil {
+		log.Printf("[ERROR] AddChatMessage: failed to get memory for %s: %v", deviceID, err)
+		return
 	}
-	go s.broadcastChatMemory()
+	mem.AddMessage(role, content)
+	if err := mem.SaveToFile(); err != nil {
+		log.Printf("[WARN] AddChatMessage: failed to save for %s: %v", deviceID, err)
+	}
+	go s.broadcastChatMemory(deviceID)
 }
 
 // CreateInternalSession creates a session for internal web handler use
@@ -2561,7 +2610,7 @@ func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	text := strings.ToLower(strings.TrimSpace(req.Text))
+	text := strings.ToLower(strings.TrimSpace(req.Message))
 
 	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
 	defer cancel()
@@ -2619,7 +2668,29 @@ func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		}
 
 	default:
-		reply, mode, jobID, planDebug = h.handleAssistantDefault(ctx, req.Text)
+		reply, mode, jobID, planDebug = h.handleAssistantDefault(ctx, req.Message)
+	}
+
+	// Update chat memory
+	deviceID := req.DeviceID
+	if deviceID == "" {
+		deviceID = h.orchestrator.selfDeviceID
+	}
+	mem, err := h.orchestrator.getChatMemoryForDevice(deviceID)
+	if err == nil {
+		mem.AddMessage("user", req.Message)
+		mem.AddMessage("assistant", reply)
+		
+		if err := mem.SaveToFile(); err != nil {
+			log.Printf("[WARN] handleAssistant: failed to save memory: %v", err)
+		}
+
+		go h.orchestrator.broadcastChatMemory(deviceID)
+		
+		// Trigger background summarization if needed
+		mem.SummarizeAsync(h.performSummarization, func() {
+			h.orchestrator.broadcastChatMemory(deviceID)
+		})
 	}
 
 	h.writeJSON(w, http.StatusOK, AssistantResponse{
@@ -2672,6 +2743,30 @@ func (h *WebHandler) handleAssistantDefault(ctx context.Context, userText string
 	}
 	if len(devicesResp.Devices) == 0 {
 		return "No devices registered. Register a device first.", "", "", nil
+	}
+
+	// Try to get a conversational reply first if it's a simple query or greeting
+	if h.chat != nil {
+		// Quick check for greetings or very short queries
+		lowMsg := strings.ToLower(strings.TrimSpace(userText))
+		greetings := []string{"hi", "hey", "hello", "yo", "greeting", "how are you", "who are you"}
+		isGreeting := false
+		for _, g := range greetings {
+			if lowMsg == g || strings.HasPrefix(lowMsg, g+" ") {
+				isGreeting = true
+				break
+			}
+		}
+
+		if isGreeting || len(lowMsg) < 20 {
+			msgReply, err := h.chat.Chat(ctx, []llm.ChatMessage{
+				{Role: "system", Content: "You are a helpful AI assistant. Be concise and friendly. If the user asks for a task that requires multiple steps or device orchestration, tell them you'll prepare a plan."},
+				{Role: "user", Content: userText},
+			})
+			if err == nil && msgReply != "" {
+				return msgReply, "chat", "", nil
+			}
+		}
 	}
 
 	if h.llm != nil {
@@ -3733,13 +3828,33 @@ func (h *WebHandler) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deviceID := req.DeviceID
+	if deviceID == "" {
+		deviceID = h.orchestrator.selfDeviceID
+	}
+
+	mem, err := h.orchestrator.getChatMemoryForDevice(deviceID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Failed to get chat memory")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
-	reply, err := h.chat.Chat(ctx, req.Messages)
+	// Convert to llm.ChatMessage
+	llmMsgs := make([]llm.ChatMessage, len(req.Messages))
+	for i, m := range req.Messages {
+		llmMsgs[i] = llm.ChatMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+	}
+
+	reply, err := h.chat.Chat(ctx, llmMsgs)
 	if err != nil {
 		log.Printf("[ERROR] handleChat: %v", err)
-		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Chat failed: %v", err))
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Chat error: %v", err))
 		return
 	}
 
@@ -3747,30 +3862,41 @@ func (h *WebHandler) handleChat(w http.ResponseWriter, r *http.Request) {
 	if len(req.Messages) > 0 {
 		lastMsg := req.Messages[len(req.Messages)-1]
 		if lastMsg.Role == "user" {
-			h.orchestrator.chatMem.AddMessage("user", lastMsg.Content)
+			mem.AddMessage("user", lastMsg.Content)
 		}
 	}
-	h.orchestrator.chatMem.AddMessage("assistant", reply)
+	mem.AddMessage("assistant", reply)
 
 	// Trigger broadcast
-	go h.orchestrator.broadcastChatMemory()
+	go h.orchestrator.broadcastChatMemory(deviceID)
 
 	// Trigger background summarization if needed
-	h.orchestrator.chatMem.SummarizeAsync(h.performSummarization, func() {
-		h.orchestrator.broadcastChatMemory()
+	mem.SummarizeAsync(h.performSummarization, func() {
+		h.orchestrator.broadcastChatMemory(deviceID)
 	})
 
 	h.writeJSON(w, http.StatusOK, ChatResponse{Reply: reply})
 }
 
-// handleChatMemory returns the current chat history
+// handleChatMemory returns the current chat history for a specific device
 func (h *WebHandler) handleChatMemory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	jsonStr, err := h.orchestrator.chatMem.ToJSON()
+	deviceID := r.URL.Query().Get("device_id")
+	if deviceID == "" {
+		deviceID = h.orchestrator.selfDeviceID
+	}
+
+	mem, err := h.orchestrator.getChatMemoryForDevice(deviceID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Failed to get memory")
+		return
+	}
+
+	jsonStr, err := mem.ToJSON()
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "Failed to serialize memory")
 		return
@@ -3841,9 +3967,19 @@ func (h *WebHandler) handleAgent(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[INFO] handleAgent: processing message: %q", truncate(req.Message, 100))
 
+	deviceID := req.DeviceID
+	if deviceID == "" {
+		deviceID = h.orchestrator.selfDeviceID
+	}
+	mem, err := h.orchestrator.getChatMemoryForDevice(deviceID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Failed to get chat memory")
+		return
+	}
+
 	var history []llm.ToolChatMessage
 
-	summary := h.orchestrator.chatMem.GetSummary()
+	summary := mem.GetSummary()
 	if summary != "" {
 		history = append(history, llm.ToolChatMessage{
 			Role:    "system",
@@ -3851,7 +3987,7 @@ func (h *WebHandler) handleAgent(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	msgs := h.orchestrator.chatMem.GetMessages()
+	msgs := mem.GetMessages()
 	for _, m := range msgs {
 		history = append(history, llm.ToolChatMessage{
 			Role:    m.Role,
@@ -3866,12 +4002,21 @@ func (h *WebHandler) handleAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.orchestrator.chatMem.AddMessage("user", req.Message)
-	h.orchestrator.chatMem.AddMessage("assistant", resp.Reply)
-	go h.orchestrator.broadcastChatMemory()
+	// Update chat memory with user and agent messages
+	mem.AddMessage("user", req.Message)
+	mem.AddMessage("assistant", resp.Reply)
 
-	h.orchestrator.chatMem.SummarizeAsync(h.performSummarization, func() {
-		h.orchestrator.broadcastChatMemory()
+	// Persist to disk immediately
+	if err := mem.SaveToFile(); err != nil {
+		log.Printf("[WARN] handleAgent: failed to save memory: %v", err)
+	}
+
+	// Trigger broadcast
+	go h.orchestrator.broadcastChatMemory(deviceID)
+
+	// Trigger background summarization if needed
+	mem.SummarizeAsync(h.performSummarization, func() {
+		h.orchestrator.broadcastChatMemory(deviceID)
 	})
 
 	toolCalls := make([]AgentToolCallInfo, len(resp.ToolCalls))

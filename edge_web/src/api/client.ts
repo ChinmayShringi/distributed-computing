@@ -28,8 +28,13 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json();
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
+export async function apiGet<T>(path: string, params?: Record<string, string>): Promise<T> {
+  let url = path;
+  if (params) {
+    const searchParams = new URLSearchParams(params);
+    url += `?${searchParams.toString()}`;
+  }
+  const response = await fetch(url, {
     method: 'GET',
     headers: {
       'Accept': 'application/json',

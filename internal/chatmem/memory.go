@@ -48,11 +48,16 @@ func New() *ChatMemory {
 
 // DefaultFilePath returns the default path for the chat memory file.
 func DefaultFilePath() (string, error) {
+	return DeviceSpecificFilePath("default")
+}
+
+// DeviceSpecificFilePath returns a device-scoped chat memory file path.
+func DeviceSpecificFilePath(deviceID string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, DefaultPath), nil
+	return filepath.Join(home, ".edgemesh", "chats", "chat_memory_"+deviceID+".json"), nil
 }
 
 // LoadFromFile loads chat memory from a JSON file.
