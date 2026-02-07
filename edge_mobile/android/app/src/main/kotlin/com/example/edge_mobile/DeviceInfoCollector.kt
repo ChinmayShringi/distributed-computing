@@ -121,12 +121,52 @@ object DeviceInfoCollector {
     }
 
     /**
+     * Check if a local LLM (e.g. Ollama for Android) is running on this device.
+     * Tries to connect to 127.0.0.1:11434 (Ollama default).
+     */
+    private fun hasLocalModel(context: Context): Boolean {
+        return try {
+            val url = java.net.URL("http://127.0.0.1:11434")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 1500
+            conn.readTimeout = 1500
+            conn.requestMethod = "GET"
+            val code = conn.responseCode
+            conn.disconnect()
+            code == 200
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Get local chat endpoint for coordinator to reach this device's LLM.
+     * Uses WiFi IP so the Mac/PC server can connect.
+     */
+    private fun getLocalChatEndpoint(context: Context): String {
+        val ip = getWifiIpAddress(context)
+        if (ip == "0.0.0.0") return ""
+        return "http://$ip:11434"
+    }
+
+    /**
+     * Get local model name if available (Ollama returns it; we use a default for now)
+     */
+    private fun getLocalModelName(context: Context): String {
+        if (!hasLocalModel(context)) return ""
+        return "llama3.2:3b"  // Default; could be fetched from Ollama /api/tags
+    }
+
+    /**
      * Collect self device info for registration
      */
     fun getSelfDeviceInfo(context: Context): DeviceInfo {
         val deviceId = getOrCreateDeviceId(context)
         val ipAddress = getWifiIpAddress(context)
-        
+        val localModel = hasLocalModel(context)
+        val localEndpoint = if (localModel) getLocalChatEndpoint(context) else ""
+        val localModelName = if (localModel) getLocalModelName(context) else ""
+
         return DeviceInfo.newBuilder()
             .setDeviceId(deviceId)
             .setDeviceName("${Build.MANUFACTURER} ${Build.MODEL}")
@@ -139,6 +179,9 @@ object DeviceInfoCollector {
             .setHttpAddr("")  // No HTTP bulk server on phone
             .setCanScreenCapture(false)
             .setRamFreeMb(getFreRamMb(context))
+            .setHasLocalModel(localModel)
+            .setLocalModelName(localModelName)
+            .setLocalChatEndpoint(localEndpoint)
             .build()
     }
 }

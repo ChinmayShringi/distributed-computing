@@ -5,6 +5,12 @@ import android.util.Log
 import com.example.edge_mobile.grpc.*
 import io.grpc.stub.StreamObserver
 import kotlinx.coroutines.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 class OrchestratorServerService(private val context: Context) : OrchestratorServiceGrpc.OrchestratorServiceImplBase() {
     
@@ -112,6 +118,89 @@ class OrchestratorServerService(private val context: Context) : OrchestratorServ
         
         responseObserver.onNext(response)
         responseObserver.onCompleted()
+    }
+
+    /**
+     * RunLLMTask - Execute LLM inference using local Ollama on this device
+     */
+    override fun runLLMTask(request: LLMTaskRequest, responseObserver: StreamObserver<LLMTaskResponse>) {
+        Log.d(TAG, "RunLLMTask: prompt_len=${request.prompt.length}")
+        
+        scope.launch {
+            val deviceInfo = DeviceInfoCollector.getSelfDeviceInfo(context)
+            if (!deviceInfo.hasLocalModel || deviceInfo.localChatEndpoint.isEmpty()) {
+                responseObserver.onNext(LLMTaskResponse.newBuilder()
+                    .setError("No local LLM model available on this device")
+                    .build())
+                responseObserver.onCompleted()
+                return@launch
+            }
+            
+            val model = if (request.model.isNotEmpty()) request.model else deviceInfo.localModelName
+            if (model.isEmpty()) {
+                responseObserver.onNext(LLMTaskResponse.newBuilder()
+                    .setError("No model specified and device has no default model")
+                    .build())
+                responseObserver.onCompleted()
+                return@launch
+            }
+            
+            try {
+                // Ollama runs on device - use 127.0.0.1 from app's perspective
+                val baseUrl = "http://127.0.0.1:11434"
+                val output = callOllamaChat(baseUrl, model, request.prompt)
+                
+                responseObserver.onNext(LLMTaskResponse.newBuilder()
+                    .setOutput(output)
+                    .setModelUsed(model)
+                    .setTokensGenerated((output.length / 4).toLong())  // rough estimate
+                    .build())
+                responseObserver.onCompleted()
+                Log.d(TAG, "RunLLMTask completed: output_len=${output.length}")
+            } catch (e: Exception) {
+                Log.e(TAG, "RunLLMTask failed", e)
+                responseObserver.onNext(LLMTaskResponse.newBuilder()
+                    .setError("LLM inference failed: ${e.message}")
+                    .build())
+                responseObserver.onCompleted()
+            }
+        }
+    }
+    
+    private fun callOllamaChat(baseUrl: String, model: String, prompt: String): String {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+        
+        val json = JSONObject().apply {
+            put("model", model)
+            put("stream", false)
+            put("messages", org.json.JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", prompt)
+                })
+            })
+        }
+        
+        val url = baseUrl.trimEnd('/') + "/api/chat"
+        val request = Request.Builder()
+            .url(url)
+            .post(json.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+        
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string() ?: ""
+                throw Exception("Ollama returned ${response.code}: $body")
+            }
+            val body = response.body?.string() ?: throw Exception("Empty response")
+            val obj = JSONObject(body)
+            val message = obj.optJSONObject("message")
+            return message?.optString("content", "") ?: ""
+        }
     }
 
     /**

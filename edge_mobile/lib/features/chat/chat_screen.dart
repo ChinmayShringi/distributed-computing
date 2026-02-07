@@ -179,18 +179,18 @@ class _ChatBody extends StatelessWidget {
           Column(
             children: [
               Row(
-                children: const [
-                  Expanded(child: _SuggestionChip('Show my devices')),
-                  SizedBox(width: 12),
-                  Expanded(child: _SuggestionChip('Run status check')),
+                children: [
+                  Expanded(child: _SuggestionChip('Show my devices', onTap: () => ChatController(ref).handleUserMessage('Show my devices'))),
+                  const SizedBox(width: 12),
+                  Expanded(child: _SuggestionChip('Run status check', onTap: () => ChatController(ref).handleUserMessage('Run status check'))),
                 ],
               ),
               const SizedBox(height: 12),
               Row(
-                children: const [
-                  Expanded(child: _SuggestionChip('Start stream on laptop')),
-                  SizedBox(width: 12),
-                  Expanded(child: _SuggestionChip('Download shared report')),
+                children: [
+                  Expanded(child: _SuggestionChip('Start stream on laptop', onTap: () => ChatController(ref).handleUserMessage('Start stream on laptop'))),
+                  const SizedBox(width: 12),
+                  Expanded(child: _SuggestionChip('Download shared report', onTap: () => ChatController(ref).handleUserMessage('Download shared report'))),
                 ],
               ),
             ],

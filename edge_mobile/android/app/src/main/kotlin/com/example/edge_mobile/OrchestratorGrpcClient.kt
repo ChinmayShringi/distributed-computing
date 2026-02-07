@@ -300,7 +300,7 @@ class OrchestratorGrpcClient(
             )
 
             // Include metrics history if requested
-            if (includeMetrics && response.deviceMetricsCount > 0) {
+            if (includeMetrics && response.deviceMetricsMap.isNotEmpty()) {
                 result["device_metrics"] = response.deviceMetricsMap.mapValues { (_, metricsHistory) ->
                     mapOf(
                         "device_id" to metricsHistory.deviceId,

@@ -57,7 +57,8 @@ object DiscoveryManager {
         val grpcHost: String,
         val grpcPort: Int,
         val httpHost: String,
-        val httpPort: Int,
+        val httpPort: Int,  // Bulk download port (8081)
+        val webApiPort: Int = 8080,  // Web UI + /api/assistant, /api/chat (8080)
         val platform: String,
         val arch: String,
         val hasLocalModel: Boolean = false,
@@ -194,10 +195,17 @@ object DiscoveryManager {
     }
 
     /**
-     * Get HTTP port for active server (default 8080)
+     * Get HTTP port for active server (bulk download, default 8081)
      */
     fun getActiveHttpPort(): Int {
-        return activeServer?.httpPort ?: 8080
+        return activeServer?.httpPort ?: 8081
+    }
+
+    /**
+     * Get Web API port for assistant/chat (default 8080)
+     */
+    fun getActiveWebApiPort(): Int {
+        return activeServer?.webApiPort ?: 8080
     }
 
     /**
@@ -224,7 +232,7 @@ object DiscoveryManager {
     /**
      * Manually set the active server by host/port (for fallback/manual config)
      */
-    fun setActiveServerManual(host: String, grpcPort: Int = 50051, httpPort: Int = 8080) {
+    fun setActiveServerManual(host: String, grpcPort: Int = 50051, httpPort: Int = 8081) {
         val server = ServerInfo(
             deviceId = "manual-$host",
             deviceName = "Manual: $host",
@@ -232,6 +240,7 @@ object DiscoveryManager {
             grpcPort = grpcPort,
             httpHost = host,
             httpPort = httpPort,
+            webApiPort = 8080,  // Web API (assistant, chat)
             platform = "unknown",
             arch = "unknown"
         )
@@ -310,8 +319,10 @@ object DiscoveryManager {
             httpAddr = fixAddress(httpAddr, sourceIp)
 
             // Parse host:port
+            // grpc_addr = host:50051, http_addr = host:8081 (bulk download)
+            // Web API (assistant, chat) is always on port 8080
             val (grpcHost, grpcPort) = parseHostPort(grpcAddr, 50051)
-            val (httpHost, httpPort) = parseHostPort(httpAddr, 8080)
+            val (httpHost, httpPort) = parseHostPort(httpAddr, 8081)
 
             val server = ServerInfo(
                 deviceId = deviceId,
@@ -320,6 +331,7 @@ object DiscoveryManager {
                 grpcPort = grpcPort,
                 httpHost = httpHost,
                 httpPort = httpPort,
+                webApiPort = 8080,  // Web UI + /api/assistant, /api/chat
                 platform = deviceJson.getString("platform"),
                 arch = deviceJson.getString("arch"),
                 hasLocalModel = deviceJson.optBoolean("has_local_model", false),

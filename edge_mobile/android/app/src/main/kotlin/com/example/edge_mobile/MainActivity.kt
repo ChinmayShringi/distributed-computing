@@ -58,12 +58,12 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
         val activeServer = DiscoveryManager.getActiveServer()
         if (activeServer != null) {
             Log.i(TAG, "Using previously discovered server: ${activeServer.deviceName}")
-            initializeClients(activeServer.grpcHost, activeServer.grpcPort, activeServer.httpPort)
+            initializeClients(activeServer.grpcHost, activeServer.grpcPort, activeServer.webApiPort)
         } else {
             // Initialize with fallback immediately so user can connect right away
             val fallback = getFallbackHost()
             Log.i(TAG, "Initializing with fallback host: $fallback")
-            DiscoveryManager.setActiveServerManual(fallback, 50051, 8080)
+            DiscoveryManager.setActiveServerManual(fallback, 50051, 8081)
             initializeClients(fallback, 50051, 8080)
         }
 
@@ -96,9 +96,10 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
     /**
      * Initialize gRPC and Assistant clients with discovered server
      * Uses synchronization to prevent race conditions with in-flight requests
+     * @param webApiPort Port for Web API (assistant, chat) - typically 8080
      */
-    private fun initializeClients(host: String, grpcPort: Int, httpPort: Int) {
-        Log.i(TAG, "Initializing clients: $host:$grpcPort (gRPC), $host:$httpPort (HTTP)")
+    private fun initializeClients(host: String, grpcPort: Int, webApiPort: Int) {
+        Log.i(TAG, "Initializing clients: $host:$grpcPort (gRPC), $host:$webApiPort (Web API)")
 
         synchronized(clientLock) {
             // Keep reference to old client for cleanup
@@ -107,8 +108,8 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
             // Initialize new gRPC client for orchestrator FIRST
             grpcClient = OrchestratorGrpcClient(host = host, port = grpcPort)
 
-            // Initialize REST client for assistant
-            assistantClient = AssistantClient(host = host, port = httpPort)
+            // Initialize REST client for assistant (uses Web API port 8080, not bulk 8081)
+            assistantClient = AssistantClient(host = host, port = webApiPort)
 
             clientsInitialized = true
 
@@ -122,7 +123,7 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
                 "connected" to true,
                 "host" to host,
                 "grpc_port" to grpcPort,
-                "http_port" to httpPort
+                "http_port" to webApiPort
             ))
         }
     }
@@ -140,7 +141,7 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
                 "grpc_host" to server.grpcHost,
                 "grpc_port" to server.grpcPort,
                 "http_host" to server.httpHost,
-                "http_port" to server.httpPort,
+                "http_port" to server.webApiPort,
                 "platform" to server.platform,
                 "has_local_model" to server.hasLocalModel
             ))
@@ -160,7 +161,7 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
     override fun onActiveServerChanged(server: DiscoveryManager.ServerInfo?) {
         if (server != null) {
             Log.i(TAG, "Active server changed to: ${server.deviceName}")
-            initializeClients(server.grpcHost, server.grpcPort, server.httpPort)
+            initializeClients(server.grpcHost, server.grpcPort, server.webApiPort)
         } else {
             Log.w(TAG, "No active server available")
             clientsInitialized = false
@@ -183,7 +184,7 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
                 "grpc_host" to server.grpcHost,
                 "grpc_port" to server.grpcPort,
                 "http_host" to server.httpHost,
-                "http_port" to server.httpPort,
+                "http_port" to server.webApiPort,
                 "platform" to server.platform,
                 "has_local_model" to server.hasLocalModel,
                 "is_active" to (server.deviceId == DiscoveryManager.getActiveServer()?.deviceId)
@@ -212,7 +213,7 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
             "connected" to (server != null && clientsInitialized),
             "host" to (server?.grpcHost ?: ""),
             "grpc_port" to (server?.grpcPort ?: 50051),
-            "http_port" to (server?.httpPort ?: 8080),
+            "http_port" to (server?.webApiPort ?: 8080),
             "device_name" to (server?.deviceName ?: ""),
             "discovered_count" to DiscoveryManager.getDiscoveredServers().size
         ))

@@ -4255,6 +4255,36 @@ func main() {
 		log.Printf("[INFO] Chat provider: disabled")
 	}
 
+	// Wrap with device-priority when CHAT_USE_DEVICE_LLM is set (use mobile/registered device's model)
+	if os.Getenv("CHAT_USE_DEVICE_LLM") == "true" || os.Getenv("CHAT_USE_DEVICE_LLM") == "1" {
+		chatTimeout := 120
+		if v := os.Getenv("CHAT_TIMEOUT_SECONDS"); v != "" {
+			if n, e := strconv.Atoi(v); e == nil && n > 0 {
+				chatTimeout = n
+			}
+		}
+		deviceResolver := func() (baseURL, modelName string, ok bool) {
+			devices := orchestrator.registry.List()
+			for _, d := range devices {
+				if d.HasLocalModel && d.LocalChatEndpoint != "" {
+					return d.LocalChatEndpoint, d.LocalModelName, true
+				}
+			}
+			return "", "", false
+		}
+		chatProvider = llm.NewDeviceChatProvider(chatProvider, deviceResolver, chatTimeout)
+		if llmProvider != nil {
+			llmTimeout := 20
+			if v := os.Getenv("LLM_TIMEOUT_SECONDS"); v != "" {
+				if n, e := strconv.Atoi(v); e == nil && n > 0 {
+					llmTimeout = n
+				}
+			}
+			llmProvider = llm.NewDeviceLLMProvider(llmProvider, deviceResolver, llmTimeout)
+		}
+		log.Printf("[INFO] Chat + Assistant: device-priority enabled (will use registered device's LLM when available)")
+	}
+
 	// Initialize Agent (LLM tool-calling)
 	agentGRPCAddr := "localhost:50051"
 	if idx := strings.LastIndex(addr, ":"); idx >= 0 {

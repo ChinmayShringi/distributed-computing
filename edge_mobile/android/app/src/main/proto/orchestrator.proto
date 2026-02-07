@@ -49,6 +49,13 @@ service OrchestratorService {
 
   // File reading (for LLM tool calling)
   rpc ReadFile (ReadFileRequest) returns (ReadFileResponse);
+
+  // Remote LLM task execution
+  rpc RunLLMTask (LLMTaskRequest) returns (LLMTaskResponse);
+
+  // Activity tracking and metrics
+  rpc GetActivity (GetActivityRequest) returns (GetActivityResponse);
+  rpc GetDeviceMetrics (DeviceId) returns (MetricsHistoryResponse);
 }
 
 message Empty {}
@@ -97,6 +104,10 @@ message DeviceInfo {
   double llm_prefill_toks_per_s = 11;  // 0 = use platform default
   double llm_decode_toks_per_s = 12;   // 0 = use platform default
   uint64 ram_free_mb = 13;              // free RAM in MB (0 = unknown)
+  // Local LLM model capability
+  bool has_local_model = 14;           // device has Ollama/chat running
+  string local_model_name = 15;        // loaded model (e.g., "llama3.2:3b")
+  string local_chat_endpoint = 16;     // URL to chat service (e.g., "http://192.168.1.38:11434")
 }
 
 message DeviceAck {
@@ -360,4 +371,71 @@ message ReadFileResponse {
   bool truncated = 4;
   string error = 5;
   string content_preview = 6;  // first ~2KB decoded if text
+}
+
+// Remote LLM task messages
+
+message LLMTaskRequest {
+  string prompt = 1;
+  string model = 2;        // optional: specific model name
+  int32 max_tokens = 3;    // optional: max tokens to generate
+}
+
+message LLMTaskResponse {
+  string output = 1;
+  string model_used = 2;
+  int64 tokens_generated = 3;
+  string error = 4;
+}
+
+// Activity tracking messages
+
+message MetricsSample {
+  int64 timestamp_ms = 1;
+  double cpu_load = 2;
+  uint64 mem_used_mb = 3;
+  uint64 mem_total_mb = 4;
+  double gpu_load = 5;
+  uint64 gpu_mem_used_mb = 6;
+  uint64 gpu_mem_total_mb = 7;
+  double npu_load = 8;
+}
+
+message RunningTask {
+  string task_id = 1;
+  string job_id = 2;
+  string kind = 3;
+  string input = 4;
+  string device_id = 5;
+  string device_name = 6;
+  int64 started_at_ms = 7;
+  int64 elapsed_ms = 8;
+}
+
+message DeviceActivity {
+  string device_id = 1;
+  string device_name = 2;
+  int32 running_task_count = 3;
+  DeviceStatus current_status = 4;
+}
+
+message ActivityData {
+  repeated RunningTask running_tasks = 1;
+  repeated DeviceActivity device_activities = 2;
+}
+
+message GetActivityRequest {
+  bool include_metrics_history = 1;
+  int64 metrics_since_ms = 2;
+}
+
+message MetricsHistoryResponse {
+  string device_id = 1;
+  string device_name = 2;
+  repeated MetricsSample samples = 3;
+}
+
+message GetActivityResponse {
+  ActivityData activity = 1;
+  map<string, MetricsHistoryResponse> device_metrics = 2;
 }

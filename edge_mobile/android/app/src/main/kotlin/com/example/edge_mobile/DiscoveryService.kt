@@ -43,7 +43,10 @@ class DiscoveryService(
         val hasCpu: Boolean,
         val hasGpu: Boolean,
         val hasNpu: Boolean,
-        val canScreenCapture: Boolean
+        val canScreenCapture: Boolean,
+        val hasLocalModel: Boolean = false,
+        val localModelName: String = "",
+        val localChatEndpoint: String = ""
     )
 
     /**
@@ -157,7 +160,10 @@ class DiscoveryService(
                 hasCpu = selfDeviceInfo.hasCpu,
                 hasGpu = selfDeviceInfo.hasGpu,
                 hasNpu = selfDeviceInfo.hasNpu,
-                canScreenCapture = selfDeviceInfo.canScreenCapture
+                canScreenCapture = selfDeviceInfo.canScreenCapture,
+                hasLocalModel = selfDeviceInfo.hasLocalModel,
+                localModelName = selfDeviceInfo.localModelName,
+                localChatEndpoint = selfDeviceInfo.localChatEndpoint
             )
             
             val message = JSONObject().apply {
@@ -175,6 +181,9 @@ class DiscoveryService(
                     put("has_gpu", deviceAnnounce.hasGpu)
                     put("has_npu", deviceAnnounce.hasNpu)
                     put("can_screen_capture", deviceAnnounce.canScreenCapture)
+                    put("has_local_model", deviceAnnounce.hasLocalModel)
+                    put("local_model_name", deviceAnnounce.localModelName)
+                    put("local_chat_endpoint", deviceAnnounce.localChatEndpoint)
                 })
             }
             
@@ -208,7 +217,10 @@ class DiscoveryService(
                 hasCpu = deviceJson.getBoolean("has_cpu"),
                 hasGpu = deviceJson.getBoolean("has_gpu"),
                 hasNpu = deviceJson.getBoolean("has_npu"),
-                canScreenCapture = deviceJson.getBoolean("can_screen_capture")
+                canScreenCapture = deviceJson.getBoolean("can_screen_capture"),
+                hasLocalModel = deviceJson.optBoolean("has_local_model", false),
+                localModelName = deviceJson.optString("local_model_name", ""),
+                localChatEndpoint = deviceJson.optString("local_chat_endpoint", "")
             )
             
             // Ignore our own broadcasts
