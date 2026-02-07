@@ -28,7 +28,6 @@ import (
 
 	"github.com/edgecli/edgecli/internal/allowlist"
 	"github.com/edgecli/edgecli/internal/brain"
-	"github.com/edgecli/edgecli/internal/discovery"
 	"github.com/edgecli/edgecli/internal/cost"
 	"github.com/edgecli/edgecli/internal/deviceid"
 	"github.com/edgecli/edgecli/internal/exec"
@@ -1556,60 +1555,9 @@ func main() {
 	// Start bulk HTTP server in a goroutine
 	go orchestrator.startBulkHTTP()
 
-	// P2P Discovery: enabled by default, use UDP broadcast to find peers on LAN
-	// Set P2P_DISCOVERY=false to disable
-	if os.Getenv("P2P_DISCOVERY") != "false" {
-		discoveryPort := discovery.DefaultPort
-		if portStr := os.Getenv("DISCOVERY_PORT"); portStr != "" {
-			if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
-				discoveryPort = p
-			}
-		}
-
-		// Get self device info and convert to discovery format
-		selfInfo := orchestrator.getSelfDeviceInfo()
-		selfDevice := &discovery.DeviceAnnounce{
-			DeviceID:         selfInfo.DeviceId,
-			DeviceName:       selfInfo.DeviceName,
-			GrpcAddr:         selfInfo.GrpcAddr,
-			HttpAddr:         selfInfo.HttpAddr,
-			Platform:         selfInfo.Platform,
-			Arch:             selfInfo.Arch,
-			HasCPU:           selfInfo.HasCpu,
-			HasGPU:           selfInfo.HasGpu,
-			HasNPU:           selfInfo.HasNpu || (runtime.GOOS == "windows" && runtime.GOARCH == "arm64"),
-			CanScreenCapture: selfInfo.CanScreenCapture,
-		}
-
-		discoverySvc := discovery.NewService(discoveryPort, selfDevice, &discoveryCallback{registry: orchestrator.registry})
-
-		// Add seed peers for cross-subnet discovery
-		if seedPeers := os.Getenv("SEED_PEERS"); seedPeers != "" {
-			for _, peer := range strings.Split(seedPeers, ",") {
-				peer = strings.TrimSpace(peer)
-				if peer == "" {
-					continue
-				}
-				// Add discovery port if not specified
-				if !strings.Contains(peer, ":") {
-					peer = peer + ":" + strconv.Itoa(discoveryPort)
-				}
-				if err := discoverySvc.AddSeedPeer(peer); err != nil {
-					log.Printf("[WARN] Invalid seed peer %s: %v", peer, err)
-				} else {
-					log.Printf("[INFO] Added seed peer: %s", peer)
-				}
-			}
-		}
-
-		if err := discoverySvc.Start(); err != nil {
-			log.Printf("[WARN] Failed to start P2P discovery: %v", err)
-		} else {
-			log.Printf("[INFO] P2P discovery enabled on UDP port %d", discoveryPort)
-			defer discoverySvc.Stop()
-		}
-	} else if coordinatorAddr := os.Getenv("COORDINATOR_ADDR"); coordinatorAddr != "" {
-		// Legacy: Auto-register with coordinator if COORDINATOR_ADDR is set.
+	// Auto-register with coordinator if COORDINATOR_ADDR is set.
+	// This lets any device join the mesh automatically on startup.
+	if coordinatorAddr := os.Getenv("COORDINATOR_ADDR"); coordinatorAddr != "" {
 		go orchestrator.autoRegisterWithCoordinator(coordinatorAddr)
 	}
 
@@ -1617,28 +1565,4 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}
-}
-
-// discoveryCallback bridges discovery events to the device registry
-type discoveryCallback struct {
-	registry *registry.Registry
-}
-
-func (dc *discoveryCallback) OnDeviceDiscovered(device *discovery.DeviceAnnounce) {
-	dc.registry.UpsertFromDiscovery(
-		device.DeviceID,
-		device.DeviceName,
-		device.GrpcAddr,
-		device.HttpAddr,
-		device.Platform,
-		device.Arch,
-		device.HasCPU,
-		device.HasGPU,
-		device.HasNPU,
-		device.CanScreenCapture,
-	)
-}
-
-func (dc *discoveryCallback) OnDeviceLeft(deviceID string) {
-	dc.registry.Remove(deviceID)
 }
