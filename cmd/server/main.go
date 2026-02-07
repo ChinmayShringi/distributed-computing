@@ -542,7 +542,6 @@ func (s *OrchestratorServer) syncAllChatMemoriesToAllPeers() {
 		s.syncAllChatMemoriesToPeer(info.DeviceId, info.GrpcAddr)
 	}
 }
-
 // ListDevices returns all registered devices
 func (s *OrchestratorServer) ListDevices(ctx context.Context, req *pb.ListDevicesRequest) (*pb.ListDevicesResponse, error) {
 	devices := s.registry.List()
@@ -939,7 +938,6 @@ func (s *OrchestratorServer) autoRegisterWithCoordinator(coordinatorAddr string)
 		// The coordinator already does this in RegisterDevice.
 		// However, we should also push OUR existing memories to the coordinator just in case.
 		go s.syncAllChatMemoriesToPeer("coordinator", coordinatorAddr)
-
 		// Re-register periodically (heartbeat) every 30 seconds
 		time.Sleep(30 * time.Second)
 	}
@@ -2181,9 +2179,6 @@ func (s *OrchestratorServer) startBulkHTTP() {
 	}
 }
 
-// SyncChatMemory synchronizes chat memory between devices.
-// If the sender's memory is newer, we update ours and return updated=true.
-// If our memory is newer, we return our memory for the sender to update.
 func (s *OrchestratorServer) SyncChatMemory(ctx context.Context, req *pb.ChatMemorySync) (*pb.ChatMemorySyncResponse, error) {
 	deviceID := req.DeviceId
 	if deviceID == "" {
@@ -2338,8 +2333,6 @@ func callOllamaChat(ctx context.Context, baseURL, model, prompt string) (string,
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
 	return result.Message.Content, nil
 }
 
@@ -2739,6 +2732,7 @@ func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		}
 
 	default:
+<<<<<<< HEAD
 		reply, mode, jobID, planDebug = h.handleAssistantDefault(ctx, req.Message)
 	}
 
@@ -2768,6 +2762,9 @@ func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
 		mem.SummarizeAsync(h.performSummarization, func() {
 			h.orchestrator.broadcastChatMemory(deviceID)
 		})
+=======
+		reply, mode, jobID, planDebug = h.handleAssistantDefault(ctx, req.Text)
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 	}
 
 	h.writeJSON(w, http.StatusOK, AssistantResponse{
@@ -2845,7 +2842,6 @@ func (h *WebHandler) handleAssistantDefault(ctx context.Context, userText string
 			}
 		}
 	}
-
 	if h.llm != nil {
 		type deviceCompact struct {
 			DeviceID string `json:"device_id"`
@@ -3919,19 +3915,10 @@ func (h *WebHandler) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
-	// Convert to llm.ChatMessage
-	llmMsgs := make([]llm.ChatMessage, len(req.Messages))
-	for i, m := range req.Messages {
-		llmMsgs[i] = llm.ChatMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		}
-	}
-
-	reply, err := h.chat.Chat(ctx, llmMsgs)
+	reply, err := h.chat.Chat(ctx, req.Messages)
 	if err != nil {
 		log.Printf("[ERROR] handleChat: %v", err)
-		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Chat error: %v", err))
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Chat failed: %v", err))
 		return
 	}
 

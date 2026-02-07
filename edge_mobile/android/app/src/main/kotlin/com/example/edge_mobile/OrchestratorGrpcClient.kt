@@ -90,7 +90,15 @@ class OrchestratorGrpcClient(
                     "capabilities" to capabilities,
                     "grpc_addr" to device.grpcAddr,
                     "can_screen_capture" to device.canScreenCapture,
+<<<<<<< HEAD
                     "http_addr" to device.httpAddr
+=======
+                    "http_addr" to device.httpAddr,
+                    "has_local_model" to device.hasLocalModel,
+                    "local_model_name" to device.localModelName,
+                    "local_chat_endpoint" to device.localChatEndpoint,
+                    "ram_free_mb" to device.ramFreeMb
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                 )
             }
         } catch (e: Exception) {
@@ -300,6 +308,137 @@ class OrchestratorGrpcClient(
     }
 
     /**
+<<<<<<< HEAD
+=======
+     * Submit a distributed job across devices
+     */
+    suspend fun submitJob(
+        prompt: String,
+        maxWorkers: Int = 0
+    ): Map<String, Any> = withContext(Dispatchers.IO) {
+        init()
+
+        if (sessionId == null) {
+            createSession()
+        }
+
+        try {
+            val request = JobRequest.newBuilder()
+                .setSessionId(sessionId!!)
+                .setText(prompt)
+                .setMaxWorkers(maxWorkers)
+                .build()
+
+            val response = stub!!.submitJob(request)
+
+            mapOf(
+                "job_id" to response.jobId,
+                "created_at" to response.createdAt,
+                "summary" to response.summary
+            )
+        } catch (e: Exception) {
+            throw Exception("Failed to submit job: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Get detailed job status with task timing
+     */
+    suspend fun getJobDetail(jobId: String): Map<String, Any> = withContext(Dispatchers.IO) {
+        init()
+
+        try {
+            val request = JobId.newBuilder()
+                .setJobId(jobId)
+                .build()
+
+            val response = stub!!.getJobDetail(request)
+
+            mapOf(
+                "job_id" to response.jobId,
+                "state" to response.state,
+                "final_result" to response.finalResult,
+                "current_group" to response.currentGroup,
+                "total_groups" to response.totalGroups,
+                "created_at_ms" to response.createdAtMs,
+                "started_at_ms" to response.startedAtMs,
+                "ended_at_ms" to response.endedAtMs,
+                "tasks" to response.tasksList.map { task ->
+                    mapOf(
+                        "task_id" to task.taskId,
+                        "job_id" to task.jobId,
+                        "assigned_device_id" to task.assignedDeviceId,
+                        "assigned_device_name" to task.assignedDeviceName,
+                        "kind" to task.kind,
+                        "input" to task.input,
+                        "state" to task.state,
+                        "result" to task.result,
+                        "error" to task.error,
+                        "group_index" to task.groupIndex,
+                        "started_at_ms" to task.startedAtMs,
+                        "ended_at_ms" to task.endedAtMs
+                    )
+                }
+            )
+        } catch (e: Exception) {
+            throw Exception("Failed to get job detail: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Get metrics history for a specific device
+     */
+    suspend fun getDeviceMetrics(
+        deviceId: String,
+        sinceMs: Long = 0
+    ): Map<String, Any> = withContext(Dispatchers.IO) {
+        init()
+
+        try {
+            // GetDeviceMetrics takes DeviceId and returns MetricsHistoryResponse
+            val request = DeviceId.newBuilder()
+                .setDeviceId(deviceId)
+                .build()
+
+            val response = stub!!.getDeviceMetrics(request)
+
+            mapOf(
+                "device_id" to response.deviceId,
+                "device_name" to response.deviceName,
+                "samples" to response.samplesList.map { sample ->
+                    mapOf(
+                        "timestamp_ms" to sample.timestampMs,
+                        "cpu_load" to sample.cpuLoad,
+                        "mem_used_mb" to sample.memUsedMb,
+                        "mem_total_mb" to sample.memTotalMb,
+                        "gpu_load" to sample.gpuLoad,
+                        "gpu_mem_used_mb" to sample.gpuMemUsedMb,
+                        "gpu_mem_total_mb" to sample.gpuMemTotalMb,
+                        "npu_load" to sample.npuLoad
+                    )
+                }
+            )
+        } catch (e: Exception) {
+            throw Exception("Failed to get device metrics: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Get current connection status
+     */
+    fun getConnectionStatus(): Map<String, Any> {
+        return mapOf(
+            "connected" to (channel != null && stub != null),
+            "host" to host,
+            "grpc_port" to port,
+            "http_port" to 8080,
+            "device_name" to DEFAULT_DEVICE_NAME,
+            "discovered_count" to 0
+        )
+    }
+
+    /**
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
      * Close the gRPC channel and clean up resources
      */
     fun close() {

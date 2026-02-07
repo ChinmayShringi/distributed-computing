@@ -3,8 +3,11 @@ syntax = "proto3";
 package edgemesh;
 
 option go_package = "github.com/edgecli/edgecli/proto";
+<<<<<<< HEAD
 option java_package = "com.example.edge_mobile.grpc";
 option java_multiple_files = true;
+=======
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 
 service OrchestratorService {
   // Session management
@@ -49,6 +52,21 @@ service OrchestratorService {
 
   // File reading (for LLM tool calling)
   rpc ReadFile (ReadFileRequest) returns (ReadFileResponse);
+<<<<<<< HEAD
+=======
+
+  // Chat memory synchronization
+  rpc SyncChatMemory (ChatMemorySync) returns (ChatMemorySyncResponse);
+  rpc GetChatMemory (Empty) returns (ChatMemoryData);
+
+  // Remote LLM task execution
+  rpc RunLLMTask (LLMTaskRequest) returns (LLMTaskResponse);
+
+  // Activity tracking and metrics
+  rpc GetActivity (GetActivityRequest) returns (GetActivityResponse);
+  rpc GetDeviceMetrics (DeviceId) returns (MetricsHistoryResponse);
+  rpc GetJobDetail (JobId) returns (JobDetailResponse);
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 }
 
 message Empty {}
@@ -97,6 +115,13 @@ message DeviceInfo {
   double llm_prefill_toks_per_s = 11;  // 0 = use platform default
   double llm_decode_toks_per_s = 12;   // 0 = use platform default
   uint64 ram_free_mb = 13;              // free RAM in MB (0 = unknown)
+<<<<<<< HEAD
+=======
+  // Local LLM model capability
+  bool has_local_model = 14;           // device has Ollama/chat running
+  string local_model_name = 15;        // loaded model (e.g., "llama3.2:3b")
+  string local_chat_endpoint = 16;     // URL to chat service (e.g., "http://192.168.1.38:11434")
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 }
 
 message DeviceAck {
@@ -110,6 +135,15 @@ message DeviceStatus {
   double cpu_load = 3;      // 0..1, or -1 if unavailable
   uint64 mem_used_mb = 4;
   uint64 mem_total_mb = 5;
+<<<<<<< HEAD
+=======
+  // GPU/NPU metrics for activity tracking
+  double gpu_load = 6;            // 0..1, or -1 if unavailable
+  uint64 gpu_mem_used_mb = 7;
+  uint64 gpu_mem_total_mb = 8;
+  double npu_load = 9;            // 0..1, or -1 if unavailable
+  int64 timestamp_ms = 10;        // sample timestamp (unix milliseconds)
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 }
 
 message ListDevicesRequest {}
@@ -149,6 +183,11 @@ message RoutingPolicy {
     REQUIRE_NPU = 1;       // fail if no NPU device
     PREFER_REMOTE = 2;     // prefer not-self if possible
     FORCE_DEVICE_ID = 3;   // require specific device_id
+<<<<<<< HEAD
+=======
+    PREFER_LOCAL_MODEL = 4;   // prefer device with local LLM model
+    REQUIRE_LOCAL_MODEL = 5;  // fail if no local LLM model available
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
   }
   Mode mode = 1;
   string device_id = 2;    // used if FORCE_DEVICE_ID
@@ -361,3 +400,117 @@ message ReadFileResponse {
   string error = 5;
   string content_preview = 6;  // first ~2KB decoded if text
 }
+<<<<<<< HEAD
+=======
+
+// Chat memory synchronization messages
+
+message ChatMemorySync {
+  int64 last_updated_ms = 1;   // timestamp of sender's memory
+  string memory_json = 2;       // full JSON if pushing, empty if pulling
+}
+
+message ChatMemorySyncResponse {
+  bool updated = 1;             // true if receiver's memory was updated
+  string memory_json = 2;       // new JSON if updated, empty otherwise
+}
+
+message ChatMemoryData {
+  string memory_json = 1;       // full chat memory JSON
+}
+
+// Remote LLM task messages
+
+message LLMTaskRequest {
+  string prompt = 1;
+  string model = 2;        // optional: specific model name
+  int32 max_tokens = 3;    // optional: max tokens to generate
+}
+
+message LLMTaskResponse {
+  string output = 1;
+  string model_used = 2;
+  int64 tokens_generated = 3;
+  string error = 4;
+}
+
+// Activity tracking messages
+
+message MetricsSample {
+  int64 timestamp_ms = 1;
+  double cpu_load = 2;
+  uint64 mem_used_mb = 3;
+  uint64 mem_total_mb = 4;
+  double gpu_load = 5;
+  uint64 gpu_mem_used_mb = 6;
+  uint64 gpu_mem_total_mb = 7;
+  double npu_load = 8;
+}
+
+message RunningTask {
+  string task_id = 1;
+  string job_id = 2;
+  string kind = 3;
+  string input = 4;
+  string device_id = 5;
+  string device_name = 6;
+  int64 started_at_ms = 7;
+  int64 elapsed_ms = 8;
+}
+
+message DeviceActivity {
+  string device_id = 1;
+  string device_name = 2;
+  int32 running_task_count = 3;
+  DeviceStatus current_status = 4;
+}
+
+message ActivityData {
+  repeated RunningTask running_tasks = 1;
+  repeated DeviceActivity device_activities = 2;
+}
+
+message GetActivityRequest {
+  bool include_metrics_history = 1;
+  int64 metrics_since_ms = 2;
+}
+
+message MetricsHistoryResponse {
+  string device_id = 1;
+  string device_name = 2;
+  repeated MetricsSample samples = 3;
+}
+
+message GetActivityResponse {
+  ActivityData activity = 1;
+  map<string, MetricsHistoryResponse> device_metrics = 2;
+}
+
+// Enhanced task status for visualization
+message TaskStatusEnhanced {
+  string task_id = 1;
+  string job_id = 2;
+  string assigned_device_id = 3;
+  string assigned_device_name = 4;
+  string kind = 5;
+  string input = 6;
+  string state = 7;
+  string result = 8;
+  string error = 9;
+  int32 group_index = 10;
+  int64 started_at_ms = 11;
+  int64 ended_at_ms = 12;
+}
+
+message JobDetailResponse {
+  string job_id = 1;
+  string state = 2;
+  repeated TaskStatusEnhanced tasks = 3;
+  string final_result = 4;
+  int32 current_group = 5;
+  int32 total_groups = 6;
+  int64 created_at_ms = 7;
+  int64 started_at_ms = 8;
+  int64 ended_at_ms = 9;
+}
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620

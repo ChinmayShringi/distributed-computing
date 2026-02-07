@@ -1938,8 +1938,26 @@
                     throw new Error(data.error || 'Chat failed');
                 }
 
+<<<<<<< HEAD
                 // Trigger an immediate poll to refresh the UI with the real data
                 await pollChatHistory(true);
+=======
+                // Show tool calls if any
+                let toolInfo = '';
+                if (data.tool_calls && data.tool_calls.length > 0) {
+                    const toolNames = data.tool_calls.map(tc => tc.tool_name).join(', ');
+                    toolInfo = `<div style="font-size: 0.8rem; color: #666; margin-bottom: 4px;">[${data.iterations} iteration(s), tools: ${escapeHtml(toolNames)}]</div>`;
+                }
+
+                // Add assistant message to UI
+                log.innerHTML += `
+                    <div class="chat-message">
+                        <span class="chat-assistant">Agent:</span>
+                        ${toolInfo}
+                        <div class="chat-content">${escapeHtml(data.reply)}</div>
+                    </div>
+                `;
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
             } catch (err) {
                 error.textContent = err.message;
                 error.classList.remove('hidden');
@@ -1972,6 +1990,7 @@
 
         // ===== Chat Polling Logic =====
         let lastMessageCount = 0;
+<<<<<<< HEAD
         let lastUpdatedTimestamp = 0;
         let isChatting = false;
         let isPolling = false;
@@ -1983,6 +2002,13 @@
 
             // Don't poll if we are currently sending a message (except when forced)
             if (isChatting && !force) {
+=======
+        let isChatting = false;
+
+        async function pollChatHistory() {
+            // Don't poll if we are currently sending a message (avoids race with optimistic UI)
+            if (isChatting) {
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                 setTimeout(pollChatHistory, 2000);
                 return;
             }
@@ -1993,6 +2019,7 @@
 
                 const data = await response.json();
                 const messages = data.messages || [];
+<<<<<<< HEAD
                 const ts = data.last_updated_ms || 0;
 
                 // Sync UI if timestamp changed or if forced
@@ -2005,6 +2032,70 @@
                         const roleClass = msg.role === 'user' ? 'chat-user' : 'chat-assistant';
                         const label = msg.role === 'user' ? 'You:' : 'Agent:';
                         newHtml += `
+=======
+
+                // If we have new messages
+                if (messages.length > lastMessageCount) {
+                    const log = document.getElementById('slm-chat-log');
+
+                    // If this is the first load, clear the default welcome message
+                    if (lastMessageCount === 0 && messages.length > 0) {
+                        log.innerHTML = '';
+                    }
+
+                    // Append only new messages
+                    // Note: This logic assumes simple append-only consistency
+                    // We might duplicate if we just sent a message and it arrived in memory
+                    // But since we pause polling during isChatting, and isChatting finishes AFTER 
+                    // we get the reply (which means we saw the reply), we might have issues.
+
+                    // Better approach: Rebuild log if count differs significantly, 
+                    // or carefully check content.
+                    // Given the constraints: we'll simply check if the last message in UI 
+                    // matches the last message in memory.
+
+                    // Actually, let's just append the delta.
+                    // If we just sent a message, 'lastMessageCount' is old.
+                    // But the UI *already* showed the message.
+                    // So we will duplicate it if we blindly append.
+
+                    // FIX: We need to sync 'lastMessageCount' with what we *think* we have.
+                    // But 'sendSlmChat' adds 2 messages (User + Agent).
+                    // So after sendSlmChat, reliable count goes up by 2?
+                    // Not necessarily (if other devices chatted).
+
+                    // Robust Solution:
+                    // Always clear and rebuild? No, flickering.
+                    // Diffing?
+
+                    // Let's iterate from 'lastMessageCount' to end.
+                    // For each message, check if it matches the text of the *last* message in the DOM.
+                    // If it does, skip it (assume it's already rendered).
+                    // If not, append it.
+
+                    const newMessages = messages.slice(lastMessageCount);
+                    newMessages.forEach(msg => {
+                        // Check against last element in DOM
+                        const renderedMsgs = log.querySelectorAll('.chat-content');
+                        let lastRenderedText = '';
+                        if (renderedMsgs.length > 0) {
+                            lastRenderedText = renderedMsgs[renderedMsgs.length - 1].innerText;
+                        }
+
+                        // Determine if duplicate (simple check)
+                        // This prevents re-rendering the message we just sent/received via sendSlmChat
+                        // provided the text is identical.
+                        if (msg.content.trim() === lastRenderedText.trim()) {
+                            // Skip
+                            return;
+                        }
+
+                        // Append
+                        const roleClass = msg.role === 'user' ? 'chat-user' : 'chat-assistant';
+                        const label = msg.role === 'user' ? 'You:' : 'Agent:';
+
+                        log.innerHTML += `
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                             <div class="chat-message">
                                 <span class="${roleClass}">${label}</span>
                                 <div class="chat-content">${escapeHtml(msg.content)}</div>
@@ -2012,6 +2103,7 @@
                         `;
                     });
 
+<<<<<<< HEAD
                     if (newHtml === '') {
                         newHtml = `
                             <div class="chat-message">
@@ -2024,15 +2116,22 @@
                     log.innerHTML = newHtml;
                     log.scrollTop = log.scrollHeight;
                     lastUpdatedTimestamp = ts;
+=======
+                    log.scrollTop = log.scrollHeight;
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                     lastMessageCount = messages.length;
                 }
             } catch (err) {
                 console.warn('Poll chat error:', err);
             }
 
+<<<<<<< HEAD
             if (!force) {
                 setTimeout(pollChatHistory, 2000);
             }
+=======
+            setTimeout(pollChatHistory, 2000);
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
         }
     </script>
 </body>

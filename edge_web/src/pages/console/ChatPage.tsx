@@ -132,11 +132,11 @@ export const ChatPage = () => {
     const interval = setInterval(checkHealth, 10000);
     return () => clearInterval(interval);
   }, []);
-
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
+  // Poll job status
   const pollJob = useCallback(async (jobId: string, messageId: string) => {
     try {
       const status = await getJobStatus(jobId);
@@ -147,6 +147,7 @@ export const ChatPage = () => {
       );
 
       if (status.state !== 'DONE' && status.state !== 'FAILED') {
+        // Continue polling
         setTimeout(() => pollJob(jobId, messageId), 500);
       } else {
         setPollingJobId(null);
@@ -188,6 +189,7 @@ export const ChatPage = () => {
 
       setMessages((prev) => [...prev, assistantMessage]);
 
+      // If a job was created, start polling
       if (response.job_id) {
         setPollingJobId(response.job_id);
         pollJob(response.job_id, assistantMessage.id);

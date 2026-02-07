@@ -58,7 +58,6 @@ func TestSummarization(t *testing.T) {
 	})
 
 	<-done
-
 	if len(m.Messages) > MaxMessages {
 		t.Errorf("expected at most %d messages, got %d", MaxMessages, len(m.Messages))
 	}

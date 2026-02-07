@@ -337,4 +337,54 @@ class GrpcService {
       throw Exception('Failed to get activity: ${e.message}');
     }
   }
+<<<<<<< HEAD
+=======
+
+  /// Submit a distributed job across devices
+  /// Returns: job_id, created_at, summary
+  Future<Map<String, dynamic>> submitJob({
+    required String prompt,
+    int maxWorkers = 0,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod('submitJob', {
+        'prompt': prompt,
+        'max_workers': maxWorkers,
+      });
+      return Map<String, dynamic>.from(result as Map);
+    } on PlatformException catch (e) {
+      throw Exception('Failed to submit job: ${e.message}');
+    }
+  }
+
+  /// Get detailed job status with task timing
+  /// Returns: job_id, state, tasks[] with start_at/end_at, final_result
+  Future<Map<String, dynamic>> getJobDetail(String jobId) async {
+    try {
+      final result = await _channel.invokeMethod('getJobDetail', {
+        'job_id': jobId,
+      });
+      return Map<String, dynamic>.from(result as Map);
+    } on PlatformException catch (e) {
+      throw Exception('Failed to get job detail: ${e.message}');
+    }
+  }
+
+  /// Get metrics history for a specific device
+  /// Returns: device_id, metrics[] with cpu_percent, memory_percent, gpu_percent, timestamp
+  Future<Map<String, dynamic>> getDeviceMetrics(
+    String deviceId, {
+    int sinceMs = 0,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod('getDeviceMetrics', {
+        'device_id': deviceId,
+        'since_ms': sinceMs,
+      });
+      return Map<String, dynamic>.from(result as Map);
+    } on PlatformException catch (e) {
+      throw Exception('Failed to get device metrics: ${e.message}');
+    }
+  }
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 }
