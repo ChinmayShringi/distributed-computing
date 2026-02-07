@@ -8,7 +8,7 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X github.com/edgecli/edgecli/cmd/edgecli/commands.Version=$(VERSION) \
 	-X github.com/edgecli/edgecli/cmd/edgecli/commands.Commit=$(COMMIT)"
 
-.PHONY: all build install clean test lint fmt help proto server qaihub-example qaihub-download-models
+.PHONY: all build install clean test lint fmt help proto server server-quick build-web qaihub-example qaihub-download-models
 
 all: build
 
@@ -93,9 +93,22 @@ bump-version:
 show-version:
 	@echo "Current version: $$(cat VERSION)"
 
-## server: Run the unified server (gRPC :50051 + HTTP Web UI :8080)
+## build-web: Build the React web UI and copy to cmd/server/webui
+build-web:
+	@echo "Building edge_web..."
+	@cd edge_web && npm run build
+	@echo "Copying build to cmd/server/webui..."
+	@rm -rf cmd/server/webui
+	@cp -r edge_web/dist cmd/server/webui
+	@echo "Web UI build complete"
+
+## server: Build web UI and run the unified server (gRPC :50051 + HTTP Web UI :8080)
 ## Loads .env file if present for chat configuration
-server:
+server: build-web
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && go run ./cmd/server
+
+## server-quick: Run the server without rebuilding web UI (use existing webui/)
+server-quick:
 	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && go run ./cmd/server
 
 ## qaihub-example: Run QAI Hub compile example (Windows only)

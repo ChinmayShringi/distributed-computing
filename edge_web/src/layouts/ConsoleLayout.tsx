@@ -14,6 +14,10 @@ import {
   User,
   Menu,
   X,
+  Activity,
+  MessageSquare,
+  Bot,
+  Cpu,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +26,10 @@ const navItems = [
   { icon: Monitor, label: 'Devices', href: '/console/devices' },
   { icon: Play, label: 'Run', href: '/console/run' },
   { icon: Briefcase, label: 'Jobs', href: '/console/jobs' },
+  { icon: Activity, label: 'Activity', href: '/console/activity' },
+  { icon: MessageSquare, label: 'Chat', href: '/console/chat' },
+  { icon: Bot, label: 'Agent', href: '/console/agent' },
+  { icon: Cpu, label: 'QAI Hub', href: '/console/qaihub' },
   { icon: Settings, label: 'Settings', href: '/console/settings' },
 ];
 
