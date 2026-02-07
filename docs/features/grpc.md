@@ -93,6 +93,9 @@ message DeviceInfo {
   double llm_prefill_toks_per_s = 11; // LLM prefill throughput (0 = use default)
   double llm_decode_toks_per_s = 12;  // LLM decode throughput (0 = use default)
   uint64 ram_free_mb = 13;   // Free RAM in MB (0 = unknown)
+  bool has_local_model = 14;        // True if Ollama/local LLM is running
+  string local_model_name = 15;     // Loaded model name (e.g., "llama3.2:3b")
+  string local_chat_endpoint = 16;  // Chat endpoint URL (e.g., "http://localhost:11434")
 }
 ```
 
@@ -145,6 +148,8 @@ message RoutingPolicy {
     REQUIRE_NPU = 1;         // Fail if no NPU
     PREFER_REMOTE = 2;       // Prefer non-self device
     FORCE_DEVICE_ID = 3;     // Target specific device
+    PREFER_LOCAL_MODEL = 4;  // Prefer device with local LLM model
+    REQUIRE_LOCAL_MODEL = 5; // Fail if no local LLM model available
   }
   Mode mode = 1;
   string device_id = 2;      // Used with FORCE_DEVICE_ID
@@ -346,6 +351,34 @@ message TaskResult {
   double time_ms = 5;
 }
 ```
+
+#### RunLLMTask
+Executes an LLM inference task on the device's local model (Ollama).
+
+```protobuf
+rpc RunLLMTask (LLMTaskRequest) returns (LLMTaskResponse);
+```
+
+**Request:**
+```protobuf
+message LLMTaskRequest {
+  string prompt = 1;         // User prompt
+  string model = 2;          // Optional: specific model name
+  int32 max_tokens = 3;      // Optional: max tokens to generate
+}
+```
+
+**Response:**
+```protobuf
+message LLMTaskResponse {
+  string output = 1;         // Generated text
+  string model_used = 2;     // Model that was used
+  int64 tokens_generated = 3; // Approximate tokens generated
+  string error = 4;          // Error message if failed
+}
+```
+
+The device must have `has_local_model = true` for this RPC to succeed. Use `PREFER_LOCAL_MODEL` or `REQUIRE_LOCAL_MODEL` routing policies to target devices with local models.
 
 ### WebRTC Screen Streaming
 
