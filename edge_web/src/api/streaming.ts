@@ -32,11 +32,13 @@ export async function startStream(
 
 export async function sendStreamAnswer(
   streamId: string,
-  answerSdp: string
+  answerSdp: string,
+  selectedDeviceAddr: string
 ): Promise<StreamAnswerResponse> {
   const request: StreamAnswerRequest = {
     stream_id: streamId,
     answer_sdp: answerSdp,
+    selected_device_addr: selectedDeviceAddr,
   };
   return apiPost<StreamAnswerResponse>('/api/stream/answer', request);
 }

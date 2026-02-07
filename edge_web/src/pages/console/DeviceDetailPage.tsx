@@ -1,77 +1,115 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { GlassCard, GlassContainer } from '@/components/GlassCard';
-import { CapabilityChip } from '@/components/CapabilityChip';
-import { MiniGauge } from '@/components/MiniGauge';
+import { CircularProgress } from '@/components/CircularProgress';
 import { Button } from '@/components/ui/button';
-import { mockDevices } from '@/lib/mock-data';
+import { Badge } from '@/components/ui/badge';
+import { listDevices, getDeviceMetrics, hasCapability, type Device, type DeviceMetricsHistory } from '@/api';
 import {
   ArrowLeft,
   Monitor,
-  Laptop,
-  Server,
-  Smartphone,
-  Cpu,
-  Terminal,
   RefreshCw,
-  Power,
-  FolderSync,
+  Cpu,
+  Zap,
+  Bot,
   Eye,
-  WifiOff,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-
-const deviceIcons = {
-  desktop: Monitor,
-  laptop: Laptop,
-  server: Server,
-  mobile: Smartphone,
-  iot: Cpu,
-};
 
 export const DeviceDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { toast } = useToast();
-  
-  const device = mockDevices.find((d) => d.id === id);
 
-  if (!device) {
+  const [device, setDevice] = useState<Device | null>(null);
+  const [metrics, setMetrics] = useState<DeviceMetricsHistory | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    if (!id) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch devices and find the one we want
+      const devices = await listDevices();
+      const found = devices.find((d) => d.device_id === id);
+
+      if (!found) {
+        setError('Device not found');
+        setDevice(null);
+        return;
+      }
+
+      setDevice(found);
+
+      // Fetch metrics for this device
+      try {
+        const metricsData = await getDeviceMetrics(id);
+        setMetrics(metricsData);
+      } catch {
+        // Metrics might not be available, that's ok
+        setMetrics(null);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch device';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Get latest metrics sample
+  const latestSample = metrics?.samples?.[metrics.samples.length - 1];
+  const cpuPercent = latestSample?.cpu_load !== undefined && latestSample.cpu_load >= 0
+    ? latestSample.cpu_load * 100
+    : 0;
+  const memPercent = latestSample?.mem_total_mb && latestSample?.mem_used_mb
+    ? (latestSample.mem_used_mb / latestSample.mem_total_mb) * 100
+    : 0;
+
+  if (loading) {
     return (
-      <div className="p-6 text-center">
-        <p className="text-muted-foreground">Device not found.</p>
-        <Button variant="ghost" onClick={() => navigate('/console/devices')} className="mt-4">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Devices
-        </Button>
+      <div className="p-6 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
   }
 
-  const DeviceIcon = deviceIcons[device.type];
-  const isOnline = device.status === 'online';
-
-  const actions = [
-    { icon: Terminal, label: 'Remote Shell', action: 'shell', requiresOnline: true },
-    { icon: FolderSync, label: 'Sync', action: 'sync', requiresOnline: true },
-    { icon: RefreshCw, label: 'Restart', action: 'restart', requiresOnline: true },
-    { icon: Power, label: 'Disconnect Node', action: 'disconnect', requiresOnline: false },
-  ];
-
-  const handleAction = (action: string) => {
-    toast({
-      title: `Action: ${action}`,
-      description: `${action} initiated on ${device.name}`,
-    });
-  };
+  if (error || !device) {
+    return (
+      <div className="p-6 space-y-4">
+        <Button variant="ghost" onClick={() => navigate('/console/devices')}>
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to Devices
+        </Button>
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-danger-pink/10 border border-danger-pink/20">
+          <AlertCircle className="w-5 h-5 text-danger-pink" />
+          <span className="text-danger-pink">{error || 'Device not found'}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
       {/* Back button */}
-      <Button variant="ghost" onClick={() => navigate('/console/devices')} className="mb-4">
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back to Devices
-      </Button>
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" onClick={() => navigate('/console/devices')}>
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to Devices
+        </Button>
+        <Button variant="outline" size="icon" onClick={fetchData} disabled={loading}>
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        </Button>
+      </div>
 
       {/* Device Header */}
       <motion.div
@@ -80,154 +118,113 @@ export const DeviceDetailPage = () => {
       >
         <GlassCard className="p-6">
           <div className="flex flex-col md:flex-row md:items-center gap-6">
-            <div
-              className={`p-4 rounded-2xl ${
-                isOnline ? 'bg-primary/20' : 'bg-surface-variant'
-              }`}
-            >
-              <DeviceIcon
-                className={`w-10 h-10 ${
-                  isOnline ? 'text-primary' : 'text-muted-foreground'
-                }`}
-              />
+            <div className="p-4 rounded-2xl bg-primary/20">
+              <Monitor className="w-10 h-10 text-primary" />
             </div>
 
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-2xl font-bold">{device.name}</h1>
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    isOnline
-                      ? 'bg-safe-green/20 text-safe-green'
-                      : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {isOnline ? 'Online' : 'Offline'}
+                <h1 className="text-2xl font-bold">{device.device_name}</h1>
+                <span className="px-3 py-1 rounded-full text-sm font-medium bg-safe-green/20 text-safe-green">
+                  Online
                 </span>
               </div>
-              <p className="text-muted-foreground">{device.os}</p>
-              {device.ip && (
-                <p className="text-sm font-mono text-muted-foreground mt-1">
-                  {device.ip}
-                </p>
-              )}
+              <p className="text-muted-foreground">
+                {device.platform} / {device.arch}
+              </p>
+              <p className="text-sm font-mono text-muted-foreground mt-1">
+                {device.grpc_addr}
+              </p>
             </div>
           </div>
         </GlassCard>
       </motion.div>
 
-      {/* Remote View Placeholder */}
-      {isOnline && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
-          <GlassContainer className="aspect-video flex items-center justify-center">
-            <div className="text-center space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-full bg-surface-variant flex items-center justify-center">
-                <Eye className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="font-semibold">Remote View</p>
-                <p className="text-sm text-muted-foreground">
-                  Click to start remote viewing session
-                </p>
-              </div>
-            </div>
-          </GlassContainer>
-        </motion.div>
-      )}
-
-      {!isOnline && (
-        <GlassCard className="p-6 text-center">
-          <div className="flex items-center justify-center gap-2 text-muted-foreground">
-            <WifiOff className="w-5 h-5" />
-            <span>Device is offline. Last seen: {device.lastSeen}</span>
+      {/* Capabilities */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <GlassContainer>
+          <h2 className="text-lg font-semibold mb-4">Capabilities</h2>
+          <div className="flex flex-wrap gap-2">
+            {hasCapability(device, 'gpu') && (
+              <Badge variant="outline" className="gap-1 text-safe-green border-safe-green">
+                <Cpu className="w-3 h-3" />
+                GPU
+              </Badge>
+            )}
+            {hasCapability(device, 'npu') && (
+              <Badge variant="outline" className="gap-1 text-primary border-primary">
+                <Zap className="w-3 h-3" />
+                NPU
+              </Badge>
+            )}
+            {device.has_local_model && (
+              <Badge variant="outline" className="gap-1 text-info-blue border-info-blue">
+                <Bot className="w-3 h-3" />
+                LLM
+              </Badge>
+            )}
+            {device.can_screen_capture && (
+              <Badge variant="outline" className="gap-1 text-warning-amber border-warning-amber">
+                <Eye className="w-3 h-3" />
+                Screen Capture
+              </Badge>
+            )}
           </div>
-        </GlassCard>
-      )}
+        </GlassContainer>
+      </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Telemetry */}
-        {isOnline && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <GlassContainer>
-              <h2 className="text-lg font-semibold mb-6">Telemetry</h2>
-              <div className="flex items-center justify-center gap-12">
-                <MiniGauge value={device.cpuPct} label="CPU" variant="info" />
-                <MiniGauge value={device.memPct} label="Memory" variant="primary" />
-              </div>
-            </GlassContainer>
-          </motion.div>
-        )}
+      {/* Telemetry */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <GlassContainer>
+          <h2 className="text-lg font-semibold mb-6">Telemetry</h2>
+          <div className="flex items-center justify-center gap-12">
+            <CircularProgress value={cpuPercent} label="CPU" variant="cpu" size={100} strokeWidth={8} />
+            <CircularProgress value={memPercent} label="Memory" variant="memory" size={100} strokeWidth={8} />
+          </div>
+          {!latestSample && (
+            <p className="text-center text-sm text-muted-foreground mt-4">
+              No metrics data available yet
+            </p>
+          )}
+        </GlassContainer>
+      </motion.div>
 
-        {/* Capabilities */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-        >
-          <GlassContainer>
-            <h2 className="text-lg font-semibold mb-4">Capabilities</h2>
-            <div className="flex flex-wrap gap-2">
-              {device.capabilities.map((cap) => (
-                <CapabilityChip key={cap} capability={cap} size="md" />
-              ))}
-            </div>
-          </GlassContainer>
-        </motion.div>
-      </div>
-
-      {/* Actions */}
+      {/* Device Info */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
       >
         <GlassContainer>
-          <h2 className="text-lg font-semibold mb-4">Actions</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {actions.map((action) => (
-              <Button
-                key={action.action}
-                variant="outline"
-                className="flex-col h-auto py-4 gap-2 border-outline hover:bg-surface-variant"
-                disabled={action.requiresOnline && !isOnline}
-                onClick={() => handleAction(action.label)}
-              >
-                <action.icon className="w-5 h-5" />
-                <span className="text-xs">{action.label}</span>
-              </Button>
-            ))}
+          <h2 className="text-lg font-semibold mb-4">Device Info</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex justify-between py-2 border-b border-outline">
+              <span className="text-muted-foreground">Device ID</span>
+              <span className="font-mono text-xs">{device.device_id}</span>
+            </div>
+            <div className="flex justify-between py-2 border-b border-outline">
+              <span className="text-muted-foreground">Platform</span>
+              <span className="font-medium">{device.platform}</span>
+            </div>
+            <div className="flex justify-between py-2 border-b border-outline">
+              <span className="text-muted-foreground">Architecture</span>
+              <span className="font-medium">{device.arch}</span>
+            </div>
+            <div className="flex justify-between py-2 border-b border-outline">
+              <span className="text-muted-foreground">gRPC Address</span>
+              <span className="font-mono text-xs">{device.grpc_addr}</span>
+            </div>
           </div>
         </GlassContainer>
       </motion.div>
-
-      {/* Hardware Info */}
-      {device.hardware && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
-        >
-          <GlassContainer>
-            <h2 className="text-lg font-semibold mb-4">Hardware</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(device.hardware).map(([key, value]) => (
-                <div key={key} className="flex justify-between py-2 border-b border-outline last:border-0">
-                  <span className="text-muted-foreground capitalize">{key}</span>
-                  <span className="font-medium">{value}</span>
-                </div>
-              ))}
-            </div>
-          </GlassContainer>
-        </motion.div>
-      )}
     </div>
   );
 };

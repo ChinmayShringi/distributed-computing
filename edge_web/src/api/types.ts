@@ -13,11 +13,18 @@ export interface Device {
   device_name: string;
   platform: string;
   arch: string;
-  self_addr: string;
-  has_gpu: boolean;
-  has_npu: boolean;
+  capabilities: string[];
+  grpc_addr: string;
+  http_addr?: string;
   can_screen_capture: boolean;
   has_local_model: boolean;
+  local_model_name?: string;
+  local_chat_endpoint?: string;
+}
+
+// Helper to check capabilities
+export function hasCapability(device: Device, cap: 'gpu' | 'npu' | 'cpu'): boolean {
+  return device.capabilities?.includes(cap) ?? false;
 }
 
 export interface DeviceMetrics {
@@ -140,32 +147,52 @@ export interface RunningTask {
   device_id: string;
   device_name: string;
   kind: string;
-  state: TaskState;
   input: string;
+  started_at_ms: number;
   elapsed_ms: number;
+}
+
+export interface DeviceStatus {
+  device_id: string;
+  last_seen: number;
+  cpu_load: number;
+  mem_used_mb?: number;
+  mem_total_mb?: number;
+  gpu_load: number;
+  npu_load: number;
+  timestamp_ms?: number;
 }
 
 export interface DeviceActivity {
   device_id: string;
   device_name: string;
-  running_count: number;
-  last_metrics: DeviceMetrics | null;
+  running_task_count?: number;
+  current_status: DeviceStatus;
 }
 
-export interface MetricsHistoryEntry {
+export interface MetricsSample {
+  timestamp_ms: number;
+  cpu_load: number;
+  mem_used_mb?: number;
+  mem_total_mb?: number;
+  gpu_load: number;
+  npu_load: number;
+}
+
+export interface DeviceMetricsHistory {
   device_id: string;
   device_name: string;
-  timestamp: string;
-  cpu_percent: number;
-  memory_percent: number;
-  gpu_percent: number;
-  npu_percent: number;
+  samples: MetricsSample[];
+}
+
+export interface ActivityData {
+  device_activities: DeviceActivity[];
+  running_tasks: RunningTask[];
 }
 
 export interface ActivityResponse {
-  running_tasks: RunningTask[];
-  device_activities: DeviceActivity[];
-  metrics_history: MetricsHistoryEntry[];
+  activity: ActivityData;
+  device_metrics?: Record<string, DeviceMetricsHistory>;
 }
 
 // Streaming types
@@ -188,6 +215,7 @@ export interface StreamStartResponse {
 export interface StreamAnswerRequest {
   stream_id: string;
   answer_sdp: string;
+  selected_device_addr: string;
 }
 
 export interface StreamAnswerResponse {
@@ -239,10 +267,11 @@ export interface AgentResponse {
 }
 
 export interface AgentHealthResponse {
+  ok: boolean;
   provider: string;
+  base_url: string;
   model: string;
-  available: boolean;
-  error: string;
+  error?: string;
 }
 
 export interface ChatMessage {
