@@ -25,6 +25,10 @@ import { DeviceDetailPage } from "@/pages/console/DeviceDetailPage";
 import { RunPage } from "@/pages/console/RunPage";
 import { JobsPage } from "@/pages/console/JobsPage";
 import { SettingsPage } from "@/pages/console/SettingsPage";
+import { ActivityPage } from "@/pages/console/ActivityPage";
+import { ChatPage } from "@/pages/console/ChatPage";
+import { AgentPage } from "@/pages/console/AgentPage";
+import { QAIHubPage } from "@/pages/console/QAIHubPage";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +59,10 @@ const App = () => (
             <Route path="devices/:id" element={<DeviceDetailPage />} />
             <Route path="run" element={<RunPage />} />
             <Route path="jobs" element={<JobsPage />} />
+            <Route path="activity" element={<ActivityPage />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="agent" element={<AgentPage />} />
+            <Route path="qaihub" element={<QAIHubPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
 

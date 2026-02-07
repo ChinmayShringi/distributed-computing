@@ -47,7 +47,7 @@ import (
 	pb "github.com/edgecli/edgecli/proto"
 )
 
-//go:embed index.html
+//go:embed webui/*
 var staticFS embed.FS
 
 const (
@@ -2385,20 +2385,58 @@ func (s *OrchestratorServer) CreateInternalSession(name string) string {
 
 // ---- WebHandler HTTP Methods ----
 
-// handleIndex serves the embedded index.html
-func (h *WebHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+// handleStatic serves the embedded webui files with SPA fallback
+func (h *WebHandler) handleStatic(w http.ResponseWriter, r *http.Request) {
+	// Clean the path and determine the file to serve
+	path := r.URL.Path
+	if path == "/" {
+		path = "/index.html"
+	}
+
+	// Try to read the file from embedded FS
+	filePath := "webui" + path
+	content, err := staticFS.ReadFile(filePath)
+	if err != nil {
+		// For SPA: if file not found and not an asset, serve index.html
+		if !strings.HasPrefix(path, "/assets/") && !strings.HasSuffix(path, ".ico") && !strings.HasSuffix(path, ".svg") {
+			content, err = staticFS.ReadFile("webui/index.html")
+			if err != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(content)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}
 
-	content, err := staticFS.ReadFile("index.html")
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	// Set content type based on extension
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	case ".js":
+		w.Header().Set("Content-Type", "application/javascript")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
+	case ".ico":
+		w.Header().Set("Content-Type", "image/x-icon")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	case ".jpg", ".jpeg":
+		w.Header().Set("Content-Type", "image/jpeg")
+	case ".json":
+		w.Header().Set("Content-Type", "application/json")
+	case ".woff", ".woff2":
+		w.Header().Set("Content-Type", "font/woff2")
+	default:
+		w.Header().Set("Content-Type", "application/octet-stream")
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(content)
 }
 
@@ -4166,7 +4204,7 @@ func main() {
 
 	// Setup HTTP routes
 	httpMux := http.NewServeMux()
-	httpMux.HandleFunc("/", webHandler.handleIndex)
+	httpMux.HandleFunc("/", webHandler.handleStatic)
 	httpMux.HandleFunc("/api/devices", webHandler.handleDevices)
 	httpMux.HandleFunc("/api/routed-cmd", webHandler.handleRoutedCmd)
 	httpMux.HandleFunc("/api/assistant", webHandler.handleAssistant)

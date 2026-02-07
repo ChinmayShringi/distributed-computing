@@ -1,333 +1,310 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { GlassCard, GlassContainer } from '@/components/GlassCard';
-import { CapabilityChip } from '@/components/CapabilityChip';
 import { TerminalPanel } from '@/components/TerminalPanel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { mockDevices, mockChatMessages, ChatMessage } from '@/lib/mock-data';
+import { Badge } from '@/components/ui/badge';
+import {
+  listDevices,
+  executeRoutedCommand,
+  type Device,
+  type RoutingPolicy,
+  type RoutedCommandResponse,
+} from '@/api';
 import {
   Play,
   Terminal,
-  Wrench,
-  Bot,
-  Network,
-  Stethoscope,
-  RotateCcw,
-  Send,
   Loader2,
+  AlertCircle,
+  RefreshCw,
+  Clock,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-const tools = [
-  {
-    id: 'network-scan',
-    name: 'Network Scan',
-    description: 'Scan local network for devices and open ports',
-    icon: Network,
-    mode: 'safe' as const,
-  },
-  {
-    id: 'diagnostics',
-    name: 'System Diagnostics',
-    description: 'Run comprehensive system health checks',
-    icon: Stethoscope,
-    mode: 'advanced' as const,
-  },
-  {
-    id: 'maintenance-reset',
-    name: 'Maintenance Reset',
-    description: 'Reset device to maintenance mode',
-    icon: RotateCcw,
-    mode: 'advanced' as const,
-  },
+const routingPolicies: { value: RoutingPolicy; label: string; description: string }[] = [
+  { value: 'BEST_AVAILABLE', label: 'Best Available', description: 'NPU > GPU > CPU preference' },
+  { value: 'PREFER_REMOTE', label: 'Prefer Remote', description: 'Prefer non-local devices' },
+  { value: 'REQUIRE_NPU', label: 'Require NPU', description: 'Fail if no NPU device' },
+  { value: 'PREFER_LOCAL_MODEL', label: 'Prefer Local Model', description: 'Prefer device with LLM' },
+  { value: 'REQUIRE_LOCAL_MODEL', label: 'Require Local Model', description: 'Fail if no LLM device' },
+  { value: 'FORCE_DEVICE_ID', label: 'Force Device', description: 'Target specific device' },
 ];
 
 export const RunPage = () => {
   const { toast } = useToast();
-  const [selectedDevice, setSelectedDevice] = useState<string>('');
+
+  // Device state
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(true);
+
+  // Form state
   const [command, setCommand] = useState('');
-  const [output, setOutput] = useState('');
+  const [args, setArgs] = useState('');
+  const [policy, setPolicy] = useState<RoutingPolicy>('BEST_AVAILABLE');
+  const [forceDeviceId, setForceDeviceId] = useState('');
+
+  // Execution state
   const [running, setRunning] = useState(false);
-  
-  // Chat state
-  const [messages, setMessages] = useState<ChatMessage[]>(mockChatMessages);
-  const [chatInput, setChatInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [result, setResult] = useState<RoutedCommandResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const onlineDevices = mockDevices.filter((d) => d.status === 'online');
-
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // Fetch devices
+  const fetchDevices = useCallback(async () => {
+    try {
+      setLoadingDevices(true);
+      const data = await listDevices();
+      setDevices(data);
+      // Set default force device if available
+      if (data.length > 0 && !forceDeviceId) {
+        setForceDeviceId(data[0].device_id);
+      }
+    } catch (err) {
+      console.error('Failed to fetch devices:', err);
+    } finally {
+      setLoadingDevices(false);
+    }
+  }, [forceDeviceId]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isTyping]);
+    fetchDevices();
+  }, [fetchDevices]);
 
+  // Handle command execution
   const handleRun = async () => {
-    if (!selectedDevice || !command) return;
-    
+    if (!command.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a command',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setRunning(true);
-    setOutput('');
-    
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    
-    setOutput(`$ ${command}\n\n[Executing on ${onlineDevices.find(d => d.id === selectedDevice)?.name}...]\n\nCommand executed successfully.\nExit code: 0`);
-    setRunning(false);
+    setResult(null);
+    setError(null);
+
+    try {
+      const argsArray = args.trim() ? args.split(',').map((a) => a.trim()) : [];
+      const response = await executeRoutedCommand(
+        command.trim(),
+        argsArray,
+        policy,
+        policy === 'FORCE_DEVICE_ID' ? forceDeviceId : undefined
+      );
+
+      setResult(response);
+
+      toast({
+        title: response.exit_code === 0 ? 'Command Succeeded' : 'Command Failed',
+        description: `Executed on ${response.device_name} in ${response.elapsed_ms}ms`,
+        variant: response.exit_code === 0 ? 'default' : 'destructive',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Command execution failed';
+      setError(message);
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setRunning(false);
+    }
   };
 
-  const handleToolRun = (toolName: string) => {
-    toast({
-      title: 'Tool Started',
-      description: `${toolName} is now running...`,
-    });
-  };
-
-  const handleSendMessage = async () => {
-    if (!chatInput.trim()) return;
-    
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: chatInput,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    
-    setMessages((prev) => [...prev, userMessage]);
-    setChatInput('');
-    setIsTyping(true);
-    
-    // Simulate AI response
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    const responses = [
-      "I've analyzed your request. Based on the current device status, I recommend running a diagnostic check first.",
-      "I can help you with that. Would you like me to execute this command across all online devices or just a specific one?",
-      "That operation completed successfully. The results show normal performance metrics across your mesh network.",
-      "I've queued that job for execution. You can monitor its progress in the Jobs section.",
-    ];
-    
-    const assistantMessage: ChatMessage = {
-      id: `msg-${Date.now() + 1}`,
-      role: 'assistant',
-      content: responses[Math.floor(Math.random() * responses.length)],
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    
-    setIsTyping(false);
-    setMessages((prev) => [...prev, assistantMessage]);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !running) {
+      handleRun();
+    }
   };
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Run</h1>
-        <p className="text-muted-foreground mt-1">
-          Execute scripts, run tools, and interact with AI.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Terminal className="w-6 h-6 text-primary" />
+            Run Command
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Execute commands on remote devices with intelligent routing
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={fetchDevices}
+          disabled={loadingDevices}
+        >
+          <RefreshCw className={`w-4 h-4 ${loadingDevices ? 'animate-spin' : ''}`} />
+        </Button>
       </div>
 
-      <Tabs defaultValue="script" className="space-y-6">
-        <TabsList className="bg-surface-2">
-          <TabsTrigger value="script" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Terminal className="w-4 h-4 mr-2" />
-            Script
-          </TabsTrigger>
-          <TabsTrigger value="tools" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Wrench className="w-4 h-4 mr-2" />
-            Tools
-          </TabsTrigger>
-          <TabsTrigger value="ai" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Bot className="w-4 h-4 mr-2" />
-            AI Hub
-          </TabsTrigger>
-        </TabsList>
+      {/* Command Form */}
+      <GlassContainer>
+        <div className="space-y-4">
+          {/* Command Input */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="command">Command</Label>
+              <Input
+                id="command"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="e.g., hostname, whoami, uname"
+                className="font-mono bg-surface-2 border-outline"
+                disabled={running}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="args">Arguments (comma-separated)</Label>
+              <Input
+                id="args"
+                value={args}
+                onChange={(e) => setArgs(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="e.g., -a, -v, --help"
+                className="font-mono bg-surface-2 border-outline"
+                disabled={running}
+              />
+            </div>
+          </div>
 
-        {/* Script Tab */}
-        <TabsContent value="script" className="space-y-4">
-          <GlassContainer>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Select value={selectedDevice} onValueChange={setSelectedDevice}>
+          {/* Routing Policy */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Routing Policy</Label>
+              <Select
+                value={policy}
+                onValueChange={(v) => setPolicy(v as RoutingPolicy)}
+                disabled={running}
+              >
+                <SelectTrigger className="bg-surface-2 border-outline">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-surface-2 border-outline">
+                  {routingPolicies.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      <div className="flex flex-col">
+                        <span>{p.label}</span>
+                        <span className="text-xs text-muted-foreground">{p.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {policy === 'FORCE_DEVICE_ID' && (
+              <div className="space-y-2">
+                <Label>Target Device</Label>
+                <Select
+                  value={forceDeviceId}
+                  onValueChange={setForceDeviceId}
+                  disabled={running}
+                >
                   <SelectTrigger className="bg-surface-2 border-outline">
-                    <SelectValue placeholder="Select target device" />
+                    <SelectValue placeholder="Select device" />
                   </SelectTrigger>
                   <SelectContent className="bg-surface-2 border-outline">
-                    {onlineDevices.map((device) => (
-                      <SelectItem key={device.id} value={device.id}>
-                        {device.name}
+                    {devices.map((device) => (
+                      <SelectItem key={device.device_id} value={device.device_id}>
+                        {device.device_name} ({device.platform})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+          </div>
 
-                <div className="flex gap-2">
-                  <Input
-                    value={command}
-                    onChange={(e) => setCommand(e.target.value)}
-                    placeholder="Enter command..."
-                    className="font-mono bg-surface-2 border-outline flex-1"
-                    onKeyDown={(e) => e.key === 'Enter' && handleRun()}
-                  />
-                  <Button
-                    onClick={handleRun}
-                    disabled={!selectedDevice || !command || running}
-                    className="bg-safe-green hover:bg-safe-green/90 text-background"
-                  >
-                    {running ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Play className="w-4 h-4" />
-                    )}
-                  </Button>
+          {/* Run Button */}
+          <Button
+            onClick={handleRun}
+            disabled={!command.trim() || running}
+            className="bg-safe-green hover:bg-safe-green/90 text-background"
+          >
+            {running ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4 mr-2" />
+            )}
+            Execute Command
+          </Button>
+        </div>
+      </GlassContainer>
+
+      {/* Error Display */}
+      {error && (
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-danger-pink/10 border border-danger-pink/20">
+          <AlertCircle className="w-5 h-5 text-danger-pink" />
+          <span className="text-danger-pink">{error}</span>
+        </div>
+      )}
+
+      {/* Result Display */}
+      {result && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <GlassCard className="p-5 space-y-4">
+            {/* Result Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {result.exit_code === 0 ? (
+                  <CheckCircle className="w-6 h-6 text-safe-green" />
+                ) : (
+                  <XCircle className="w-6 h-6 text-danger-pink" />
+                )}
+                <div>
+                  <h3 className="font-semibold">Command Result</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Executed on {result.device_name}
+                  </p>
                 </div>
               </div>
-
-              {output && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
+              <div className="flex items-center gap-3">
+                <Badge
+                  variant={result.exit_code === 0 ? 'default' : 'destructive'}
+                  className={result.exit_code === 0 ? 'bg-safe-green' : ''}
                 >
-                  <TerminalPanel output={output} exitCode={0} />
-                </motion.div>
-              )}
-            </div>
-          </GlassContainer>
-        </TabsContent>
-
-        {/* Tools Tab */}
-        <TabsContent value="tools">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {tools.map((tool, index) => (
-              <motion.div
-                key={tool.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <GlassCard hover className="p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="p-3 rounded-xl bg-surface-variant">
-                      <tool.icon className="w-6 h-6 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-semibold">{tool.name}</h3>
-                        <CapabilityChip
-                          capability={tool.mode === 'safe' ? 'Safe' : 'Advanced'}
-                          size="sm"
-                        />
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        {tool.description}
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleToolRun(tool.name)}
-                        className="border-outline"
-                      >
-                        <Play className="w-4 h-4 mr-2" />
-                        Run Tool
-                      </Button>
-                    </div>
-                  </div>
-                </GlassCard>
-              </motion.div>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* AI Hub Tab */}
-        <TabsContent value="ai">
-          <GlassContainer className="h-[600px] flex flex-col p-0">
-            {/* Chat Header */}
-            <div className="p-4 border-b border-outline flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/20">
-                <Bot className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="font-semibold">AI Assistant</h3>
-                <p className="text-xs text-muted-foreground">
-                  Ask anything about your mesh network
-                </p>
+                  Exit: {result.exit_code}
+                </Badge>
+                <Badge variant="outline" className="gap-1">
+                  <Clock className="w-3 h-3" />
+                  {result.elapsed_ms}ms
+                </Badge>
               </div>
             </div>
 
-            {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {messages.map((message) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                      message.role === 'user'
-                        ? 'bg-primary text-primary-foreground rounded-br-md'
-                        : 'bg-surface-2 rounded-bl-md'
-                    }`}
-                  >
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                    <p
-                      className={`text-xs mt-1 ${
-                        message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                      }`}
-                    >
-                      {message.timestamp}
-                    </p>
-                  </div>
-                </motion.div>
-              ))}
+            {/* Output */}
+            {result.stdout && (
+              <TerminalPanel
+                output={result.stdout}
+                exitCode={result.exit_code}
+              />
+            )}
 
-              {/* Typing Indicator */}
-              {isTyping && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex justify-start"
-                >
-                  <div className="bg-surface-2 rounded-2xl rounded-bl-md px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <div className="typing-dot" />
-                      <div className="typing-dot" />
-                      <div className="typing-dot" />
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Chat Input */}
-            <div className="p-4 border-t border-outline">
-              <div className="flex gap-2">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask the AI assistant..."
-                  className="bg-surface-2 border-outline"
-                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!chatInput.trim() || isTyping}
-                  className="bg-primary hover:bg-primary/90"
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
+            {/* Stderr */}
+            {result.stderr && (
+              <div className="space-y-2">
+                <Label className="text-danger-pink">Standard Error</Label>
+                <pre className="p-3 rounded-lg bg-danger-pink/10 border border-danger-pink/20 text-sm font-mono text-danger-pink overflow-auto max-h-[200px]">
+                  {result.stderr}
+                </pre>
               </div>
-            </div>
-          </GlassContainer>
-        </TabsContent>
-      </Tabs>
+            )}
+          </GlassCard>
+        </motion.div>
+      )}
     </div>
   );
 };
