@@ -151,4 +151,34 @@ class GrpcService {
       throw Exception('Failed to get job: ${e.message}');
     }
   }
+
+  /// Send a message to the assistant (via REST /api/assistant)
+  /// Returns: reply, raw (optional), mode (optional), job_id (optional), plan (optional)
+  Future<Map<String, dynamic>> sendAssistantMessage(String text) async {
+    try {
+      final result = await _channel.invokeMethod('sendAssistantMessage', {
+        'text': text,
+      });
+      return Map<String, dynamic>.from(result as Map);
+    } on PlatformException catch (e) {
+      throw Exception('Failed to send assistant message: ${e.message}');
+    }
+  }
+
+  /// Get activity data (running tasks, device activities, optional metrics history)
+  /// Returns: running_tasks[], device_activities[], device_metrics (if includeMetrics=true)
+  Future<Map<String, dynamic>> getActivity({
+    bool includeMetrics = false,
+    int metricsSinceMs = 0,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod('getActivity', {
+        'include_metrics': includeMetrics,
+        'metrics_since_ms': metricsSinceMs,
+      });
+      return Map<String, dynamic>.from(result as Map);
+    } on PlatformException catch (e) {
+      throw Exception('Failed to get activity: ${e.message}');
+    }
+  }
 }

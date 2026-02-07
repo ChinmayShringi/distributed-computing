@@ -24,6 +24,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _grpcService = GrpcService();
   List<Map<String, dynamic>> _devices = [];
   List<Map<String, dynamic>> _recentActivity = [];
+  List<Map<String, dynamic>> _runningTasks = [];
   bool _isLoading = true;
   String? _errorMessage;
   Timer? _refreshTimer;
@@ -56,6 +57,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '${diff.inDays}d ago';
   }
 
+  String _formatElapsedMs(int elapsedMs) {
+    if (elapsedMs < 1000) return '${elapsedMs}ms';
+    if (elapsedMs < 60000) return '${(elapsedMs / 1000).toStringAsFixed(1)}s';
+    return '${(elapsedMs / 60000).toStringAsFixed(1)}m';
+  }
+
   Future<void> _loadDashboardData({bool silent = false}) async {
     if (!silent) {
       setState(() {
@@ -68,7 +75,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Load devices with status
       final devices = await _grpcService.listDevices();
       final enrichedDevices = <Map<String, dynamic>>[];
-      
+
       for (var device in devices) {
         try {
           final status = await _grpcService.getDeviceStatus(device['device_id'] as String);
@@ -88,23 +95,89 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
 
-      // Generate recent activity from device updates
-      final activity = <Map<String, dynamic>>[];
-      for (var device in enrichedDevices) {
-        if (device['status'] == 'online') {
-          final ts = DateTime.now().subtract(Duration(seconds: activity.length * 30));
+      // Load activity data (running tasks and device activities)
+      List<Map<String, dynamic>> runningTasks = [];
+      List<Map<String, dynamic>> activity = [];
+
+      try {
+        final activityData = await _grpcService.getActivity(includeMetrics: false);
+
+        // Extract running tasks
+        if (activityData['running_tasks'] is List) {
+          runningTasks = (activityData['running_tasks'] as List)
+              .map((t) => Map<String, dynamic>.from(t as Map))
+              .toList();
+        }
+
+        // Build activity items from running tasks
+        for (var task in runningTasks) {
+          final startedAtMs = task['started_at_ms'] as int? ?? 0;
+          final ts = startedAtMs > 0
+              ? DateTime.fromMillisecondsSinceEpoch(startedAtMs)
+              : DateTime.now();
+          final elapsedMs = task['elapsed_ms'] as int? ?? 0;
+
           activity.add({
             'timestamp': ts.toIso8601String(),
-            'type': 'device_update',
-            'message': '${device['device_name']} reported status',
-            'device': device['device_name'],
+            'type': 'running_task',
+            'message': '${task['kind']} running on ${task['device_name']}',
+            'device': task['device_name'],
             'severity': 'info',
-            'cmd': 'Status check',
-            'selected_device_name': device['device_name'],
-            'time': _formatTime(ts),
-            'output': 'Device online • CPU: ${((device['cpu_load'] ?? 0) * 100).toStringAsFixed(1)}%',
-            'exit_code': 0,
+            'cmd': task['kind'] ?? 'Task',
+            'selected_device_name': task['device_name'] ?? 'Unknown',
+            'time': _formatElapsedMs(elapsedMs),
+            'output': 'Job: ${task['job_id']} • Task: ${task['task_id']}',
+            'exit_code': -1, // Still running
+            'is_running': true,
           });
+        }
+
+        // Add device activity summaries
+        if (activityData['device_activities'] is List) {
+          for (var deviceActivity in (activityData['device_activities'] as List)) {
+            final da = deviceActivity as Map;
+            final taskCount = da['running_task_count'] as int? ?? 0;
+            if (taskCount > 0) {
+              activity.add({
+                'timestamp': DateTime.now().toIso8601String(),
+                'type': 'device_activity',
+                'message': '${da['device_name']} has $taskCount running task(s)',
+                'device': da['device_name'],
+                'severity': 'info',
+                'cmd': 'Device Activity',
+                'selected_device_name': da['device_name'] ?? 'Unknown',
+                'time': 'Active',
+                'output': '$taskCount task(s) running',
+                'exit_code': 0,
+                'is_running': false,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // If activity fetch fails, fall back to device status activity
+        debugPrint('Activity fetch failed: $e');
+      }
+
+      // If no activity from server, generate from device updates
+      if (activity.isEmpty) {
+        for (var device in enrichedDevices) {
+          if (device['status'] == 'online') {
+            final ts = DateTime.now().subtract(Duration(seconds: activity.length * 30));
+            activity.add({
+              'timestamp': ts.toIso8601String(),
+              'type': 'device_update',
+              'message': '${device['device_name']} reported status',
+              'device': device['device_name'],
+              'severity': 'info',
+              'cmd': 'Status check',
+              'selected_device_name': device['device_name'],
+              'time': _formatTime(ts),
+              'output': 'Device online • CPU: ${((device['cpu_load'] ?? 0) * 100).toStringAsFixed(1)}%',
+              'exit_code': 0,
+              'is_running': false,
+            });
+          }
         }
       }
 
@@ -112,6 +185,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _devices = enrichedDevices;
           _recentActivity = activity;
+          _runningTasks = runningTasks;
           _isLoading = false;
           _errorMessage = null;
         });
@@ -129,8 +203,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final onlineDevices = _devices.where((d) => d['status'] == 'online').length;
-    final activeJobs = 0; // Jobs not fully implemented yet
-    
+    final activeJobs = _runningTasks.length;
+
     return Scaffold(
       backgroundColor: AppColors.backgroundDark,
       body: SafeArea(
@@ -187,77 +261,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           sliver: SliverGrid(
                             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 16,
-                              crossAxisSpacing: 16,
-                              childAspectRatio: 0.75,
+                              crossAxisCount: 3,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 0.85,
                             ),
                             delegate: SliverChildListDelegate([
                               _KpiCard(
-                                title: 'CONNECTED NODES',
+                                title: 'NODES',
                                 value: onlineDevices.toString().padLeft(2, '0'),
                                 icon: LucideIcons.laptop,
                                 color: AppColors.safeGreen,
-                                subtitle: '${_devices.length} TOTAL DEVICES',
+                                subtitle: '${_devices.length} TOTAL',
                               ),
                               const _KpiCard(
-                                title: 'SECURE TOOLS',
+                                title: 'TOOLS',
                                 value: '24',
                                 icon: LucideIcons.shieldCheck,
                                 color: AppColors.infoBlue,
                                 subtitle: '8 ELEVATED',
                               ),
                               _KpiCard(
-                                title: 'ACTIVE JOBS',
+                                title: 'JOBS',
                                 value: activeJobs.toString().padLeft(2, '0'),
                                 icon: LucideIcons.activity,
-                                color: AppColors.warningAmber,
-                                subtitle: 'MONITORING',
+                                color: activeJobs > 0 ? AppColors.warningAmber : AppColors.mutedIcon,
+                                subtitle: activeJobs > 0 ? 'RUNNING' : 'IDLE',
                               ),
                             ]),
                           ),
                         ),
 
-            // KPI Cards
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 16,
-                  childAspectRatio: 1.3,
-                ),
-                delegate: SliverChildListDelegate([
-                  const _KpiCard(
-                    title: 'CONNECTED NODES',
-                    value: '12',
-                    icon: LucideIcons.laptop,
-                    color: AppColors.safeGreen,
-                    subtitle: '4 ACTIVE SESSIONS',
-                  ),
-                  const _KpiCard(
-                    title: 'SECURE TOOLS',
-                    value: '24',
-                    icon: LucideIcons.shieldCheck,
-                    color: AppColors.infoBlue,
-                    subtitle: '8 ELEVATED',
-                  ),
-                  const _KpiCard(
-                    title: 'ACTIVE JOBS',
-                    value: '03',
-                    icon: LucideIcons.activity,
-                    color: AppColors.warningAmber,
-                    subtitle: '1 SYNCHRONIZING',
-                  ),
-                ]),
-              ),
-            ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
-                        const SliverToBoxAdapter(
+                        SliverToBoxAdapter(
                           child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 20),
-                            child: _SectionHeader(label: 'RECENT ORCHESTRATION EVENTS'),
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: _SectionHeader(
+                              label: _runningTasks.isNotEmpty
+                                  ? 'RUNNING TASKS (${_runningTasks.length})'
+                                  : 'RECENT ORCHESTRATION EVENTS',
+                            ),
                           ),
                         ),
 
@@ -396,7 +440,23 @@ class _ActivityItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final exitCode = item['exit_code'] as int? ?? -1;
-    final color = exitCode == 0 ? AppColors.safeGreen : AppColors.primaryRed;
+    final isRunning = item['is_running'] as bool? ?? false;
+
+    Color color;
+    String statusText;
+    if (isRunning) {
+      color = AppColors.warningAmber;
+      statusText = 'RUNNING';
+    } else if (exitCode == 0) {
+      color = AppColors.safeGreen;
+      statusText = 'EXIT 0';
+    } else if (exitCode == -1) {
+      color = AppColors.mutedIcon;
+      statusText = 'N/A';
+    } else {
+      color = AppColors.primaryRed;
+      statusText = 'EXIT $exitCode';
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -408,9 +468,9 @@ class _ActivityItem extends StatelessWidget {
           iconColor: AppColors.mutedIcon,
           collapsedIconColor: AppColors.mutedIcon,
           leading: ThreeDBadgeIcon(
-            icon: LucideIcons.terminal,
+            icon: isRunning ? LucideIcons.loader : LucideIcons.terminal,
             size: 14,
-            accentColor: AppColors.mutedIcon,
+            accentColor: color,
             useRotation: false,
           ),
           title: Text(
@@ -428,12 +488,12 @@ class _ActivityItem extends StatelessWidget {
           trailing: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.05),
+              color: color.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: color.withOpacity(0.2)),
+              border: Border.all(color: color.withValues(alpha: 0.2)),
             ),
             child: Text(
-              'EXIT $exitCode',
+              statusText,
               style: GoogleFonts.jetBrainsMono(
                 color: color,
                 fontSize: 9,

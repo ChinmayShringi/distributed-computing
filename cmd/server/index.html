@@ -318,6 +318,62 @@
         .resource-fill.memory { background: #4CAF50; }
         .resource-fill.gpu { background: #9C27B0; }
 
+        /* Circular Progress Bars */
+        .circular-progress-container {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            margin-top: 12px;
+            gap: 8px;
+        }
+
+        .circular-progress {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 70px;
+        }
+
+        .circular-progress svg {
+            width: 70px;
+            height: 70px;
+            transform: rotate(-90deg);
+        }
+
+        .circular-progress .progress-bg {
+            fill: none;
+            stroke: #e0e0e0;
+            stroke-width: 3;
+        }
+
+        .circular-progress .progress-ring {
+            fill: none;
+            stroke-width: 3;
+            stroke-linecap: round;
+            transition: stroke-dasharray 0.5s ease;
+        }
+
+        .circular-progress .progress-ring.cpu { stroke: #2196F3; }
+        .circular-progress .progress-ring.memory { stroke: #4CAF50; }
+        .circular-progress .progress-ring.gpu { stroke: #9C27B0; }
+
+        .circular-progress .progress-text {
+            fill: #333;
+            font-size: 8px;
+            font-weight: 600;
+            text-anchor: middle;
+            dominant-baseline: central;
+            transform: rotate(90deg);
+            transform-origin: center;
+        }
+
+        .circular-progress .progress-label {
+            font-size: 0.75rem;
+            color: #555;
+            margin-top: 4px;
+            text-align: center;
+        }
+
         .chart-container {
             display: flex;
             flex-wrap: wrap;
@@ -804,6 +860,27 @@
             }).join('');
         }
 
+        // Helper to create circular progress SVG
+        function createCircularProgress(percent, type, label) {
+            const validPercent = percent >= 0 ? percent : 0;
+            const circumference = 2 * Math.PI * 15.9155;
+            const dashArray = (validPercent / 100) * circumference;
+            const displayText = percent >= 0 ? `${percent}%` : 'N/A';
+
+            return `
+                <div class="circular-progress">
+                    <svg viewBox="0 0 36 36">
+                        <circle class="progress-bg" cx="18" cy="18" r="15.9155"/>
+                        <circle class="progress-ring ${type}" cx="18" cy="18" r="15.9155"
+                            stroke-dasharray="${dashArray} ${circumference}"
+                            stroke-dashoffset="0"/>
+                        <text class="progress-text" x="18" y="18">${displayText}</text>
+                    </svg>
+                    <div class="progress-label">${label}</div>
+                </div>
+            `;
+        }
+
         // Update device resources display
         function updateDeviceResources(activities) {
             const container = document.getElementById('device-resources-list');
@@ -813,7 +890,12 @@
                 return;
             }
 
-            container.innerHTML = activities.map(activity => {
+            // Sort by device name to maintain stable order
+            const sortedActivities = [...activities].sort((a, b) =>
+                (a.device_name || '').localeCompare(b.device_name || '')
+            );
+
+            container.innerHTML = sortedActivities.map(activity => {
                 const status = activity.current_status || {};
                 const cpuPercent = status.cpu_load >= 0 ? Math.round(status.cpu_load * 100) : -1;
                 const memPercent = status.mem_total_mb > 0 ? Math.round((status.mem_used_mb / status.mem_total_mb) * 100) : 0;
@@ -824,37 +906,11 @@
                         <div class="device-name">${escapeHtml(activity.device_name || 'Unknown')}</div>
                         <div class="device-info">Tasks running: ${activity.running_task_count || 0}</div>
 
-                        <div style="margin-top: 8px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
-                                <span>CPU</span>
-                                <span>${cpuPercent >= 0 ? cpuPercent + '%' : 'N/A'}</span>
-                            </div>
-                            <div class="resource-bar">
-                                <div class="resource-fill cpu" style="width: ${cpuPercent >= 0 ? cpuPercent : 0}%"></div>
-                            </div>
+                        <div class="circular-progress-container">
+                            ${createCircularProgress(cpuPercent, 'cpu', 'CPU')}
+                            ${createCircularProgress(memPercent, 'memory', 'Memory')}
+                            ${gpuPercent >= 0 ? createCircularProgress(gpuPercent, 'gpu', 'GPU/NPU') : ''}
                         </div>
-
-                        <div style="margin-top: 4px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
-                                <span>Memory</span>
-                                <span>${memPercent}% (${status.mem_used_mb || 0}/${status.mem_total_mb || 0} MB)</span>
-                            </div>
-                            <div class="resource-bar">
-                                <div class="resource-fill memory" style="width: ${memPercent}%"></div>
-                            </div>
-                        </div>
-
-                        ${gpuPercent >= 0 ? `
-                        <div style="margin-top: 4px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
-                                <span>GPU/NPU</span>
-                                <span>${gpuPercent}%</span>
-                            </div>
-                            <div class="resource-bar">
-                                <div class="resource-fill gpu" style="width: ${gpuPercent}%"></div>
-                            </div>
-                        </div>
-                        ` : ''}
                     </div>
                 `;
             }).join('');

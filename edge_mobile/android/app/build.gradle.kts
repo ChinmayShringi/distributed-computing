@@ -65,6 +65,9 @@ dependencies {
     
     // JSON for discovery messages
     implementation("org.json:json:20231013")
+
+    // OkHttp for REST API calls (assistant, chat)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 
 protobuf {

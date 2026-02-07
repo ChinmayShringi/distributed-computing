@@ -229,6 +229,77 @@ class OrchestratorGrpcClient(
     }
 
     /**
+     * Get activity data (running tasks, device activities, optional metrics history)
+     */
+    suspend fun getActivity(
+        includeMetrics: Boolean = false,
+        metricsSinceMs: Long = 0
+    ): Map<String, Any> = withContext(Dispatchers.IO) {
+        init()
+
+        try {
+            val request = GetActivityRequest.newBuilder()
+                .setIncludeMetricsHistory(includeMetrics)
+                .setMetricsSinceMs(metricsSinceMs)
+                .build()
+
+            val response = stub!!.getActivity(request)
+            val activity = response.activity
+
+            val result = mutableMapOf<String, Any>(
+                "running_tasks" to activity.runningTasksList.map { task ->
+                    mapOf(
+                        "task_id" to task.taskId,
+                        "job_id" to task.jobId,
+                        "kind" to task.kind,
+                        "input" to task.input,
+                        "device_id" to task.deviceId,
+                        "device_name" to task.deviceName,
+                        "started_at_ms" to task.startedAtMs,
+                        "elapsed_ms" to task.elapsedMs
+                    )
+                },
+                "device_activities" to activity.deviceActivitiesList.map { deviceActivity ->
+                    mapOf(
+                        "device_id" to deviceActivity.deviceId,
+                        "device_name" to deviceActivity.deviceName,
+                        "running_task_count" to deviceActivity.runningTaskCount,
+                        "current_status" to if (deviceActivity.hasCurrentStatus()) {
+                            mapOf(
+                                "cpu_load" to deviceActivity.currentStatus.cpuLoad,
+                                "mem_used_mb" to deviceActivity.currentStatus.memUsedMb,
+                                "mem_total_mb" to deviceActivity.currentStatus.memTotalMb
+                            )
+                        } else null
+                    )
+                }
+            )
+
+            // Include metrics history if requested
+            if (includeMetrics && response.deviceMetricsCount > 0) {
+                result["device_metrics"] = response.deviceMetricsMap.mapValues { (_, metricsHistory) ->
+                    mapOf(
+                        "device_id" to metricsHistory.deviceId,
+                        "device_name" to metricsHistory.deviceName,
+                        "samples" to metricsHistory.samplesList.map { sample ->
+                            mapOf(
+                                "timestamp_ms" to sample.timestampMs,
+                                "cpu_load" to sample.cpuLoad,
+                                "mem_used_mb" to sample.memUsedMb,
+                                "mem_total_mb" to sample.memTotalMb
+                            )
+                        }
+                    )
+                }
+            }
+
+            result
+        } catch (e: Exception) {
+            throw Exception("Failed to get activity: ${e.message}", e)
+        }
+    }
+
+    /**
      * Close the gRPC channel and clean up resources
      */
     fun close() {
