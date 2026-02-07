@@ -5,7 +5,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:go_router/go_router.dart';
 import '../../theme/app_colors.dart';
 import '../../shared/widgets/edge_mesh_wordmark.dart';
-import '../../data/mock_data.dart';
 
 class AppSidebar extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
@@ -55,7 +54,7 @@ class AppSidebar extends ConsumerWidget {
                   icon: LucideIcons.layers,
                   label: 'Jobs',
                   isActive: navigationShell.currentIndex == 4,
-                  badgeCount: MockData.jobs.where((j) => j['status'] == 'running').length,
+                  badgeCount: 0, // Jobs not yet implemented
                   onTap: () => _navigate(context, 4),
                 ),
                 
@@ -357,7 +356,10 @@ class _SidebarFooter extends StatelessWidget {
             ),
           ),
           IconButton(
-            onPressed: () {},
+            onPressed: () {
+              context.pop();
+              context.go('/dashboard/settings');
+            },
             icon: const Icon(LucideIcons.settings, size: 18, color: AppColors.mutedIcon),
           ),
         ],

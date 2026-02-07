@@ -209,6 +209,9 @@ When modifying `proto/orchestrator.proto`:
 | `CHAT_API_KEY` | (empty) | API key (optional, for OpenAI-compatible) |
 | `CHAT_TIMEOUT_SECONDS` | `60` | Chat request timeout |
 | `AGENT_MAX_ITERATIONS` | `8` | Max tool calling iterations for agent |
+| `P2P_DISCOVERY` | `true` | UDP broadcast peer discovery (set `false` to disable) |
+| `DISCOVERY_PORT` | `50051` | UDP port for P2P discovery broadcasts |
+| `SEED_PEERS` | (empty) | Comma-separated IPs for cross-subnet discovery |
 
 ## Multi-Device Setup
 

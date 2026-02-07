@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'models.dart';
-import '../../data/mock_data.dart';
+import '../../services/grpc_service.dart';
 
 // Using basic Provider to hold ValueNotifier/ChangeNotifier
 // which is the most compatible way across all Riverpod versions.
@@ -14,8 +14,17 @@ final chatThinkingProvider = Provider((ref) => ValueNotifier<bool>(false));
 class ChatController {
   final WidgetRef ref;
   final _uuid = const Uuid();
+  final _grpcService = GrpcService();
 
   ChatController(this.ref);
+
+  String _deviceType(String? platform) {
+    if (platform == null) return 'desktop';
+    final p = platform.toLowerCase();
+    if (p.contains('android') || p.contains('ios')) return 'mobile';
+    if (p.contains('linux')) return 'server';
+    return 'desktop';
+  }
 
   Future<void> handleUserMessage(String text) async {
     final userMsg = ChatMessage(
@@ -50,7 +59,7 @@ class ChatController {
     thinkingNotifier.value = false;
   }
 
-  void _handleDeviceQuery() {
+  Future<void> _handleDeviceQuery() async {
     final assistantMsg = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.text,
@@ -58,11 +67,27 @@ class ChatController {
       text: 'Right away. Here are the devices currently connected to your mesh:',
     );
 
+    // Fetch real device data
+    List<Map<String, dynamic>> devices = [];
+    try {
+      devices = await _grpcService.listDevices();
+    } catch (e) {
+      // Fallback to empty list if error
+      devices = [];
+    }
+
+    final transformedDevices = devices.map((d) => {
+      'name': d['device_name'] ?? 'Unknown',
+      'type': _deviceType(d['platform']),
+      'status': 'online',
+      'os': '${d['platform'] ?? ''} ${d['arch'] ?? ''}',
+    }).toList();
+
     final deviceCard = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.devices,
       sender: MessageSender.assistant,
-      payload: {'devices': MockData.devices},
+      payload: {'devices': transformedDevices},
     );
 
     final notifier = ref.read(chatMessagesProvider);
@@ -99,7 +124,7 @@ class ChatController {
     notifier.value = [...notifier.value, assistantMsg, planCard];
   }
 
-  void _handleStreamQuery() {
+  Future<void> _handleStreamQuery() async {
     final assistantMsg = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.text,
@@ -107,11 +132,28 @@ class ChatController {
       text: 'Sure. Select a device to start streaming its desktop or terminal:',
     );
 
+    // Fetch real device data
+    List<Map<String, dynamic>> devices = [];
+    try {
+      devices = await _grpcService.listDevices();
+    } catch (e) {
+      // Fallback to empty list if error
+      devices = [];
+    }
+
+    final transformedDevices = devices.map((d) => {
+      'name': d['device_name'] ?? 'Unknown',
+      'type': _deviceType(d['platform']),
+      'status': 'online',
+      'os': '${d['platform'] ?? ''} ${d['arch'] ?? ''}',
+      'device_id': d['device_id'],
+    }).toList();
+
     final streamCard = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.stream,
       sender: MessageSender.assistant,
-      payload: {'devices': MockData.devices},
+      payload: {'devices': transformedDevices},
     );
 
     final notifier = ref.read(chatMessagesProvider);

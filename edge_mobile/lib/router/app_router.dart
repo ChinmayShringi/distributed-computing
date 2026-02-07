@@ -291,6 +291,9 @@ final appRouter = GoRouter(
                 GoRoute(
                     path: 'download',
                     builder: (context, state) => const DownloadScreen()),
+                GoRoute(
+                    path: 'settings',
+                    builder: (context, state) => const SettingsScreen()),
               ],
             ),
           ],

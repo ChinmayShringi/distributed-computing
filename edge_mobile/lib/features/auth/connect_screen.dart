@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_colors.dart';
 import '../../shared/widgets/edge_mesh_wordmark.dart';
 import '../../shared/widgets/glass_container.dart';
+import '../../services/grpc_service.dart';
 
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
@@ -15,32 +16,44 @@ class ConnectScreen extends StatefulWidget {
 }
 
 class _ConnectScreenState extends State<ConnectScreen> {
-  final _serverController = TextEditingController(text: '192.168.1.10:50051');
+  final _serverController = TextEditingController(text: '192.168.1.195:50051');
   final _keyController = TextEditingController(text: 'dev');
   bool _isObscured = true;
   bool _isConnecting = false;
   bool _isConnected = false;
+  String? _errorMessage;
+  final _grpcService = GrpcService();
 
-  void _handleConnect() async {
+  Future<void> _handleConnect() async {
     setState(() {
       _isConnecting = true;
+      _errorMessage = null;
     });
 
-    // Simulate connection handshake
-    await Future.delayed(const Duration(milliseconds: 1500));
+    try {
+      await _grpcService.healthCheck();
+      await _grpcService.createSession(
+        deviceName: 'android-device',
+        securityKey: _keyController.text.trim().isEmpty ? 'dev' : _keyController.text.trim(),
+      );
 
-    if (mounted) {
-      setState(() {
-        _isConnecting = false;
-        _isConnected = true;
-      });
-    }
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+          _isConnected = true;
+          _errorMessage = null;
+        });
+      }
 
-    // Brief delay to show success state before navigating
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    if (mounted) {
-      context.go('/chat');
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (mounted) context.go('/chat');
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+          _errorMessage = 'Connection failed: ${e.toString().split('\n').first}';
+        });
+      }
     }
   }
 
@@ -151,6 +164,29 @@ class _ConnectScreenState extends State<ConnectScreen> {
                           onToggleVisibility: () => setState(() => _isObscured = !_isObscured),
                         ),
                         
+                        if (_errorMessage != null) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryRed.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.primaryRed.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(LucideIcons.alertCircle, size: 18, color: AppColors.primaryRed),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _errorMessage!,
+                                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.primaryRed),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 40),
                         
                         // Primary Action

@@ -1,14 +1,136 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:go_router/go_router.dart';
 import '../../theme/app_colors.dart';
 import '../../shared/widgets/edge_mesh_wordmark.dart';
 import '../../shared/widgets/terminal_panel.dart';
 import '../../shared/widgets/status_strip.dart';
 import '../../shared/widgets/glass_container.dart';
 import '../../shared/widgets/three_d_badge_icon.dart';
+import '../../services/grpc_service.dart';
 
-class RunScreen extends StatelessWidget {
+class RunScreen extends StatefulWidget {
   const RunScreen({super.key});
+
+  @override
+  State<RunScreen> createState() => _RunScreenState();
+}
+
+class _RunScreenState extends State<RunScreen> {
+  final _grpcService = GrpcService();
+  final _commandController = TextEditingController();
+  List<Map<String, dynamic>> _devices = [];
+  Map<String, dynamic>? _selectedDevice;
+  String? _output;
+  int? _exitCode;
+  bool _isExecuting = false;
+  bool _devicesLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+  }
+
+  @override
+  void dispose() {
+    _commandController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDevices() async {
+    try {
+      final devices = await _grpcService.listDevices();
+      if (mounted) {
+        setState(() {
+          _devices = devices;
+          _devicesLoaded = true;
+          if (_selectedDevice == null && devices.isNotEmpty) {
+            _selectedDevice = devices.first;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _devices = [];
+          _devicesLoaded = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _executeCommand() async {
+    final cmd = _commandController.text.trim();
+    if (cmd.isEmpty) return;
+    setState(() {
+      _isExecuting = true;
+      _output = null;
+      _exitCode = null;
+    });
+    try {
+      final parts = cmd.split(RegExp(r'\s+'));
+      final command = parts.isNotEmpty ? parts.first : cmd;
+      final args = parts.length > 1 ? parts.sublist(1) : <String>[];
+      final result = await _grpcService.executeRoutedCommand(
+        command: command,
+        args: args,
+        policy: 'BEST_AVAILABLE',
+      );
+      if (mounted) {
+        setState(() {
+          _output = result['stdout']?.toString() ?? result['output']?.toString() ?? result.toString();
+          _exitCode = result['exit_code'] as int? ?? 0;
+          _isExecuting = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _output = 'Error: $e';
+          _exitCode = -1;
+          _isExecuting = false;
+        });
+      }
+    }
+  }
+
+  void _showDevicePicker() {
+    if (_devices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No devices available. Ensure orchestrator is running.')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => ListView.builder(
+        shrinkWrap: true,
+        itemCount: _devices.length,
+        itemBuilder: (_, i) {
+          final d = _devices[i];
+          final isSelected = _selectedDevice?['device_id'] == d['device_id'];
+          return ListTile(
+            leading: Icon(
+              (d['platform']?.toString().toLowerCase().contains('android') ?? false) ? LucideIcons.smartphone : LucideIcons.laptop,
+              color: isSelected ? AppColors.safeGreen : AppColors.textSecondary,
+            ),
+            title: Text(d['device_name']?.toString() ?? 'Unknown'),
+            subtitle: Text('${d['platform']} ${d['arch']}'),
+            trailing: isSelected ? const Icon(LucideIcons.check, color: AppColors.safeGreen) : null,
+            onTap: () {
+              setState(() => _selectedDevice = d);
+              Navigator.pop(ctx);
+            },
+          );
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,12 +169,20 @@ class RunScreen extends StatelessWidget {
                   ],
                 ),
                 
-                const Expanded(
+                Expanded(
                   child: TabBarView(
                     children: [
-                      _CommandTab(),
-                      _ToolsTab(),
-                      _AssistantTab(),
+                      _CommandTab(
+                        commandController: _commandController,
+                        selectedDevice: _selectedDevice,
+                        output: _output,
+                        exitCode: _exitCode,
+                        isExecuting: _isExecuting,
+                        onSelectDevice: _showDevicePicker,
+                        onExecute: _executeCommand,
+                      ),
+                      const _ToolsTab(),
+                      _AssistantTab(onAsk: () => context.go('/chat')),
                     ],
                   ),
                 ),
@@ -66,7 +196,23 @@ class RunScreen extends StatelessWidget {
 }
 
 class _CommandTab extends StatelessWidget {
-  const _CommandTab();
+  final TextEditingController commandController;
+  final Map<String, dynamic>? selectedDevice;
+  final String? output;
+  final int? exitCode;
+  final bool isExecuting;
+  final VoidCallback onSelectDevice;
+  final VoidCallback onExecute;
+
+  const _CommandTab({
+    required this.commandController,
+    required this.selectedDevice,
+    required this.output,
+    required this.exitCode,
+    required this.isExecuting,
+    required this.onSelectDevice,
+    required this.onExecute,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -82,9 +228,14 @@ class _CommandTab extends StatelessWidget {
             child: ListTile(
               leading: const ThreeDBadgeIcon(icon: LucideIcons.laptop, accentColor: AppColors.primaryRed, size: 14),
               title: const Text('Target Device', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-              subtitle: const Text('Samsung Galaxy S24 • Online', style: TextStyle(fontSize: 12)),
+              subtitle: Text(
+                selectedDevice != null
+                    ? '${selectedDevice!['device_name']} • ${selectedDevice!['platform']}'
+                    : 'Select a device...',
+                style: const TextStyle(fontSize: 12),
+              ),
               trailing: const Icon(LucideIcons.chevronDown, size: 16),
-              onTap: () {},
+              onTap: onSelectDevice,
             ),
           ),
           const SizedBox(height: 16),
@@ -118,6 +269,7 @@ class _CommandTab extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             borderRadius: 12,
             child: TextField(
+              controller: commandController,
               style: const TextStyle(fontFamily: 'JetBrains Mono', fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'shell@edge:~\$ enter command...',
@@ -130,9 +282,9 @@ class _CommandTab extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: () {},
-            icon: const Icon(LucideIcons.zap, size: 16),
-            label: const Text('EXECUTE RUNTIME'),
+            onPressed: isExecuting ? null : onExecute,
+            icon: isExecuting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(LucideIcons.zap, size: 16),
+            label: Text(isExecuting ? 'EXECUTING...' : 'EXECUTE RUNTIME'),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.primaryRed,
               foregroundColor: Colors.white,
@@ -146,10 +298,13 @@ class _CommandTab extends StatelessWidget {
           const SizedBox(height: 24),
           
           // Result
-          const TerminalPanel(
-            output: 'STDOUT: Listening for packets on eth0...\nSYSTEM: Permission node verified.',
-            exitCode: null,
-          ),
+          if (output != null)
+            TerminalPanel(output: output!, exitCode: exitCode)
+          else
+            const TerminalPanel(
+              output: 'Output will appear here after execution.',
+              exitCode: null,
+            ),
         ],
       ),
     );
@@ -253,7 +408,9 @@ class _ToolCard extends StatelessWidget {
 }
 
 class _AssistantTab extends StatelessWidget {
-  const _AssistantTab();
+  final VoidCallback onAsk;
+
+  const _AssistantTab({required this.onAsk});
 
   @override
   Widget build(BuildContext context) {
@@ -275,32 +432,14 @@ class _AssistantTab extends StatelessWidget {
                   'How can I help you orchestrate today?',
                   style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
                 ),
-              ],
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: GlassContainer(
-            borderRadius: 30,
-            padding: const EdgeInsets.fromLTRB(20, 4, 8, 4),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: TextField(
-                    decoration: InputDecoration(
-                      hintText: 'Ask the Mesh Assistant...',
-                      hintStyle: TextStyle(fontSize: 14, color: AppColors.textSecondary),
-                      border: InputBorder.none,
-                    ),
-                  ),
-                ),
-                CircleAvatar(
-                  backgroundColor: AppColors.primaryRed,
-                  radius: 18,
-                  child: IconButton(
-                    icon: const Icon(LucideIcons.send, color: Colors.white, size: 14),
-                    onPressed: () {},
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: onAsk,
+                  icon: const Icon(LucideIcons.messageSquare, size: 16),
+                  label: const Text('Open Chat Assistant'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primaryRed,
+                    foregroundColor: Colors.white,
                   ),
                 ),
               ],
