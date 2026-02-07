@@ -7,8 +7,8 @@
 @layer base {
   :root {
     /* EDGE MESH Dark Theme */
-    --background: 220 20% 4%;
-    --background-dark: 220 20% 4%;
+    --background: 0 0% 0%;
+    --background-dark: 0 0% 0%;
     --foreground: 210 20% 98%;
     
     --surface-1: 220 18% 8%;

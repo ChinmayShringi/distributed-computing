@@ -11,7 +11,6 @@ import { ConsoleLayout } from "@/layouts/ConsoleLayout";
 // Public Pages
 import { HomePage } from "@/pages/HomePage";
 import { FeaturesPage } from "@/pages/FeaturesPage";
-import { PricingPage } from "@/pages/PricingPage";
 import { AboutPage } from "@/pages/AboutPage";
 
 // Console Pages
@@ -43,7 +42,6 @@ const App = () => (
           <Route element={<PublicLayout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/features" element={<FeaturesPage />} />
-            <Route path="/pricing" element={<PricingPage />} />
             <Route path="/about" element={<AboutPage />} />
           </Route>
 
