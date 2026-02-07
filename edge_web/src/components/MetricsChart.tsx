@@ -9,21 +9,15 @@ import {
   Legend,
 } from 'recharts';
 import { useMemo } from 'react';
-import type { MetricsHistoryEntry } from '@/api';
+import type { DeviceMetricsHistory } from '@/api';
 
 type MetricType = 'cpu' | 'memory' | 'gpu';
 
 interface MetricsChartProps {
-  data: MetricsHistoryEntry[];
+  data: Record<string, DeviceMetricsHistory>;
   metric: MetricType;
   height?: number;
 }
-
-const metricConfig: Record<MetricType, { key: keyof MetricsHistoryEntry; label: string; color: string }> = {
-  cpu: { key: 'cpu_percent', label: 'CPU %', color: '#3B82F6' }, // info-blue
-  memory: { key: 'memory_percent', label: 'Memory %', color: '#8B5CF6' }, // primary purple
-  gpu: { key: 'gpu_percent', label: 'GPU %', color: '#10B981' }, // safe-green
-};
 
 // Color palette for different devices
 const deviceColors = [
@@ -38,34 +32,56 @@ const deviceColors = [
 ];
 
 export function MetricsChart({ data, metric, height = 200 }: MetricsChartProps) {
-  const config = metricConfig[metric];
-
-  // Group data by timestamp and device for multi-line chart
+  // Transform device_metrics into chart data format
   const chartData = useMemo(() => {
-    const byTimestamp = new Map<string, Record<string, number>>();
-    const devices = new Set<string>();
+    const deviceEntries = Object.values(data);
+    if (deviceEntries.length === 0) {
+      return { data: [], devices: [] };
+    }
 
-    data.forEach((entry) => {
-      devices.add(entry.device_name);
-      const time = new Date(entry.timestamp).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
+    const devices = deviceEntries.map((d) => d.device_name);
+    const byTimestamp = new Map<number, Record<string, number | string>>();
+
+    deviceEntries.forEach((device) => {
+      device.samples.forEach((sample) => {
+        if (!byTimestamp.has(sample.timestamp_ms)) {
+          byTimestamp.set(sample.timestamp_ms, {
+            time: new Date(sample.timestamp_ms).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            }),
+            timestamp: sample.timestamp_ms,
+          });
+        }
+
+        const record = byTimestamp.get(sample.timestamp_ms)!;
+
+        // Get the value based on metric type
+        let value = 0;
+        if (metric === 'cpu') {
+          value = sample.cpu_load >= 0 ? sample.cpu_load * 100 : 0;
+        } else if (metric === 'memory') {
+          if (sample.mem_total_mb && sample.mem_used_mb) {
+            value = (sample.mem_used_mb / sample.mem_total_mb) * 100;
+          }
+        } else if (metric === 'gpu') {
+          const gpuVal = sample.gpu_load >= 0 ? sample.gpu_load : 0;
+          const npuVal = sample.npu_load >= 0 ? sample.npu_load : 0;
+          value = Math.max(gpuVal, npuVal) * 100;
+        }
+
+        record[device.device_name] = value;
       });
-
-      if (!byTimestamp.has(time)) {
-        byTimestamp.set(time, { time });
-      }
-
-      const record = byTimestamp.get(time)!;
-      record[entry.device_name] = entry[config.key] as number;
     });
 
-    return {
-      data: Array.from(byTimestamp.values()),
-      devices: Array.from(devices),
-    };
-  }, [data, config.key]);
+    // Sort by timestamp and take last 60 samples
+    const sortedData = Array.from(byTimestamp.values())
+      .sort((a, b) => (a.timestamp as number) - (b.timestamp as number))
+      .slice(-60);
+
+    return { data: sortedData, devices };
+  }, [data, metric]);
 
   if (chartData.data.length === 0) {
     return (

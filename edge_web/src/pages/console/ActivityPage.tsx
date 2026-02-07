@@ -43,9 +43,9 @@ export const ActivityPage = () => {
     refresh,
   } = useActivityPolling({ enabled: false, includeMetricsHistory: true });
 
-  const runningTasks = data?.running_tasks || [];
-  const deviceActivities = data?.device_activities || [];
-  const metricsHistory = data?.metrics_history || [];
+  const runningTasks = data?.activity?.running_tasks || [];
+  const deviceActivities = data?.activity?.device_activities || [];
+  const deviceMetrics = data?.device_metrics || {};
 
   return (
     <div className="p-6 space-y-6">
@@ -129,23 +129,27 @@ export const ActivityPage = () => {
                     {activity.device_id.slice(0, 12)}...
                   </p>
                 </div>
-                {activity.running_count > 0 && (
+                {(activity.running_task_count ?? 0) > 0 && (
                   <Badge variant="default" className="bg-safe-green">
-                    {activity.running_count} running
+                    {activity.running_task_count} running
                   </Badge>
                 )}
               </div>
 
               <div className="flex items-center justify-around relative">
                 <CircularProgress
-                  value={activity.last_metrics?.cpu_percent || 0}
+                  value={Math.max(0, (activity.current_status?.cpu_load ?? 0) * 100)}
                   label="CPU"
                   variant="cpu"
                   size={70}
                   strokeWidth={6}
                 />
                 <CircularProgress
-                  value={activity.last_metrics?.memory_percent || 0}
+                  value={
+                    activity.current_status?.mem_total_mb && activity.current_status?.mem_used_mb
+                      ? (activity.current_status.mem_used_mb / activity.current_status.mem_total_mb) * 100
+                      : 0
+                  }
                   label="Memory"
                   variant="memory"
                   size={70}
@@ -154,8 +158,11 @@ export const ActivityPage = () => {
                 <CircularProgress
                   value={
                     Math.max(
-                      activity.last_metrics?.gpu_percent || 0,
-                      activity.last_metrics?.npu_percent || 0
+                      0,
+                      Math.max(
+                        activity.current_status?.gpu_load ?? -1,
+                        activity.current_status?.npu_load ?? -1
+                      ) * 100
                     )
                   }
                   label="GPU/NPU"
@@ -259,15 +266,15 @@ export const ActivityPage = () => {
           </TabsList>
 
           <TabsContent value="cpu">
-            <MetricsChart data={metricsHistory} metric="cpu" height={250} />
+            <MetricsChart data={deviceMetrics} metric="cpu" height={250} />
           </TabsContent>
 
           <TabsContent value="memory">
-            <MetricsChart data={metricsHistory} metric="memory" height={250} />
+            <MetricsChart data={deviceMetrics} metric="memory" height={250} />
           </TabsContent>
 
           <TabsContent value="gpu">
-            <MetricsChart data={metricsHistory} metric="gpu" height={250} />
+            <MetricsChart data={deviceMetrics} metric="gpu" height={250} />
           </TabsContent>
         </Tabs>
       </GlassCard>
