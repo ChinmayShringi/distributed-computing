@@ -8,9 +8,9 @@ import (
 // LLM device selection helpers
 
 // HasLLMCapability checks if a device has LLM inference capability
-// A device is LLM-capable if it advertises non-zero prefill tokens/sec
+// A device is LLM-capable if it has a local model endpoint (Ollama/LM Studio)
 func HasLLMCapability(device *pb.DeviceInfo) bool {
-	return device.LlmPrefillToksPerS > 0
+	return device.HasLocalModel
 }
 
 // FilterLLMDevices returns only devices that have LLM capability
@@ -25,7 +25,7 @@ func FilterLLMDevices(devices []*pb.DeviceInfo) []*pb.DeviceInfo {
 }
 
 // SelectBestLLMDevice selects the best device for LLM tasks
-// Priority: NPU > GPU > CPU, then fastest prefill speed
+// Priority: NPU > GPU > CPU, then prefer devices with advertised TPS
 func SelectBestLLMDevice(devices []*pb.DeviceInfo) *pb.DeviceInfo {
 	if len(devices) == 0 {
 		return nil
@@ -36,7 +36,10 @@ func SelectBestLLMDevice(devices []*pb.DeviceInfo) *pb.DeviceInfo {
 	// Phase 1: Prefer NPU devices
 	for _, d := range devices {
 		if d.HasNpu {
-			if best == nil || d.LlmPrefillToksPerS > best.LlmPrefillToksPerS {
+			if best == nil {
+				best = d
+			} else if d.LlmPrefillToksPerS > best.LlmPrefillToksPerS {
+				// If multiple NPU devices, pick faster one
 				best = d
 			}
 		}
@@ -48,7 +51,9 @@ func SelectBestLLMDevice(devices []*pb.DeviceInfo) *pb.DeviceInfo {
 	// Phase 2: Prefer GPU devices
 	for _, d := range devices {
 		if d.HasGpu {
-			if best == nil || d.LlmPrefillToksPerS > best.LlmPrefillToksPerS {
+			if best == nil {
+				best = d
+			} else if d.LlmPrefillToksPerS > best.LlmPrefillToksPerS {
 				best = d
 			}
 		}
@@ -57,9 +62,11 @@ func SelectBestLLMDevice(devices []*pb.DeviceInfo) *pb.DeviceInfo {
 		return best
 	}
 
-	// Phase 3: Fall back to CPU, pick fastest
+	// Phase 3: Fall back to CPU, prefer devices with TPS info, else first available
 	for _, d := range devices {
-		if best == nil || d.LlmPrefillToksPerS > best.LlmPrefillToksPerS {
+		if best == nil {
+			best = d
+		} else if d.LlmPrefillToksPerS > 0 && d.LlmPrefillToksPerS > best.LlmPrefillToksPerS {
 			best = d
 		}
 	}
