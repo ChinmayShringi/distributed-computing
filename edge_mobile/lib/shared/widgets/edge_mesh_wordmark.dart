@@ -1,38 +1,37 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_colors.dart';
 
 class EdgeMeshWordmark extends StatelessWidget {
-  final double fontSize;
-
-  const EdgeMeshWordmark({super.key, this.fontSize = 24});
+  final double? size;
+  final double? fontSize;
+  
+  const EdgeMeshWordmark({
+    super.key, 
+    this.size,
+    this.fontSize,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final effectiveSize = size ?? fontSize ?? 18;
+    
     return RichText(
       text: TextSpan(
-        style: GoogleFonts.orbitron(
-          fontSize: fontSize,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 2.0,
+        style: TextStyle(
+          fontSize: effectiveSize,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+          color: const Color(0xFFE6EDF6),
         ),
-        children: [
+        children: const [
           TextSpan(
             text: 'EDGE',
-            style: TextStyle(
-              color: AppColors.primaryRed,
-              shadows: [
-                Shadow(
-                  color: AppColors.primaryRed.withOpacity(0.5),
-                  blurRadius: 10,
-                ),
-              ],
-            ),
+            style: TextStyle(color: AppColors.safeGreen),
           ),
-          const TextSpan(text: ' '),
-          const TextSpan(
+          TextSpan(text: ' '),
+          TextSpan(
             text: 'MESH',
-            style: TextStyle(color: AppColors.textPrimary),
+            style: TextStyle(color: AppColors.primaryRed),
           ),
         ],
       ),

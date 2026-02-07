@@ -22,20 +22,6 @@ class DevicesScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // Standardized Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const EdgeMeshWordmark(fontSize: 18),
-                  IconButton(
-                    icon: const Icon(LucideIcons.plusCircle, color: AppColors.safeGreen, size: 18),
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-            ),
             
             const StatusStrip(
               isConnected: true,

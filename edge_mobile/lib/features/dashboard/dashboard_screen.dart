@@ -23,41 +23,6 @@ class DashboardScreen extends StatelessWidget {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // Standardized Header
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const EdgeMeshWordmark(fontSize: 18),
-                    Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(LucideIcons.bell, size: 18, color: AppColors.mutedIcon),
-                          onPressed: () {},
-                          style: IconButton.styleFrom(
-                            padding: const EdgeInsets.all(8),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        IconButton(
-                          icon: const Icon(LucideIcons.user, size: 18, color: AppColors.mutedIcon),
-                          onPressed: () {},
-                          style: IconButton.styleFrom(
-                            padding: const EdgeInsets.all(8),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
 
             const SliverToBoxAdapter(
               child: StatusStrip(
