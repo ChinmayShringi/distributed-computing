@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../theme/app_colors.dart';
 import '../../shared/widgets/edge_mesh_wordmark.dart';
@@ -6,9 +7,127 @@ import '../../shared/widgets/status_strip.dart';
 import '../../shared/widgets/mode_pill.dart';
 import '../../shared/widgets/glass_container.dart';
 import '../../shared/widgets/three_d_badge_icon.dart';
+import '../../services/grpc_service.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final _grpcService = GrpcService();
+  bool _workerEnabled = false;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWorkerStatus();
+  }
+
+  Future<void> _loadWorkerStatus() async {
+    try {
+      final isRunning = await _grpcService.isWorkerRunning();
+      setState(() {
+        _workerEnabled = isRunning;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _toggleWorker() async {
+    try {
+      if (_workerEnabled) {
+        await _grpcService.stopWorker();
+        setState(() => _workerEnabled = false);
+      } else {
+        // When enabling worker, also request screen capture permission
+        final granted = await _requestScreenCapturePermission();
+        if (granted) {
+          await _grpcService.startWorker();
+          setState(() => _workerEnabled = true);
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Worker enabled with screen capture'),
+                backgroundColor: AppColors.safeGreen,
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Screen capture permission denied. Worker started without streaming.'),
+                backgroundColor: AppColors.warningAmber,
+              ),
+            );
+          }
+          // Start worker anyway, just without screen capture
+          await _grpcService.startWorker();
+          setState(() => _workerEnabled = true);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to toggle worker: $e')),
+        );
+      }
+    }
+  }
+
+  Future<bool> _requestScreenCapturePermission() async {
+    try {
+      // Show dialog explaining the permission
+      final shouldRequest = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface2,
+          title: const Text(
+            'Enable Screen Streaming',
+            style: TextStyle(color: AppColors.textPrimary),
+          ),
+          content: const Text(
+            'To allow remote viewing of this device, we need permission to capture the screen. '
+            'This enables WebRTC streaming when requested by the orchestrator.',
+            style: TextStyle(color: AppColors.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('SKIP', style: TextStyle(color: AppColors.mutedIcon)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.safeGreen,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('GRANT PERMISSION'),
+            ),
+          ],
+        ),
+      );
+      
+      if (shouldRequest == true) {
+        // Request the actual permission
+        return await _grpcService.requestScreenCapture();
+      }
+      
+      return false;
+    } catch (e) {
+      debugPrint("Failed to request screen capture: $e");
+      return false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,6 +204,74 @@ class SettingsScreen extends StatelessWidget {
               ),
               
               const SizedBox(height: 32),
+              _buildSectionHeader('WORKER MODE'),
+              GlassContainer(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            ThreeDBadgeIcon(
+                              icon: LucideIcons.cpu,
+                              accentColor: AppColors.safeGreen,
+                              size: 14,
+                            ),
+                            SizedBox(width: 12),
+                            Text('Enable Worker', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Switch(
+                                value: _workerEnabled,
+                                onChanged: (value) => _toggleWorker(),
+                                activeColor: AppColors.safeGreen,
+                              ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _workerEnabled
+                          ? 'This device is accepting and executing distributed tasks.'
+                          : 'Allow this device to execute tasks from the orchestrator.',
+                      style: TextStyle(color: AppColors.textSecondary.withOpacity(0.7), fontSize: 12),
+                    ),
+                    if (_workerEnabled) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.safeGreen.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.safeGreen.withOpacity(0.3)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(LucideIcons.checkCircle, size: 14, color: AppColors.safeGreen),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Worker service active - Broadcasting to network',
+                                style: TextStyle(color: AppColors.safeGreen, fontSize: 11, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 32),
               _buildSectionHeader('CORE CONFIG'),
               
               _GlassSettingsTile(
@@ -118,7 +305,18 @@ class SettingsScreen extends StatelessWidget {
                SizedBox(
                  width: double.infinity,
                  child: FilledButton(
-                   onPressed: () {},
+                   onPressed: () async {
+                     try {
+                       await _grpcService.closeConnection();
+                       if (mounted) context.go('/connect');
+                     } catch (e) {
+                       if (mounted) {
+                         ScaffoldMessenger.of(context).showSnackBar(
+                           SnackBar(content: Text('Failed to disconnect: $e')),
+                         );
+                       }
+                     }
+                   },
                    style: FilledButton.styleFrom(
                      backgroundColor: Colors.white.withOpacity(0.05),
                      foregroundColor: Colors.white,

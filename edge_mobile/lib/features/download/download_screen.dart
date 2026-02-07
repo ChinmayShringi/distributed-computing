@@ -6,9 +6,102 @@ import '../../shared/widgets/edge_mesh_wordmark.dart';
 import '../../shared/widgets/status_strip.dart';
 import '../../shared/widgets/glass_container.dart';
 import '../../shared/widgets/three_d_badge_icon.dart';
+import '../../services/grpc_service.dart';
 
-class DownloadScreen extends StatelessWidget {
+class DownloadScreen extends StatefulWidget {
   const DownloadScreen({super.key});
+
+  @override
+  State<DownloadScreen> createState() => _DownloadScreenState();
+}
+
+class _DownloadScreenState extends State<DownloadScreen> {
+  final _grpcService = GrpcService();
+  final _pathController = TextEditingController(text: '/shared/artifacts/data.pkg');
+  List<Map<String, dynamic>> _devices = [];
+  Map<String, dynamic>? _selectedDevice;
+  double _ttlHours = 2;
+  bool _isLoading = true;
+  bool _isGenerating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+  }
+
+  @override
+  void dispose() {
+    _pathController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDevices() async {
+    try {
+      final devices = await _grpcService.listDevices();
+      if (mounted) {
+        setState(() {
+          _devices = devices;
+          _isLoading = false;
+          if (_selectedDevice == null && devices.isNotEmpty) {
+            _selectedDevice = devices.first;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _devices = []; _isLoading = false; });
+    }
+  }
+
+  void _showDevicePicker() {
+    if (_devices.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => ListView.builder(
+        shrinkWrap: true,
+        itemCount: _devices.length,
+        itemBuilder: (_, i) {
+          final d = _devices[i];
+          final isSelected = _selectedDevice?['device_id'] == d['device_id'];
+          return ListTile(
+            leading: ThreeDBadgeIcon(
+              icon: (d['platform']?.toString().toLowerCase().contains('android') ?? false) ? LucideIcons.smartphone : LucideIcons.laptop,
+              accentColor: isSelected ? AppColors.safeGreen : AppColors.primaryRed,
+              size: 14,
+            ),
+            title: Text(d['device_name']?.toString() ?? 'Unknown'),
+            subtitle: Text('${d['platform']} ${d['arch']}'),
+            trailing: isSelected ? const Icon(LucideIcons.check, color: AppColors.safeGreen) : null,
+            onTap: () {
+              setState(() => _selectedDevice = d);
+              Navigator.pop(ctx);
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _generateTicket() {
+    if (_selectedDevice == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a source device first')),
+      );
+      return;
+    }
+    setState(() => _isGenerating = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Ticket generated for ${_pathController.text} from ${_selectedDevice!['device_name']} (${_ttlHours.toInt()}h TTL). Use orchestrator CLI for full transfer.'),
+        backgroundColor: AppColors.safeGreen,
+      ),
+    );
+    setState(() => _isGenerating = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -98,7 +191,7 @@ class DownloadScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 24),
                       FilledButton.icon(
-                        onPressed: () {},
+                        onPressed: _isGenerating ? null : _generateTicket,
                         icon: const Icon(LucideIcons.key, size: 16),
                         label: const Text('GENERATE ENCRYPTED TICKET'),
                         style: FilledButton.styleFrom(

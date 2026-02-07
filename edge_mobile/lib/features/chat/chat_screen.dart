@@ -47,11 +47,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return Column(
       children: [
         Expanded(
-          child: ValueListenableBuilder<List<ChatMessage>>(
+          child:             ValueListenableBuilder<List<ChatMessage>>(
             valueListenable: messagesNotifier,
             builder: (context, messages, child) {
               if (messages.isEmpty) {
-                return const _ChatBody();
+                return _ChatBody(ref: ref);
               }
               return ValueListenableBuilder<bool>(
                 valueListenable: thinkingNotifier,
@@ -75,6 +75,56 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _ComposerBar(
           controller: _messageController,
           onSend: _sendMessage,
+          onOpenActions: () {
+            showModalBottomSheet(
+              context: context,
+              backgroundColor: const Color(0xFF0F1623),
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+              ),
+              builder: (ctx) => Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _ActionSheetItem(
+                      icon: LucideIcons.server,
+                      label: 'List Devices',
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        ChatController(ref).handleUserMessage('Show my devices');
+                      },
+                    ),
+                    _ActionSheetItem(
+                      icon: LucideIcons.terminal,
+                      label: 'Run Command',
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        ChatController(ref).handleUserMessage('Run ls -la');
+                      },
+                    ),
+                    _ActionSheetItem(
+                      icon: LucideIcons.playCircle,
+                      label: 'Start Stream',
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        ChatController(ref).handleUserMessage('Start stream');
+                      },
+                    ),
+                    _ActionSheetItem(
+                      icon: LucideIcons.download,
+                      label: 'Download File',
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        ChatController(ref).handleUserMessage('Download shared file');
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+          ref: ref,
         ),
       ],
     );
@@ -82,7 +132,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 }
 
 class _ChatBody extends StatelessWidget {
-  const _ChatBody();
+  final WidgetRef ref;
+  const _ChatBody({required this.ref});
 
   @override
   Widget build(BuildContext context) {
@@ -120,11 +171,11 @@ class _ChatBody extends StatelessWidget {
               spacing: 12,
               runSpacing: 12,
               alignment: WrapAlignment.center,
-              children: const [
-                _SuggestionChip('Show my devices'),
-                _SuggestionChip('Run status check'),
-                _SuggestionChip('Start stream on laptop'),
-                _SuggestionChip('Download shared/report.txt'),
+              children: [
+                _SuggestionChip('Show my devices', onTap: () => ChatController(ref).handleUserMessage('Show my devices')),
+                _SuggestionChip('Run status check', onTap: () => ChatController(ref).handleUserMessage('Run status check')),
+                _SuggestionChip('Start stream on laptop', onTap: () => ChatController(ref).handleUserMessage('Start stream')),
+                _SuggestionChip('Download shared/report.txt', onTap: () => ChatController(ref).handleUserMessage('Download shared/report.txt')),
               ],
             ),
           ],
@@ -136,12 +187,13 @@ class _ChatBody extends StatelessWidget {
 
 class _SuggestionChip extends StatelessWidget {
   final String text;
-  const _SuggestionChip(this.text);
+  final VoidCallback onTap;
+  const _SuggestionChip(this.text, {required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () {},
+      onTap: onTap,
       borderRadius: BorderRadius.circular(999),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -159,8 +211,15 @@ class _SuggestionChip extends StatelessWidget {
 class _ComposerBar extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
+  final VoidCallback onOpenActions;
+  final WidgetRef ref;
 
-  const _ComposerBar({required this.controller, required this.onSend});
+  const _ComposerBar({
+    required this.controller,
+    required this.onSend,
+    required this.onOpenActions,
+    required this.ref,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -171,7 +230,7 @@ class _ComposerBar extends StatelessWidget {
         children: [
           _CircleIconBtn(
             icon: Icons.add_rounded,
-            onTap: () => _openActionsSheet(context),
+            onTap: onOpenActions,
           ),
           const SizedBox(width: 10),
 
@@ -222,28 +281,6 @@ class _ComposerBar extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  void _openActionsSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF0F1623),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _ActionSheetItem(icon: LucideIcons.server, label: 'List Devices', onTap: () => Navigator.pop(context)),
-            _ActionSheetItem(icon: LucideIcons.terminal, label: 'Run Command', onTap: () => Navigator.pop(context)),
-            _ActionSheetItem(icon: LucideIcons.playCircle, label: 'Start Stream', onTap: () => Navigator.pop(context)),
-            _ActionSheetItem(icon: LucideIcons.download, label: 'Download File', onTap: () => Navigator.pop(context)),
-          ],
-        ),
       ),
     );
   }
