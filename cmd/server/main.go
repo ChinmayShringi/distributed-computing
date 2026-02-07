@@ -1523,6 +1523,28 @@ func (s *OrchestratorServer) fetchAndStoreDeviceMetrics(ctx context.Context, dev
 	s.metricsStore.AddSample(deviceID, device.Info.DeviceName, sample)
 }
 
+// startContinuousMetricsPolling polls all registered devices for metrics every 2 seconds
+func (s *OrchestratorServer) startContinuousMetricsPolling(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	log.Printf("[INFO] Starting continuous metrics polling")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("[INFO] Stopping continuous metrics polling")
+			return
+		case <-ticker.C:
+			// Poll all registered devices
+			devices := s.registry.List()
+			for _, device := range devices {
+				go s.fetchAndStoreDeviceMetrics(ctx, device.DeviceId)
+			}
+		}
+	}
+}
+
 // executeTaskGroup runs all tasks in a group in parallel
 func (s *OrchestratorServer) executeTaskGroup(job *jobs.Job, tasks []*jobs.Task) ([]string, int) {
 	var wg sync.WaitGroup
@@ -4095,6 +4117,11 @@ func main() {
 
 	// Start bulk HTTP server in a goroutine
 	go orchestrator.startBulkHTTP()
+
+	// Start continuous metrics polling in a goroutine
+	metricsCtx, metricsCancel := context.WithCancel(context.Background())
+	defer metricsCancel()
+	go orchestrator.startContinuousMetricsPolling(metricsCtx)
 
 	// Get dev key from environment
 	devKey := os.Getenv("DEV_KEY")

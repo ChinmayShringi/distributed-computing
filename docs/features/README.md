@@ -45,6 +45,12 @@ The chat feature (`internal/llm`) provides a local LLM runtime via Ollama or Ope
 | [Deployment](deployment.md) | Multi-machine setup, Windows deployment, cross-platform builds |
 | [Execution Modes](modes.md) | Safe mode, dangerous mode, allowlists, approvals |
 
+## Mobile App
+
+| Document | Description |
+|----------|-------------|
+| [Mobile App](mobile.md) | Flutter cross-platform mobile UI, Android gRPC integration |
+
 ## Quick Links
 
 ### Starting the System
@@ -89,11 +95,15 @@ curl -X POST http://localhost:8080/api/submit-job \
 │   Browser   │──────────────▶│  Web Server │
 └─────────────┘               └──────┬──────┘
                                      │ gRPC
-                                     ▼
-┌─────────────┐     gRPC      ┌─────────────┐     gRPC      ┌─────────────┐
+┌─────────────┐     gRPC      ┌──────┴──────┐     gRPC      ┌─────────────┐
 │   Client    │──────────────▶│   Server    │◀─────────────▶│   Worker    │
 └─────────────┘               │(coordinator)│               │  (remote)   │
-                              └─────────────┘               └─────────────┘
+                              └──────┬──────┘               └─────────────┘
+                                     │ gRPC
+                              ┌──────┴──────┐
+                              │ Mobile App  │
+                              │ (Flutter)   │
+                              └─────────────┘
 ```
 
 ## Key Concepts
