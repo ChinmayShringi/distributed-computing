@@ -44,7 +44,9 @@ type Task struct {
 	State      TaskState
 	Result     string
 	Error      string
-	GroupIndex int // which group this task belongs to
+	GroupIndex int   // which group this task belongs to
+	StartedAt  int64 // Unix milliseconds when task started running
+	EndedAt    int64 // Unix milliseconds when task completed/failed
 }
 
 // ReduceSpec specifies how to combine results
@@ -56,6 +58,8 @@ type ReduceSpec struct {
 type Job struct {
 	ID           string
 	CreatedAt    time.Time
+	StartedAt    time.Time // when job started running
+	EndedAt      time.Time // when job completed/failed
 	State        JobState
 	Tasks        []*Task
 	FinalResult  string
@@ -337,6 +341,7 @@ func (m *Manager) SetJobRunning(jobID string) {
 
 	if job, ok := m.jobs[jobID]; ok {
 		job.State = JobRunning
+		job.StartedAt = time.Now()
 	}
 }
 
@@ -350,11 +355,38 @@ func (m *Manager) UpdateTask(jobID, taskID string, state TaskState, result, errM
 		return
 	}
 
+	now := time.Now().UnixMilli()
 	for _, task := range job.Tasks {
 		if task.ID == taskID {
 			task.State = state
 			task.Result = result
 			task.Error = errMsg
+			// Update timing based on state
+			if state == TaskRunning && task.StartedAt == 0 {
+				task.StartedAt = now
+			} else if state == TaskDone || state == TaskFailed {
+				task.EndedAt = now
+			}
+			break
+		}
+	}
+}
+
+// SetTaskRunning marks a task as running with start time
+func (m *Manager) SetTaskRunning(jobID, taskID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	for _, task := range job.Tasks {
+		if task.ID == taskID {
+			task.State = TaskRunning
+			task.StartedAt = now
 			break
 		}
 	}
@@ -368,6 +400,7 @@ func (m *Manager) SetJobDone(jobID, finalResult string) {
 	if job, ok := m.jobs[jobID]; ok {
 		job.State = JobDone
 		job.FinalResult = finalResult
+		job.EndedAt = time.Now()
 	}
 }
 
@@ -379,6 +412,7 @@ func (m *Manager) SetJobFailed(jobID, errMsg string) {
 	if job, ok := m.jobs[jobID]; ok {
 		job.State = JobFailed
 		job.FinalResult = "Job failed: " + errMsg
+		job.EndedAt = time.Now()
 	}
 }
 
@@ -466,4 +500,89 @@ func (m *Manager) GetGroupResults(jobID string, groupIndex int) []string {
 		}
 	}
 	return results
+}
+
+// GetRunningTasks returns all currently running tasks across all jobs
+func (m *Manager) GetRunningTasks() []*Task {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var running []*Task
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			for _, task := range job.Tasks {
+				if task.State == TaskRunning {
+					running = append(running, task)
+				}
+			}
+		}
+	}
+	return running
+}
+
+// GetActiveDeviceIDs returns device IDs that have running tasks
+func (m *Manager) GetActiveDeviceIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	deviceSet := make(map[string]bool)
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			for _, task := range job.Tasks {
+				if task.State == TaskRunning && task.DeviceID != "" {
+					deviceSet[task.DeviceID] = true
+				}
+			}
+		}
+	}
+
+	devices := make([]string, 0, len(deviceSet))
+	for id := range deviceSet {
+		devices = append(devices, id)
+	}
+	return devices
+}
+
+// GetRunningTaskCountByDevice returns the number of running tasks per device
+func (m *Manager) GetRunningTaskCountByDevice() map[string]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	counts := make(map[string]int)
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			for _, task := range job.Tasks {
+				if task.State == TaskRunning && task.DeviceID != "" {
+					counts[task.DeviceID]++
+				}
+			}
+		}
+	}
+	return counts
+}
+
+// GetAllJobs returns all jobs
+func (m *Manager) GetAllJobs() []*Job {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	jobs := make([]*Job, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		jobs = append(jobs, job)
+	}
+	return jobs
+}
+
+// GetRunningJobs returns all currently running jobs
+func (m *Manager) GetRunningJobs() []*Job {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var running []*Job
+	for _, job := range m.jobs {
+		if job.State == JobRunning {
+			running = append(running, job)
+		}
+	}
+	return running
 }
