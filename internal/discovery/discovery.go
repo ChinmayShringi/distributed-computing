@@ -34,8 +34,8 @@ type Service struct {
 	callback   Callback
 	seedPeers  []*net.UDPAddr // Known peers for cross-subnet discovery
 
-	conn      *net.UDPConn
-	broadcast *net.UDPAddr
+	conn       *net.UDPConn
+	broadcasts []*net.UDPAddr
 
 	// Track last-seen times for stale detection
 	lastSeen map[string]time.Time
@@ -234,11 +234,13 @@ func (s *Service) broadcastMessage(msgType MessageType) {
 		return
 	}
 
-	// Send to broadcast address (same subnet only)
-	if _, err := s.conn.WriteToUDP(data, s.broadcast); err != nil {
-		// Don't spam logs - broadcast failures are common on some networks
-		if s.ctx.Err() == nil {
-			log.Printf("[DEBUG] discovery: broadcast failed: %v", err)
+	// Send to all broadcast addresses (subnets)
+	for _, bcast := range s.broadcasts {
+		if _, err := s.conn.WriteToUDP(data, bcast); err != nil {
+			// Don't spam logs - broadcast failures are common on some networks
+			if s.ctx.Err() == nil {
+				log.Printf("[DEBUG] discovery: broadcast to %s failed: %v", bcast, err)
+			}
 		}
 	}
 
@@ -292,8 +294,9 @@ func (s *Service) GetPort() int {
 	return s.port
 }
 
-// detectBroadcastAddress attempts to find a suitable broadcast address for the main interface
-func detectBroadcastAddress() net.IP {
+// detectBroadcastAddresses finds all suitable broadcast addresses
+func detectBroadcastAddresses() []net.IP {
+	var results []net.IP
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
@@ -331,8 +334,8 @@ func detectBroadcastAddress() net.IP {
 			for j := 0; j < len(ip); j++ {
 				broadcast[j] = ip[j] | ^mask[j]
 			}
-			return broadcast
+			results = append(results, broadcast)
 		}
 	}
-	return nil
+	return results
 }
