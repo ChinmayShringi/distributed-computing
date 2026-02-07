@@ -218,27 +218,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                         ),
 
-                        // Execution Host + Utilization Panel
-                        SliverPadding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                          sliver: SliverToBoxAdapter(
-                            child: ExecutionHostPanel(executions: _devices.map((d) => {
-                              'selected_device_id': d['device_id'],
-                              'selected_device_name': d['device_name'],
-                              'device': d['device_name'],
-                              'time': DateTime.now().toIso8601String(),
-                              'status': d['status'],
-                              'cmd': 'Status check',
-                              'exit_code': d['status'] == 'online' ? 0 : -1,
-                              'host_compute': 'CPU',
-                              'resource_usage': {
-                                'memory_used_mb': (d['mem_used_mb'] ?? 0).toDouble(),
-                                'cpu_percent': ((d['cpu_load'] ?? 0) * 100).toDouble(),
-                              },
-                              'total_time_ms': 0,
-                            }).toList()),
-                          ),
-                        ),
+            // KPI Cards
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
+                  childAspectRatio: 1.3,
+                ),
+                delegate: SliverChildListDelegate([
+                  const _KpiCard(
+                    title: 'CONNECTED NODES',
+                    value: '12',
+                    icon: LucideIcons.laptop,
+                    color: AppColors.safeGreen,
+                    subtitle: '4 ACTIVE SESSIONS',
+                  ),
+                  const _KpiCard(
+                    title: 'SECURE TOOLS',
+                    value: '24',
+                    icon: LucideIcons.shieldCheck,
+                    color: AppColors.infoBlue,
+                    subtitle: '8 ELEVATED',
+                  ),
+                  const _KpiCard(
+                    title: 'ACTIVE JOBS',
+                    value: '03',
+                    icon: LucideIcons.activity,
+                    color: AppColors.warningAmber,
+                    subtitle: '1 SYNCHRONIZING',
+                  ),
+                ]),
+              ),
+            ),
 
                         const SliverToBoxAdapter(
                           child: Padding(
@@ -330,24 +344,24 @@ class _KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassContainer(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       borderRadius: 16,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          ThreeDBadgeIcon(icon: icon, accentColor: color, size: 20),
-          const SizedBox(height: 16),
+          ThreeDBadgeIcon(icon: icon, accentColor: color, size: 18),
+          const SizedBox(height: 8),
           Text(
             value,
             style: GoogleFonts.jetBrainsMono(
-              fontSize: 28,
+              fontSize: 24,
               fontWeight: FontWeight.w800,
               color: AppColors.textPrimary,
               height: 1.0,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(
             title,
             style: GoogleFonts.inter(
