@@ -102,10 +102,10 @@ func (a *AgentLoop) Close() error {
 
 // AgentResponse is the final response from the agent
 type AgentResponse struct {
-	Reply        string         `json:"reply"`
-	Iterations   int            `json:"iterations"`
-	ToolCalls    []ToolCallInfo `json:"tool_calls,omitempty"`
-	Error        string         `json:"error,omitempty"`
+	Reply      string         `json:"reply"`
+	Iterations int            `json:"iterations"`
+	ToolCalls  []ToolCallInfo `json:"tool_calls,omitempty"`
+	Error      string         `json:"error,omitempty"`
 }
 
 // ToolCallInfo records information about a tool call made during execution
@@ -124,7 +124,7 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []ToolC
 	}
 	// Append history
 	messages = append(messages, history...)
-	
+
 	// Append current user message
 	messages = append(messages, ToolChatMessage{Role: "user", Content: userMessage})
 
