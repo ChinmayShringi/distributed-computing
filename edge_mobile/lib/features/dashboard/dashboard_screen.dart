@@ -42,7 +42,7 @@ class DashboardScreen extends StatelessWidget {
                   crossAxisCount: 2,
                   mainAxisSpacing: 16,
                   crossAxisSpacing: 16,
-                  childAspectRatio: 0.75,
+                  childAspectRatio: 1.3,
                 ),
                 delegate: SliverChildListDelegate([
                   const _KpiCard(
@@ -148,24 +148,24 @@ class _KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassContainer(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       borderRadius: 16,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          ThreeDBadgeIcon(icon: icon, accentColor: color, size: 20),
-          const SizedBox(height: 16),
+          ThreeDBadgeIcon(icon: icon, accentColor: color, size: 18),
+          const SizedBox(height: 8),
           Text(
             value,
             style: GoogleFonts.jetBrainsMono(
-              fontSize: 28,
+              fontSize: 24,
               fontWeight: FontWeight.w800,
               color: AppColors.textPrimary,
               height: 1.0,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(
             title,
             style: GoogleFonts.inter(
