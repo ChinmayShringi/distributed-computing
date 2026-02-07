@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	// DefaultPort is the default UDP port for discovery broadcasts
-	DefaultPort = 50050
+	// DefaultPort is the default UDP port for discovery broadcasts (same as gRPC)
+	DefaultPort = 50051
 	// BroadcastInterval is how often to broadcast presence
 	BroadcastInterval = 5 * time.Second
 	// StaleTimeout is how long before a device is considered stale
