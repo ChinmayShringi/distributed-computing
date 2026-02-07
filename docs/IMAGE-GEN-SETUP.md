@@ -124,17 +124,17 @@ void setup() {
 }
 ```
 
-**Register Arduino in EdgeMesh**:
+**Register Arduino in EdgeMesh** (all devices use gRPC on 50051):
 ```bash
-# Manually register since Arduino won't run Go server
-go run ./cmd/client --addr localhost:50051 register \
-  --id "arduino-esp32" \
-  --name "Arduino-ESP32-TinyML" \
-  --self-addr "10.206.x.x:8080" \
-  --platform "arduino" --arch "arm"
+go run ./cmd/client register \
+  --id "edgemesh-arduino" \
+  --name "EdgeMeshArduino" \
+  --self-addr "10.206.56.57:50051" \
+  --platform "arduino" \
+  --arch "arm64"
 ```
 
-**Modify coordinator** to call Arduino's HTTP endpoint for IMAGE_GENERATE tasks targeted at Arduino.
+**Optional:** For TinyML-only Arduino (HTTP), use `--self-addr "10.206.56.57:8080"` and modify coordinator to call Arduino's HTTP endpoint for IMAGE_GENERATE tasks.
 
 ---
 
@@ -246,10 +246,19 @@ curl "http://localhost:8080/api/job?id=<job_id>"
 
 ## What You Need
 
-**Arduino info needed**:
-1. Board model (ESP32-S3, Portenta, etc)
-2. Does it have WiFi built-in?
-3. What TinyML model/library are you using?
+**Arduino (EdgeMeshArduino) — configured**:
+- Board: Arduino UNO Q (Qualcomm Dragonwing QRB2210)
+- Board name: EdgeMeshArduino
+- IP: `10.206.56.57`
+- gRPC: `10.206.56.57:50051` (same as all mesh devices)
+- WiFi password: edgemesh
+- Status: WiFi connected, software updated
+- See [docs/connection.md](connection.md) for registration steps
+
+**Still needed for Arduino**:
+1. Deploy & start: `./scripts/deploy-arduino.sh` (builds, copies, starts server — requires SSH to Arduino)
+2. Register: `go run ./cmd/client register --id edgemesh-arduino --name EdgeMeshArduino --self-addr 10.206.56.57:50051 --platform arduino --arch arm64`
+3. (Optional) HTTP sketch with `/generate` endpoint for TinyML image gen
 
 **Software to install**:
 1. Stable Diffusion on Mac (Automatic1111 or ComfyUI)
