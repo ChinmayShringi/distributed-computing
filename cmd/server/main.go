@@ -1508,10 +1508,24 @@ func (s *OrchestratorServer) fetchAndStoreDeviceMetrics(ctx context.Context, dev
 		return
 	}
 
-	// Get device status
-	status, err := s.GetDeviceStatus(ctx, &pb.DeviceId{DeviceId: deviceID})
+	var status *pb.DeviceStatus
+	var err error
+
+	// For self, use local GetDeviceStatus
+	if deviceID == s.selfDeviceID {
+		status, err = s.GetDeviceStatus(ctx, &pb.DeviceId{DeviceId: deviceID})
+	} else {
+		// For remote devices, make gRPC call
+		status, err = s.fetchRemoteDeviceStatus(ctx, device.Info.GrpcAddr, deviceID)
+	}
+
 	if err != nil {
-		log.Printf("[WARN] Failed to get device metrics: %v", err)
+		// Don't log for remote connection failures (too noisy)
+		return
+	}
+
+	if status == nil || status.CpuLoad < 0 {
+		// No valid metrics
 		return
 	}
 
@@ -1528,6 +1542,42 @@ func (s *OrchestratorServer) fetchAndStoreDeviceMetrics(ctx context.Context, dev
 	}
 
 	s.metricsStore.AddSample(deviceID, device.Info.DeviceName, sample)
+
+	// Also update registry status so Activity panel shows current data
+	s.registry.UpdateStatus(deviceID, status)
+}
+
+// fetchRemoteDeviceStatus makes a gRPC call to get status from a remote device
+func (s *OrchestratorServer) fetchRemoteDeviceStatus(ctx context.Context, targetAddr string, deviceID string) (*pb.DeviceStatus, error) {
+	if targetAddr == "" {
+		return nil, fmt.Errorf("no gRPC address for device %s", deviceID)
+	}
+
+	// Short timeout for metrics polling
+	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(dialCtx, targetAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	client := pb.NewOrchestratorServiceClient(conn)
+
+	// Call GetDeviceStatus on remote device
+	statusCtx, statusCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer statusCancel()
+
+	status, err := client.GetDeviceStatus(statusCtx, &pb.DeviceId{DeviceId: deviceID})
+	if err != nil {
+		return nil, err
+	}
+
+	return status, nil
 }
 
 // startContinuousMetricsPolling polls all registered devices for metrics every 2 seconds

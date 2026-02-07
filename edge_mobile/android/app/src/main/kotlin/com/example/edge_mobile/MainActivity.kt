@@ -23,6 +23,9 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
     // Track if we've initialized clients
     private var clientsInitialized = false
 
+    // Synchronization lock for client operations
+    private val clientLock = Object()
+
     private fun isEmulator(): Boolean {
         return (Build.FINGERPRINT.startsWith("generic")
             || Build.FINGERPRINT.startsWith("unknown")
@@ -51,27 +54,23 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
         // Set up Method Channel first
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
 
-        // Start discovery to find orchestrator servers
-        DiscoveryManager.addListener(this)
-        DiscoveryManager.start(this, broadcastSelf = false)
-
-        Log.i(TAG, "Started discovery, waiting for servers...")
-
-        // Check if we already have a discovered server
+        // Initialize clients immediately with fallback so connection is always available
         val activeServer = DiscoveryManager.getActiveServer()
         if (activeServer != null) {
+            Log.i(TAG, "Using previously discovered server: ${activeServer.deviceName}")
             initializeClients(activeServer.grpcHost, activeServer.grpcPort, activeServer.httpPort)
         } else {
-            // Use fallback after a short delay if no server discovered
-            android.os.Handler(mainLooper).postDelayed({
-                if (!clientsInitialized) {
-                    Log.w(TAG, "No server discovered, using fallback host")
-                    val fallback = getFallbackHost()
-                    DiscoveryManager.setActiveServerManual(fallback, 50051, 8080)
-                    initializeClients(fallback, 50051, 8080)
-                }
-            }, 3000) // Wait 3 seconds for discovery
+            // Initialize with fallback immediately so user can connect right away
+            val fallback = getFallbackHost()
+            Log.i(TAG, "Initializing with fallback host: $fallback")
+            DiscoveryManager.setActiveServerManual(fallback, 50051, 8080)
+            initializeClients(fallback, 50051, 8080)
         }
+
+        // Start discovery to find orchestrator servers (will update if better server found)
+        DiscoveryManager.addListener(this)
+        DiscoveryManager.start(this, broadcastSelf = false)
+        Log.i(TAG, "Started discovery, will switch if server found...")
 
         // Set up discovery method channel handlers
         methodChannel.setMethodCallHandler { call, result ->
@@ -96,28 +95,36 @@ class MainActivity : FlutterActivity(), DiscoveryManager.DiscoveryListener {
 
     /**
      * Initialize gRPC and Assistant clients with discovered server
+     * Uses synchronization to prevent race conditions with in-flight requests
      */
     private fun initializeClients(host: String, grpcPort: Int, httpPort: Int) {
         Log.i(TAG, "Initializing clients: $host:$grpcPort (gRPC), $host:$httpPort (HTTP)")
 
-        // Close existing clients if any
-        grpcClient?.close()
+        synchronized(clientLock) {
+            // Keep reference to old client for cleanup
+            val oldClient = grpcClient
 
-        // Initialize gRPC client for orchestrator
-        grpcClient = OrchestratorGrpcClient(host = host, port = grpcPort)
+            // Initialize new gRPC client for orchestrator FIRST
+            grpcClient = OrchestratorGrpcClient(host = host, port = grpcPort)
 
-        // Initialize REST client for assistant
-        assistantClient = AssistantClient(host = host, port = httpPort)
+            // Initialize REST client for assistant
+            assistantClient = AssistantClient(host = host, port = httpPort)
 
-        clientsInitialized = true
+            clientsInitialized = true
 
-        // Notify Flutter about connection
-        methodChannel.invokeMethod("onConnectionChanged", mapOf(
-            "connected" to true,
-            "host" to host,
-            "grpc_port" to grpcPort,
-            "http_port" to httpPort
-        ))
+            // Close old client AFTER new one is ready (allows in-flight to complete or fail gracefully)
+            oldClient?.closeGracefully()
+        }
+
+        // Notify Flutter about connection (outside lock to avoid blocking)
+        runOnUiThread {
+            methodChannel.invokeMethod("onConnectionChanged", mapOf(
+                "connected" to true,
+                "host" to host,
+                "grpc_port" to grpcPort,
+                "http_port" to httpPort
+            ))
+        }
     }
 
     // ========== Discovery Listener ==========

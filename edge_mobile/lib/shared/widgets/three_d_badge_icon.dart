@@ -112,7 +112,7 @@ class _ThreeDBadgeIconState extends State<ThreeDBadgeIcon> with TickerProviderSt
                     ),
                     // Accent Glow (Pulse)
                     BoxShadow(
-                      color: effectiveAccent.withValues(alpha: 0.15 + (_pulseController.value * 0.1)),
+                      color: effectiveAccent.withOpacity(0.15 + (_pulseController.value * 0.1)),
                       blurRadius: 10 + (_pulseController.value * 8),
                       spreadRadius: -2,
                     ),
@@ -145,7 +145,7 @@ class _ThreeDBadgeIconState extends State<ThreeDBadgeIcon> with TickerProviderSt
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: effectiveAccent.withValues(alpha: 0.2 + (_pulseController.value * 0.2)),
+                          color: effectiveAccent.withOpacity(0.2 + (_pulseController.value * 0.2)),
                           width: 0.5,
                         ),
                       ),

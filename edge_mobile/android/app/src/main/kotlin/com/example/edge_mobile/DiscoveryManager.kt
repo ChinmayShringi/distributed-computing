@@ -336,11 +336,13 @@ object DiscoveryManager {
                         Log.i(TAG, "Found server: ${server.deviceName} at ${server.grpcHost}:${server.grpcPort}")
                         notifyServerDiscovered(server)
 
-                        // Auto-select first discovered server if none active
-                        if (activeServer == null) {
+                        // Auto-select first discovered server if none active OR if current is manual fallback
+                        val shouldAutoSelect = activeServer == null ||
+                            activeServer?.deviceId?.startsWith("manual-") == true
+                        if (shouldAutoSelect) {
                             activeServer = server
                             notifyActiveServerChanged(server)
-                            Log.i(TAG, "Auto-selected server: ${server.deviceName}")
+                            Log.i(TAG, "Auto-selected discovered server: ${server.deviceName}")
                         }
                     }
                 }

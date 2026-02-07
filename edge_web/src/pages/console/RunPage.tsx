@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { GlassCard, GlassContainer } from '@/components/GlassCard';
 import { CapabilityChip } from '@/components/CapabilityChip';
@@ -7,7 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { mockDevices, mockChatMessages, ChatMessage } from '@/lib/mock-data';
+import { Label } from '@/components/ui/label';
+import {
+  listDevices,
+  executeRoutedCommand,
+  type Device,
+  type RoutingPolicy,
+  type RoutedCommandResponse,
+} from '@/api';
 import {
   Play,
   Terminal,
@@ -18,8 +25,22 @@ import {
   RotateCcw,
   Send,
   Loader2,
+  RefreshCw,
+  Clock,
+  Server,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+const routingPolicies: { value: RoutingPolicy; label: string; description: string }[] = [
+  { value: 'BEST_AVAILABLE', label: 'Best Available', description: 'NPU > GPU > CPU preference' },
+  { value: 'PREFER_REMOTE', label: 'Prefer Remote', description: 'Prefer non-local devices' },
+  { value: 'REQUIRE_NPU', label: 'Require NPU', description: 'Fail if no NPU device' },
+  { value: 'PREFER_LOCAL_MODEL', label: 'Prefer Local Model', description: 'Prefer device with Ollama' },
+  { value: 'REQUIRE_LOCAL_MODEL', label: 'Require Local Model', description: 'Fail if no LLM device' },
+  { value: 'FORCE_DEVICE_ID', label: 'Force Device', description: 'Target specific device' },
+];
 
 const tools = [
   {
@@ -45,39 +66,100 @@ const tools = [
   },
 ];
 
+interface CommandResult {
+  response: RoutedCommandResponse;
+  command: string;
+  args: string[];
+}
+
 export const RunPage = () => {
   const { toast } = useToast();
-  const [selectedDevice, setSelectedDevice] = useState<string>('');
-  const [command, setCommand] = useState('');
-  const [output, setOutput] = useState('');
+
+  // Devices state
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(true);
+
+  // Command form state
+  const [command, setCommand] = useState('pwd');
+  const [args, setArgs] = useState('');
+  const [policy, setPolicy] = useState<RoutingPolicy>('BEST_AVAILABLE');
+  const [forceDeviceId, setForceDeviceId] = useState<string>('');
+
+  // Execution state
   const [running, setRunning] = useState(false);
-  
-  // Chat state
-  const [messages, setMessages] = useState<ChatMessage[]>(mockChatMessages);
-  const [chatInput, setChatInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [result, setResult] = useState<CommandResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const onlineDevices = mockDevices.filter((d) => d.status === 'online');
-
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // Fetch devices
+  const fetchDevices = useCallback(async () => {
+    try {
+      setLoadingDevices(true);
+      const data = await listDevices();
+      setDevices(data);
+      // Set default force device if available
+      if (data.length > 0 && !forceDeviceId) {
+        setForceDeviceId(data[0].device_id);
+      }
+    } catch (err) {
+      console.error('Failed to fetch devices:', err);
+    } finally {
+      setLoadingDevices(false);
+    }
+  }, [forceDeviceId]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isTyping]);
+    fetchDevices();
+  }, [fetchDevices]);
 
   const handleRun = async () => {
-    if (!selectedDevice || !command) return;
-    
+    if (!command.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a command',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setRunning(true);
-    setOutput('');
-    
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    
-    setOutput(`$ ${command}\n\n[Executing on ${onlineDevices.find(d => d.id === selectedDevice)?.name}...]\n\nCommand executed successfully.\nExit code: 0`);
-    setRunning(false);
+    setResult(null);
+    setError(null);
+
+    try {
+      // Parse args: split by comma, trim whitespace
+      const argsArray = args
+        .split(',')
+        .map((a) => a.trim())
+        .filter((a) => a.length > 0);
+
+      const response = await executeRoutedCommand(
+        command,
+        argsArray,
+        policy,
+        policy === 'FORCE_DEVICE_ID' ? forceDeviceId : undefined
+      );
+
+      setResult({
+        response,
+        command,
+        args: argsArray,
+      });
+
+      toast({
+        title: 'Command Executed',
+        description: `Ran on ${response.selected_device_name} in ${response.total_time_ms}ms`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Command execution failed';
+      setError(message);
+      toast({
+        title: 'Execution Failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setRunning(false);
+    }
   };
 
   const handleToolRun = (toolName: string) => {
@@ -87,112 +169,204 @@ export const RunPage = () => {
     });
   };
 
-  const handleSendMessage = async () => {
-    if (!chatInput.trim()) return;
-    
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: chatInput,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    
-    setMessages((prev) => [...prev, userMessage]);
-    setChatInput('');
-    setIsTyping(true);
-    
-    // Simulate AI response
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    const responses = [
-      "I've analyzed your request. Based on the current device status, I recommend running a diagnostic check first.",
-      "I can help you with that. Would you like me to execute this command across all online devices or just a specific one?",
-      "That operation completed successfully. The results show normal performance metrics across your mesh network.",
-      "I've queued that job for execution. You can monitor its progress in the Jobs section.",
-    ];
-    
-    const assistantMessage: ChatMessage = {
-      id: `msg-${Date.now() + 1}`,
-      role: 'assistant',
-      content: responses[Math.floor(Math.random() * responses.length)],
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    
-    setIsTyping(false);
-    setMessages((prev) => [...prev, assistantMessage]);
+  // Format output for terminal display
+  const formatOutput = () => {
+    if (!result) return '';
+
+    const { response, command, args } = result;
+    const fullCommand = args.length > 0 ? `${command} ${args.join(' ')}` : command;
+
+    let output = `$ ${fullCommand}\n\n`;
+
+    if (response.stdout) {
+      output += response.stdout;
+    }
+
+    if (response.stderr) {
+      output += `\n\n[stderr]\n${response.stderr}`;
+    }
+
+    return output;
   };
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Run</h1>
-        <p className="text-muted-foreground mt-1">
-          Execute scripts, run tools, and interact with AI.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Run</h1>
+          <p className="text-muted-foreground mt-1">
+            Execute commands on distributed devices with routing policies.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={fetchDevices}
+          disabled={loadingDevices}
+        >
+          <RefreshCw className={`w-4 h-4 ${loadingDevices ? 'animate-spin' : ''}`} />
+        </Button>
       </div>
 
       <Tabs defaultValue="script" className="space-y-6">
         <TabsList className="bg-surface-2">
           <TabsTrigger value="script" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Terminal className="w-4 h-4 mr-2" />
-            Script
+            Routed Command
           </TabsTrigger>
           <TabsTrigger value="tools" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Wrench className="w-4 h-4 mr-2" />
             Tools
           </TabsTrigger>
-          <TabsTrigger value="ai" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Bot className="w-4 h-4 mr-2" />
-            AI Hub
-          </TabsTrigger>
         </TabsList>
 
-        {/* Script Tab */}
+        {/* Routed Command Tab */}
         <TabsContent value="script" className="space-y-4">
           <GlassContainer>
-            <div className="space-y-4">
+            <div className="space-y-6">
+              {/* Command Input */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Select value={selectedDevice} onValueChange={setSelectedDevice}>
-                  <SelectTrigger className="bg-surface-2 border-outline">
-                    <SelectValue placeholder="Select target device" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-surface-2 border-outline">
-                    {onlineDevices.map((device) => (
-                      <SelectItem key={device.id} value={device.id}>
-                        {device.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <div className="flex gap-2">
+                <div className="space-y-2">
+                  <Label htmlFor="command">Command</Label>
                   <Input
+                    id="command"
                     value={command}
                     onChange={(e) => setCommand(e.target.value)}
-                    placeholder="Enter command..."
-                    className="font-mono bg-surface-2 border-outline flex-1"
-                    onKeyDown={(e) => e.key === 'Enter' && handleRun()}
+                    placeholder="e.g., pwd, ls, echo"
+                    className="font-mono bg-surface-2 border-outline"
                   />
-                  <Button
-                    onClick={handleRun}
-                    disabled={!selectedDevice || !command || running}
-                    className="bg-safe-green hover:bg-safe-green/90 text-background"
-                  >
-                    {running ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Play className="w-4 h-4" />
-                    )}
-                  </Button>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="args">Arguments (comma-separated)</Label>
+                  <Input
+                    id="args"
+                    value={args}
+                    onChange={(e) => setArgs(e.target.value)}
+                    placeholder="e.g., -la, /path/to/dir"
+                    className="font-mono bg-surface-2 border-outline"
+                  />
                 </div>
               </div>
 
-              {output && (
+              {/* Routing Options */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Routing Policy</Label>
+                  <Select value={policy} onValueChange={(v) => setPolicy(v as RoutingPolicy)}>
+                    <SelectTrigger className="bg-surface-2 border-outline">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-surface-2 border-outline">
+                      {routingPolicies.map((p) => (
+                        <SelectItem key={p.value} value={p.value}>
+                          <div className="flex flex-col">
+                            <span>{p.label}</span>
+                            <span className="text-xs text-muted-foreground">{p.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {policy === 'FORCE_DEVICE_ID' && (
+                  <div className="space-y-2">
+                    <Label>Target Device</Label>
+                    <Select value={forceDeviceId} onValueChange={setForceDeviceId}>
+                      <SelectTrigger className="bg-surface-2 border-outline">
+                        <SelectValue placeholder="Select device" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-surface-2 border-outline">
+                        {devices.map((device) => (
+                          <SelectItem key={device.device_id} value={device.device_id}>
+                            {device.device_name} ({device.platform})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Run Button */}
+              <Button
+                onClick={handleRun}
+                disabled={!command.trim() || running}
+                className="bg-safe-green hover:bg-safe-green/90 text-background w-full md:w-auto"
+              >
+                {running ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 mr-2" />
+                )}
+                Run Command
+              </Button>
+
+              {/* Error Display */}
+              {error && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
+                  className="p-4 rounded-lg bg-danger-pink/10 border border-danger-pink/20"
                 >
-                  <TerminalPanel output={output} exitCode={0} />
+                  <div className="flex items-center gap-2 text-danger-pink">
+                    <XCircle className="w-5 h-5" />
+                    <span>{error}</span>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Result Display */}
+              {result && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-4"
+                >
+                  {/* Execution Metadata */}
+                  <div className="flex flex-wrap gap-4 p-4 rounded-lg bg-surface-2 border border-outline">
+                    <div className="flex items-center gap-2">
+                      <Server className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Device:</span>{' '}
+                        <span className="font-medium">{result.response.selected_device_name}</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Time:</span>{' '}
+                        <span className="font-mono text-warning-amber">{result.response.total_time_ms}ms</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {result.response.exit_code === 0 ? (
+                        <CheckCircle className="w-4 h-4 text-safe-green" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-danger-pink" />
+                      )}
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Exit:</span>{' '}
+                        <span className={`font-mono ${result.response.exit_code === 0 ? 'text-safe-green' : 'text-danger-pink'}`}>
+                          {result.response.exit_code}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Context:</span>{' '}
+                        <span className="font-medium">
+                          {result.response.executed_locally ? 'Local' : 'Remote'}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Terminal Output */}
+                  <TerminalPanel
+                    output={formatOutput()}
+                    exitCode={result.response.exit_code}
+                  />
                 </motion.div>
               )}
             </div>
@@ -240,92 +414,6 @@ export const RunPage = () => {
               </motion.div>
             ))}
           </div>
-        </TabsContent>
-
-        {/* AI Hub Tab */}
-        <TabsContent value="ai">
-          <GlassContainer className="h-[600px] flex flex-col p-0">
-            {/* Chat Header */}
-            <div className="p-4 border-b border-outline flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/20">
-                <Bot className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="font-semibold">AI Assistant</h3>
-                <p className="text-xs text-muted-foreground">
-                  Ask anything about your mesh network
-                </p>
-              </div>
-            </div>
-
-            {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {messages.map((message) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                      message.role === 'user'
-                        ? 'bg-primary text-primary-foreground rounded-br-md'
-                        : 'bg-surface-2 rounded-bl-md'
-                    }`}
-                  >
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                    <p
-                      className={`text-xs mt-1 ${
-                        message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                      }`}
-                    >
-                      {message.timestamp}
-                    </p>
-                  </div>
-                </motion.div>
-              ))}
-
-              {/* Typing Indicator */}
-              {isTyping && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex justify-start"
-                >
-                  <div className="bg-surface-2 rounded-2xl rounded-bl-md px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <div className="typing-dot" />
-                      <div className="typing-dot" />
-                      <div className="typing-dot" />
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Chat Input */}
-            <div className="p-4 border-t border-outline">
-              <div className="flex gap-2">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask the AI assistant..."
-                  className="bg-surface-2 border-outline"
-                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!chatInput.trim() || isTyping}
-                  className="bg-primary hover:bg-primary/90"
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </GlassContainer>
         </TabsContent>
       </Tabs>
     </div>

@@ -15,15 +15,25 @@ import {
   User,
   Menu,
   X,
+  Activity,
+  Bot,
+  Cpu,
+  Eye,
+  Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '/console/dashboard' },
   { icon: Monitor, label: 'Devices', href: '/console/devices' },
+  { icon: Activity, label: 'Activity', href: '/console/activity' },
   { icon: Play, label: 'Run', href: '/console/run' },
   { icon: MessageSquare, label: 'Chat', href: '/console/chat' },
+  { icon: Bot, label: 'Agent', href: '/console/agent' },
   { icon: Briefcase, label: 'Jobs', href: '/console/jobs' },
+  { icon: Eye, label: 'Live View', href: '/console/live' },
+  { icon: Download, label: 'Downloads', href: '/console/downloads' },
+  { icon: Cpu, label: 'QAI Hub', href: '/console/qaihub' },
   { icon: Settings, label: 'Settings', href: '/console/settings' },
 ];
 

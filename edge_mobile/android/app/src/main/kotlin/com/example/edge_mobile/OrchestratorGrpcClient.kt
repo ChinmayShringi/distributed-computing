@@ -15,27 +15,38 @@ class OrchestratorGrpcClient(
     private val host: String = "10.0.2.2",
     private val port: Int = 50051
 ) {
+    @Volatile
     private var channel: ManagedChannel? = null
+    @Volatile
     private var stub: OrchestratorServiceGrpc.OrchestratorServiceBlockingStub? = null
     private var sessionId: String? = null
+
+    // Lock for thread-safe initialization
+    private val initLock = Object()
 
     companion object {
         private const val DEFAULT_SECURITY_KEY = "dev"
         private const val DEFAULT_DEVICE_NAME = "android-device"
         private const val CONNECTION_TIMEOUT_SECONDS = 10L
+        private const val GRACEFUL_SHUTDOWN_SECONDS = 2L
     }
 
     /**
-     * Initialize the gRPC channel and stub
+     * Initialize the gRPC channel and stub (thread-safe)
      */
     fun init() {
+        // Double-checked locking for thread safety
         if (channel == null) {
-            channel = ManagedChannelBuilder
-                .forAddress(host, port)
-                .usePlaintext()
-                .build()
+            synchronized(initLock) {
+                if (channel == null) {
+                    channel = ManagedChannelBuilder
+                        .forAddress(host, port)
+                        .usePlaintext()
+                        .build()
 
-            stub = OrchestratorServiceGrpc.newBlockingStub(channel)
+                    stub = OrchestratorServiceGrpc.newBlockingStub(channel)
+                }
+            }
         }
     }
 
@@ -106,13 +117,26 @@ class OrchestratorGrpcClient(
 
         try {
             val request = Empty.newBuilder().build()
-            val response = stub!!.healthCheck(request)
+            // Use shorter timeout for health check for faster feedback
+            val response = stub!!
+                .withDeadlineAfter(5, TimeUnit.SECONDS)
+                .healthCheck(request)
 
             mapOf(
                 "device_id" to response.deviceId,
                 "server_time" to response.serverTime,
                 "message" to response.message
             )
+        } catch (e: io.grpc.StatusRuntimeException) {
+            val status = e.status
+            when (status.code) {
+                io.grpc.Status.Code.UNAVAILABLE ->
+                    throw Exception("Server unreachable at $host:$port. Is the orchestrator running?")
+                io.grpc.Status.Code.DEADLINE_EXCEEDED ->
+                    throw Exception("Connection timeout. Server at $host:$port not responding.")
+                else ->
+                    throw Exception("Health check failed: ${status.description ?: e.message}")
+            }
         } catch (e: Exception) {
             throw Exception("Failed to health check: ${e.message}", e)
         }
@@ -300,17 +324,44 @@ class OrchestratorGrpcClient(
     }
 
     /**
-     * Close the gRPC channel and clean up resources
+     * Close the gRPC channel and clean up resources (blocking)
      */
     fun close() {
-        channel?.shutdown()
-        try {
-            channel?.awaitTermination(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        } catch (e: InterruptedException) {
-            channel?.shutdownNow()
+        synchronized(initLock) {
+            channel?.shutdown()
+            try {
+                channel?.awaitTermination(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            } catch (e: InterruptedException) {
+                channel?.shutdownNow()
+            }
+            channel = null
+            stub = null
+            sessionId = null
         }
+    }
+
+    /**
+     * Gracefully close the gRPC channel in background
+     * Allows in-flight requests to complete or fail gracefully
+     */
+    fun closeGracefully() {
+        val channelToClose = channel
         channel = null
         stub = null
         sessionId = null
+
+        // Close in background thread to not block current operations
+        if (channelToClose != null) {
+            Thread {
+                try {
+                    channelToClose.shutdown()
+                    if (!channelToClose.awaitTermination(GRACEFUL_SHUTDOWN_SECONDS, TimeUnit.SECONDS)) {
+                        channelToClose.shutdownNow()
+                    }
+                } catch (e: Exception) {
+                    channelToClose.shutdownNow()
+                }
+            }.start()
+        }
     }
 }
