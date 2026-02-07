@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EdgeCLI Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.5;
+            padding: 16px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            color: black;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        button {
+            background: #007AFF;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #666;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+            margin-bottom: 8px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: #333;
+        }
+
+        .form-row {
+            margin-bottom: 12px;
+        }
+
+        .device-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .device-card {
+            background: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .device-name {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .device-info {
+            font-size: 0.85rem;
+            color: #555;
+        }
+
+        .device-caps {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .cap-badge {
+            background: #e0e0e0;
+            color: #333;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        .cap-badge.gpu { background: #4CAF50; color: white; }
+        .cap-badge.npu { background: #9C27B0; color: white; }
+
+        pre {
+            background: #f0f0f0;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 0.85rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .output-section {
+            margin-top: 12px;
+        }
+
+        .output-meta {
+            font-size: 0.8rem;
+            color: #555;
+            margin-bottom: 8px;
+        }
+
+        .chat-log {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 12px;
+            background: #fafafa;
+        }
+
+        .chat-message {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .chat-message:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .chat-user {
+            font-weight: 600;
+            color: #007AFF;
+        }
+
+        .chat-assistant {
+            font-weight: 600;
+            color: #34C759;
+        }
+
+        .chat-content {
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-row input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .error {
+            color: #FF3B30;
+            font-size: 0.9rem;
+            margin-top: 8px;
+        }
+
+        .loading {
+            opacity: 0.6;
+        }
+
+        /* Stream section styles */
+        #stream-img {
+            background: #1a1a1a;
+            min-height: 200px;
+            max-width: 100%;
+            border: 1px solid #333;
+            display: block;
+        }
+
+        .stream-info {
+            padding: 8px;
+            background: #f5f5f5;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            border-radius: 4px;
+        }
+
+        .stream-status {
+            font-size: 0.9rem;
+            color: #007AFF;
+            margin: 8px 0;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .inline-inputs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .inline-inputs .form-row {
+            flex: 1;
+        }
+
+        .inline-inputs input {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>EdgeCLI Demo</h1>
+
+    <!-- Devices Section -->
+    <div class="card">
+        <h2>
+            Devices
+            <button onclick="refreshDevices()" id="refresh-btn">Refresh</button>
+        </h2>
+        <div id="device-list" class="device-list">
+            <div class="device-info">Click Refresh to load devices</div>
+        </div>
+    </div>
+
+    <!-- Routed Command Section -->
+    <div class="card">
+        <h2>Routed Command</h2>
+        <div class="form-row">
+            <label for="cmd">Command</label>
+            <input type="text" id="cmd" placeholder="pwd, ls, or cat" value="pwd">
+        </div>
+        <div class="form-row">
+            <label for="args">Arguments (comma-separated)</label>
+            <input type="text" id="args" placeholder="e.g., -la or ./shared/test.txt">
+        </div>
+        <div class="form-row">
+            <label for="policy">Routing Policy</label>
+            <select id="policy" onchange="toggleForceDevice()">
+                <option value="BEST_AVAILABLE">Best Available (NPU > GPU > CPU)</option>
+                <option value="PREFER_REMOTE">Prefer Remote</option>
+                <option value="REQUIRE_NPU">Require NPU</option>
+                <option value="FORCE_DEVICE_ID">Force Device ID</option>
+            </select>
+        </div>
+        <div class="form-row hidden" id="force-device-row">
+            <label for="force-device-id">Select Device</label>
+            <select id="force-device-id">
+                <option value="">Select a device...</option>
+            </select>
+        </div>
+        <button onclick="runCommand()" id="run-btn">Run Command</button>
+
+        <div class="output-section hidden" id="cmd-output">
+            <div class="output-meta" id="cmd-meta"></div>
+            <pre id="cmd-result"></pre>
+        </div>
+        <div class="error hidden" id="cmd-error"></div>
+    </div>
+
+    <!-- Distributed Job Section -->
+    <div class="card">
+        <h2>Distributed Job</h2>
+        <div class="form-row">
+            <label for="job-text">Job Description</label>
+            <input type="text" id="job-text" placeholder="collect status" value="collect status">
+        </div>
+        <div class="form-row">
+            <label for="max-workers">Max Workers (0 = all devices)</label>
+            <input type="number" id="max-workers" value="0" min="0" style="width: 120px;">
+        </div>
+        <div class="btn-row">
+            <button onclick="submitJob()" id="submit-job-btn">Submit Job</button>
+            <button onclick="previewPlan()" id="preview-plan-btn" class="secondary">Preview Plan</button>
+        </div>
+
+        <div class="output-section hidden" id="plan-preview">
+            <div class="output-meta" id="plan-meta"></div>
+            <pre id="plan-output"></pre>
+        </div>
+
+        <div class="output-section hidden" id="job-status">
+            <div class="output-meta">
+                <strong>Job ID:</strong> <span id="job-id"></span> |
+                <strong>State:</strong> <span id="job-state"></span>
+                <button onclick="refreshJobStatus()" id="refresh-job-btn" class="secondary" style="margin-left: 10px; padding: 4px 8px; font-size: 0.8rem;">Refresh</button>
+            </div>
+            <pre id="job-output"></pre>
+        </div>
+        <div class="error hidden" id="job-error"></div>
+    </div>
+
+    <!-- Remote Stream Section -->
+    <div class="card">
+        <h2>Remote Stream</h2>
+        <div class="form-row">
+            <label for="stream-policy">Routing Policy</label>
+            <select id="stream-policy" onchange="toggleStreamForceDevice()">
+                <option value="BEST_AVAILABLE">Best Available</option>
+                <option value="PREFER_REMOTE">Prefer Remote</option>
+                <option value="FORCE_DEVICE_ID">Force Device</option>
+            </select>
+        </div>
+        <div class="form-row hidden" id="stream-force-device-row">
+            <label for="stream-force-device-id">Device</label>
+            <select id="stream-force-device-id"></select>
+        </div>
+        <div class="inline-inputs">
+            <div class="form-row">
+                <label for="stream-fps">FPS</label>
+                <input type="number" id="stream-fps" value="8" min="1" max="30">
+            </div>
+            <div class="form-row">
+                <label for="stream-quality">Quality</label>
+                <input type="number" id="stream-quality" value="60" min="10" max="100">
+            </div>
+            <div class="form-row">
+                <label for="stream-monitor">Monitor</label>
+                <input type="number" id="stream-monitor" value="0" min="0" max="3">
+            </div>
+        </div>
+        <div class="btn-row">
+            <button id="stream-start-btn" onclick="startStream()">Start Stream</button>
+            <button id="stream-stop-btn" onclick="stopStream()" disabled class="secondary">Stop Stream</button>
+        </div>
+
+        <div class="stream-status" id="stream-status"></div>
+
+        <div class="output-section hidden" id="stream-container">
+            <div class="stream-info" id="stream-info"></div>
+            <img id="stream-img" alt="Remote Screen">
+        </div>
+
+        <div class="error hidden" id="stream-error"></div>
+    </div>
+
+    <!-- File Download Section -->
+    <div class="card">
+        <h2>File Download</h2>
+        <div class="form-row">
+            <label for="download-device">Device</label>
+            <select id="download-device">
+                <option value="">Select a device...</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="download-path">File path (relative to shared/)</label>
+            <input type="text" id="download-path" placeholder="test.txt" value="test.txt">
+        </div>
+        <button onclick="requestDownload()" id="download-btn">Download</button>
+        <div class="output-section hidden" id="download-output">
+            <div class="output-meta" id="download-meta"></div>
+        </div>
+        <div class="error hidden" id="download-error"></div>
+    </div>
+
+    <!-- Assistant Section -->
+    <div class="card">
+        <h2>Assistant</h2>
+        <div class="chat-log" id="chat-log">
+            <div class="chat-message">
+                <span class="chat-assistant">Assistant:</span>
+                <div class="chat-content">Hello! I can help you run commands on your devices.
+
+Try:
+- "list devices" - show all registered devices
+- "pwd" - print working directory
+- "ls" - list files
+- "cat ./shared/&lt;file&gt;" - show file contents</div>
+            </div>
+        </div>
+        <div class="input-row">
+            <input type="text" id="assistant-input" placeholder="Type a command..." onkeypress="handleEnter(event)">
+            <button onclick="sendAssistant()" id="send-btn">Send</button>
+        </div>
+    </div>
+
+    <!-- Qualcomm Model Pipeline Section -->
+    <div class="card">
+        <h2>Qualcomm Model Pipeline (qai-hub)</h2>
+        <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">
+            Note: Compiled models target Qualcomm Snapdragon devices and cannot run locally on Mac.
+        </p>
+        <div id="qaihub-status" style="padding: 8px; background: #f5f5f5; border-radius: 4px; margin-bottom: 12px;">
+            <span style="color: #888;">Click "Run Doctor" to check qai-hub status</span>
+        </div>
+        <button onclick="runQaihubDoctor()" id="qaihub-doctor-btn">Run Doctor</button>
+
+        <div class="form-row" style="margin-top: 16px;">
+            <label for="qaihub-onnx">ONNX Model Path (absolute)</label>
+            <input type="text" id="qaihub-onnx" placeholder="/path/to/model.onnx">
+        </div>
+        <div class="form-row">
+            <label for="qaihub-target">Target Device</label>
+            <input type="text" id="qaihub-target" value="Samsung Galaxy S24">
+        </div>
+        <div class="form-row">
+            <label for="qaihub-runtime">Runtime (optional)</label>
+            <input type="text" id="qaihub-runtime" placeholder="precompiled_qnn_onnx">
+        </div>
+        <button onclick="runQaihubCompile()" id="qaihub-compile-btn">Compile Model</button>
+
+        <div class="output-section hidden" id="qaihub-output">
+            <div class="output-meta" id="qaihub-meta"></div>
+            <pre id="qaihub-result"></pre>
+        </div>
+        <div class="error hidden" id="qaihub-error"></div>
+    </div>
+
+    <!-- Local Chat Runtime Section -->
+    <div class="card">
+        <h2>Local Chat Runtime</h2>
+        <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">
+            Chat powered by local LLM (Ollama/LM Studio). Independent of Qualcomm pipeline.
+        </p>
+        <div id="chat-health-status" style="padding: 8px; background: #f5f5f5; border-radius: 4px; margin-bottom: 12px;">
+            <span style="color: #888;">Checking chat runtime...</span>
+        </div>
+        <button onclick="refreshChatHealth()" id="chat-health-btn" class="secondary" style="margin-bottom: 12px;">Refresh Status</button>
+
+        <div class="chat-log" id="slm-chat-log" style="min-height: 150px;">
+            <div class="chat-message">
+                <span class="chat-assistant">Chat:</span>
+                <div class="chat-content">Hello! I'm running on your local machine via Ollama or LM Studio.</div>
+            </div>
+        </div>
+        <div class="input-row">
+            <input type="text" id="slm-chat-input" placeholder="Type your message..." onkeypress="handleSlmChatEnter(event)">
+            <button onclick="sendSlmChat()" id="slm-send-btn">Send</button>
+        </div>
+        <div class="error hidden" id="slm-chat-error"></div>
+    </div>
+
+    <script>
+        // Global storage for available devices
+        let availableDevices = [];
+
+        // Refresh devices list
+        async function refreshDevices() {
+            const btn = document.getElementById('refresh-btn');
+            const list = document.getElementById('device-list');
+
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            list.classList.add('loading');
+
+            try {
+                const response = await fetch('/api/devices');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch devices');
+                }
+
+                // Store devices globally and populate dropdowns
+                availableDevices = data;
+                populateDeviceDropdown();
+                populateStreamDeviceDropdown();
+                populateDownloadDeviceDropdown();
+
+                if (data.length === 0) {
+                    list.innerHTML = '<div class="device-info">No devices registered</div>';
+                } else {
+                    list.innerHTML = data.map(device => `
+                        <div class="device-card">
+                            <div class="device-name">${escapeHtml(device.device_name)}</div>
+                            <div class="device-info">
+                                ${escapeHtml(device.platform)}/${escapeHtml(device.arch)} - ${escapeHtml(device.grpc_addr)}
+                            </div>
+                            <div class="device-info" style="font-size: 0.75rem; color: #999;">
+                                ID: ${escapeHtml(device.device_id.substring(0, 12))}...
+                            </div>
+                            <div class="device-caps">
+                                ${device.capabilities.map(cap =>
+                                    `<span class="cap-badge ${cap}">${cap}</span>`
+                                ).join('')}
+                                ${device.can_screen_capture ? '<span class="cap-badge" style="background:#2196F3;color:white;">screen</span>' : ''}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                list.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Refresh';
+                list.classList.remove('loading');
+            }
+        }
+
+        // Populate device dropdown for Force Device ID
+        function populateDeviceDropdown() {
+            const dropdown = document.getElementById('force-device-id');
+            dropdown.innerHTML = '<option value="">Select a device...</option>';
+            availableDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device_id;
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})`;
+                dropdown.appendChild(option);
+            });
+        }
+
+        // Toggle force device ID field
+        function toggleForceDevice() {
+            const policy = document.getElementById('policy').value;
+            const row = document.getElementById('force-device-row');
+            row.classList.toggle('hidden', policy !== 'FORCE_DEVICE_ID');
+        }
+
+        // Run routed command
+        async function runCommand() {
+            const btn = document.getElementById('run-btn');
+            const output = document.getElementById('cmd-output');
+            const meta = document.getElementById('cmd-meta');
+            const result = document.getElementById('cmd-result');
+            const error = document.getElementById('cmd-error');
+
+            const cmd = document.getElementById('cmd').value.trim();
+            const argsStr = document.getElementById('args').value.trim();
+            const policy = document.getElementById('policy').value;
+            const forceDeviceId = document.getElementById('force-device-id').value.trim();
+
+            if (!cmd) {
+                error.textContent = 'Command is required';
+                error.classList.remove('hidden');
+                return;
+            }
+
+            const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
+
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            output.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/routed-cmd', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cmd: cmd,
+                        args: args,
+                        policy: policy,
+                        force_device_id: forceDeviceId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Command failed');
+                }
+
+                meta.innerHTML = `
+                    <strong>Device:</strong> ${escapeHtml(data.selected_device_name)}
+                    (${data.executed_locally ? 'local' : 'remote'}) |
+                    <strong>Time:</strong> ${data.total_time_ms.toFixed(2)} ms |
+                    <strong>Exit:</strong> ${data.exit_code}
+                `;
+
+                let resultText = '';
+                if (data.stdout) resultText += data.stdout;
+                if (data.stderr) resultText += '\n[stderr]\n' + data.stderr;
+                if (!resultText) resultText = '(no output)';
+
+                result.textContent = resultText;
+                output.classList.remove('hidden');
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run Command';
+            }
+        }
+
+        // Send assistant message
+        async function sendAssistant() {
+            const btn = document.getElementById('send-btn');
+            const input = document.getElementById('assistant-input');
+            const log = document.getElementById('chat-log');
+
+            const text = input.value.trim();
+            if (!text) return;
+
+            // Add user message
+            log.innerHTML += `
+                <div class="chat-message">
+                    <span class="chat-user">You:</span>
+                    <div class="chat-content">${escapeHtml(text)}</div>
+                </div>
+            `;
+
+            input.value = '';
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                const response = await fetch('/api/assistant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Assistant error');
+                }
+
+                let metaHtml = '';
+                if (data.mode) {
+                    metaHtml += `<div style="font-size:0.8rem;color:#888;margin-top:4px;">Mode: ${escapeHtml(data.mode)}`;
+                    if (data.job_id) metaHtml += ` | Job: ${escapeHtml(data.job_id.substring(0, 12))}...`;
+                    metaHtml += `</div>`;
+                }
+
+                let planHtml = '';
+                if (data.plan) {
+                    planHtml = `<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:0.85rem;color:#555;">Plan JSON</summary><pre style="font-size:0.8rem;max-height:200px;overflow:auto;margin-top:4px;">${escapeHtml(JSON.stringify(data.plan, null, 2))}</pre></details>`;
+                }
+
+                log.innerHTML += `
+                    <div class="chat-message">
+                        <span class="chat-assistant">Assistant:</span>
+                        <div class="chat-content">${escapeHtml(data.reply)}</div>
+                        ${metaHtml}
+                        ${planHtml}
+                    </div>
+                `;
+
+                // Auto-populate job polling if we got a job_id
+                if (data.job_id) {
+                    currentJobId = data.job_id;
+                    document.getElementById('job-id').textContent = data.job_id.substring(0, 12) + '...';
+                    document.getElementById('job-state').textContent = 'SUBMITTED';
+                    document.getElementById('job-output').textContent = 'Submitted via assistant';
+                    document.getElementById('job-status').classList.remove('hidden');
+                    pollJobStatus();
+                }
+            } catch (err) {
+                log.innerHTML += `
+                    <div class="chat-message">
+                        <span class="chat-assistant">Assistant:</span>
+                        <div class="chat-content" style="color: #FF3B30;">Error: ${escapeHtml(err.message)}</div>
+                    </div>
+                `;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send';
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+
+        // Handle Enter key in assistant input
+        function handleEnter(event) {
+            if (event.key === 'Enter') {
+                sendAssistant();
+            }
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Current job ID for polling
+        let currentJobId = null;
+
+        // Submit a distributed job
+        async function submitJob() {
+            const btn = document.getElementById('submit-job-btn');
+            const status = document.getElementById('job-status');
+            const jobIdSpan = document.getElementById('job-id');
+            const jobStateSpan = document.getElementById('job-state');
+            const output = document.getElementById('job-output');
+            const error = document.getElementById('job-error');
+
+            const text = document.getElementById('job-text').value.trim() || 'collect status';
+            const maxWorkers = parseInt(document.getElementById('max-workers').value) || 0;
+
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/submit-job', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        max_workers: maxWorkers
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Job submission failed');
+                }
+
+                currentJobId = data.job_id;
+                jobIdSpan.textContent = data.job_id.substring(0, 12) + '...';
+                jobStateSpan.textContent = 'SUBMITTED';
+                output.textContent = data.summary;
+                status.classList.remove('hidden');
+
+                // Start polling for status
+                pollJobStatus();
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Submit Job';
+            }
+        }
+
+        // Poll job status until done
+        async function pollJobStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/job?id=${currentJobId}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to get job status');
+                }
+
+                const jobStateSpan = document.getElementById('job-state');
+                const output = document.getElementById('job-output');
+
+                jobStateSpan.textContent = data.state;
+
+                if (data.state === 'DONE' || data.state === 'FAILED') {
+                    output.textContent = data.final_result || '(no result)';
+                } else if (data.state === 'RUNNING') {
+                    // Show task progress
+                    let progressText = `Tasks: ${data.tasks.length}\n`;
+                    data.tasks.forEach(t => {
+                        const taskId = t.task_id.substring(0, 8);
+                        progressText += `  - ${t.assigned_device_name} (${taskId}): ${t.state}\n`;
+                    });
+                    output.textContent = progressText;
+
+                    // Continue polling
+                    setTimeout(pollJobStatus, 500);
+                } else {
+                    // QUEUED - continue polling
+                    setTimeout(pollJobStatus, 500);
+                }
+            } catch (err) {
+                document.getElementById('job-error').textContent = err.message;
+                document.getElementById('job-error').classList.remove('hidden');
+            }
+        }
+
+        // Manual refresh job status
+        function refreshJobStatus() {
+            if (currentJobId) {
+                pollJobStatus();
+            }
+        }
+
+        // Preview execution plan without submitting
+        async function previewPlan() {
+            const btn = document.getElementById('preview-plan-btn');
+            const preview = document.getElementById('plan-preview');
+            const meta = document.getElementById('plan-meta');
+            const output = document.getElementById('plan-output');
+            const error = document.getElementById('job-error');
+
+            const text = document.getElementById('job-text').value.trim() || 'collect status';
+            const maxWorkers = parseInt(document.getElementById('max-workers').value) || 0;
+
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        max_workers: maxWorkers
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Plan preview failed');
+                }
+
+                meta.innerHTML = `
+                    <strong>AI Used:</strong> ${data.used_ai ? 'Yes' : 'No'} |
+                    <strong>Rationale:</strong> ${escapeHtml(data.rationale)}
+                    ${data.notes ? '<br><strong>Notes:</strong> ' + escapeHtml(data.notes) : ''}
+                `;
+
+                output.textContent = JSON.stringify(data.plan, null, 2);
+                preview.classList.remove('hidden');
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Preview Plan';
+            }
+        }
+
+        // ===== Remote Stream (WebRTC) =====
+        let streamPC = null;
+        let streamInfo = null;
+
+        function toggleStreamForceDevice() {
+            const policy = document.getElementById('stream-policy').value;
+            const row = document.getElementById('stream-force-device-row');
+            row.classList.toggle('hidden', policy !== 'FORCE_DEVICE_ID');
+        }
+
+        function populateStreamDeviceDropdown() {
+            const dropdown = document.getElementById('stream-force-device-id');
+            dropdown.innerHTML = '<option value="">Select a device...</option>';
+            availableDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device_id;
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})`;
+                dropdown.appendChild(option);
+            });
+        }
+
+        async function startStream() {
+            const startBtn = document.getElementById('stream-start-btn');
+            const stopBtn = document.getElementById('stream-stop-btn');
+            const status = document.getElementById('stream-status');
+            const error = document.getElementById('stream-error');
+            const container = document.getElementById('stream-container');
+            const info = document.getElementById('stream-info');
+            const img = document.getElementById('stream-img');
+
+            const policy = document.getElementById('stream-policy').value;
+            const forceDeviceId = document.getElementById('stream-force-device-id').value;
+            const fps = parseInt(document.getElementById('stream-fps').value) || 8;
+            const quality = parseInt(document.getElementById('stream-quality').value) || 60;
+            const monitorIndex = parseInt(document.getElementById('stream-monitor').value) || 0;
+
+            startBtn.disabled = true;
+            startBtn.textContent = 'Starting...';
+            error.classList.add('hidden');
+            status.textContent = 'Requesting stream...';
+
+            try {
+                // Step 1: Request stream from server
+                const startResp = await fetch('/api/stream/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        policy: policy,
+                        force_device_id: forceDeviceId,
+                        fps: fps,
+                        quality: quality,
+                        monitor_index: monitorIndex
+                    })
+                });
+
+                const startData = await startResp.json();
+                if (!startResp.ok) {
+                    throw new Error(startData.error || 'Failed to start stream');
+                }
+
+                streamInfo = startData;
+                status.textContent = 'Creating WebRTC connection...';
+
+                // Step 2: Create RTCPeerConnection
+                streamPC = new RTCPeerConnection({ iceServers: [] });
+
+                // Debug: log connection state changes
+                streamPC.oniceconnectionstatechange = () => {
+                    const state = streamPC.iceConnectionState;
+                    console.log('[WebRTC] ICE connection state:', state);
+                    status.textContent = `ICE: ${state}`;
+                    if (state === 'failed') {
+                        error.textContent = 'ICE connection failed — UDP may be blocked between browser and device';
+                        error.classList.remove('hidden');
+                    }
+                };
+                streamPC.onconnectionstatechange = () => {
+                    console.log('[WebRTC] Connection state:', streamPC.connectionState);
+                };
+
+                // Handle incoming data channel
+                streamPC.ondatachannel = (event) => {
+                    const dc = event.channel;
+                    dc.binaryType = 'arraybuffer';
+                    console.log('[WebRTC] DataChannel received:', dc.label, 'state:', dc.readyState);
+
+                    dc.onopen = () => {
+                        console.log('[WebRTC] DataChannel opened');
+                        status.textContent = 'Streaming...';
+                    };
+
+                    let prevUrl = null;
+                    dc.onmessage = (msg) => {
+                        // Revoke previous URL to prevent memory leak
+                        if (prevUrl) {
+                            URL.revokeObjectURL(prevUrl);
+                        }
+                        const blob = new Blob([msg.data], { type: 'image/jpeg' });
+                        const url = URL.createObjectURL(blob);
+                        img.src = url;
+                        prevUrl = url;
+                    };
+
+                    dc.onclose = () => {
+                        status.textContent = 'Stream closed';
+                    };
+                };
+
+                // Step 3: Set remote description (offer)
+                await streamPC.setRemoteDescription({
+                    type: 'offer',
+                    sdp: startData.offer_sdp
+                });
+
+                // Step 4: Create answer
+                const answer = await streamPC.createAnswer();
+                await streamPC.setLocalDescription(answer);
+
+                // Step 5: Wait for ICE gathering complete (non-trickle)
+                status.textContent = 'Gathering ICE candidates...';
+                await new Promise((resolve, reject) => {
+                    if (streamPC.iceGatheringState === 'complete') {
+                        resolve();
+                        return;
+                    }
+                    const timeout = setTimeout(() => {
+                        reject(new Error('ICE gathering timeout'));
+                    }, 5000);
+                    streamPC.addEventListener('icegatheringstatechange', () => {
+                        if (streamPC.iceGatheringState === 'complete') {
+                            clearTimeout(timeout);
+                            resolve();
+                        }
+                    });
+                });
+
+                // Step 6: Send answer to server
+                status.textContent = 'Sending answer...';
+                const answerResp = await fetch('/api/stream/answer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_device_addr: startData.selected_device_addr,
+                        stream_id: startData.stream_id,
+                        answer_sdp: streamPC.localDescription.sdp
+                    })
+                });
+
+                const answerData = await answerResp.json();
+                if (!answerResp.ok) {
+                    throw new Error(answerData.error || 'Failed to complete stream');
+                }
+
+                // Success
+                status.textContent = 'Streaming...';
+                info.innerHTML = `<strong>Device:</strong> ${escapeHtml(startData.selected_device_name)} | <strong>Stream ID:</strong> ${startData.stream_id.substring(0, 8)}...`;
+                container.classList.remove('hidden');
+                stopBtn.disabled = false;
+                startBtn.textContent = 'Start Stream';
+
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+                status.textContent = '';
+                startBtn.disabled = false;
+                startBtn.textContent = 'Start Stream';
+
+                if (streamPC) {
+                    streamPC.close();
+                    streamPC = null;
+                }
+                streamInfo = null;
+            }
+        }
+
+        async function stopStream() {
+            const startBtn = document.getElementById('stream-start-btn');
+            const stopBtn = document.getElementById('stream-stop-btn');
+            const status = document.getElementById('stream-status');
+            const container = document.getElementById('stream-container');
+            const img = document.getElementById('stream-img');
+
+            if (!streamInfo) {
+                return;
+            }
+
+            stopBtn.disabled = true;
+            stopBtn.textContent = 'Stopping...';
+
+            try {
+                await fetch('/api/stream/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        selected_device_addr: streamInfo.selected_device_addr,
+                        stream_id: streamInfo.stream_id
+                    })
+                });
+            } catch (err) {
+                console.error('Stop stream error:', err);
+            }
+
+            // Clean up
+            if (streamPC) {
+                streamPC.close();
+                streamPC = null;
+            }
+            streamInfo = null;
+
+            img.src = '';
+            container.classList.add('hidden');
+            status.textContent = 'Stream stopped';
+            stopBtn.textContent = 'Stop Stream';
+            startBtn.disabled = false;
+        }
+
+        // Populate download device dropdown
+        function populateDownloadDeviceDropdown() {
+            const dropdown = document.getElementById('download-device');
+            dropdown.innerHTML = '<option value="">Select a device...</option>';
+            availableDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device_id;
+                const httpLabel = device.http_addr ? '' : ' [no HTTP]';
+                option.textContent = `${device.device_name} (${device.platform}/${device.arch})${httpLabel}`;
+                dropdown.appendChild(option);
+            });
+        }
+
+        // Request file download
+        async function requestDownload() {
+            const btn = document.getElementById('download-btn');
+            const output = document.getElementById('download-output');
+            const meta = document.getElementById('download-meta');
+            const error = document.getElementById('download-error');
+
+            const deviceId = document.getElementById('download-device').value;
+            const path = document.getElementById('download-path').value.trim();
+
+            if (!deviceId) {
+                error.textContent = 'Please select a device';
+                error.classList.remove('hidden');
+                return;
+            }
+            if (!path) {
+                error.textContent = 'File path is required';
+                error.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Requesting...';
+            output.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/request-download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId, path: path })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Download request failed');
+                }
+
+                const sizeKB = (data.size_bytes / 1024).toFixed(1);
+                const expiresIn = Math.max(0, Math.round((data.expires_unix_ms - Date.now()) / 1000));
+                meta.innerHTML = `<strong>File:</strong> ${escapeHtml(data.filename)} | <strong>Size:</strong> ${sizeKB} KB | <strong>Expires in:</strong> ${expiresIn}s`;
+                output.classList.remove('hidden');
+
+                // Trigger browser download via direct navigation
+                window.location = data.download_url;
+
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Download';
+            }
+        }
+
+        // ===== QAI Hub Functions =====
+
+        // Run qai-hub doctor
+        async function runQaihubDoctor() {
+            const btn = document.getElementById('qaihub-doctor-btn');
+            const status = document.getElementById('qaihub-status');
+
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+
+            try {
+                const response = await fetch('/api/qaihub/doctor');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Doctor check failed');
+                }
+
+                let statusHtml = '';
+                if (data.qai_hub_found) {
+                    statusHtml += '<span style="color: #34C759;">&#10004; qai-hub found</span>';
+                    if (data.qai_hub_version) {
+                        statusHtml += ` <span style="color: #888;">(${escapeHtml(data.qai_hub_version)})</span>`;
+                    }
+                } else {
+                    statusHtml += '<span style="color: #FF3B30;">&#10008; qai-hub not found</span>';
+                }
+
+                statusHtml += '<br>';
+
+                if (data.token_env_present) {
+                    statusHtml += '<span style="color: #34C759;">&#10004; API token configured</span>';
+                } else {
+                    statusHtml += '<span style="color: #FF9500;">&#9888; API token not set</span>';
+                }
+
+                if (data.notes && data.notes.length > 0) {
+                    statusHtml += '<details style="margin-top: 8px;"><summary style="cursor: pointer; font-size: 0.85rem;">Details</summary><ul style="margin: 4px 0 0 16px; font-size: 0.8rem; color: #555;">';
+                    data.notes.forEach(note => {
+                        statusHtml += `<li>${escapeHtml(note)}</li>`;
+                    });
+                    statusHtml += '</ul></details>';
+                }
+
+                status.innerHTML = statusHtml;
+            } catch (err) {
+                status.innerHTML = `<span style="color: #FF3B30;">Error: ${escapeHtml(err.message)}</span>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run Doctor';
+            }
+        }
+
+        // Run qai-hub compile
+        async function runQaihubCompile() {
+            const btn = document.getElementById('qaihub-compile-btn');
+            const output = document.getElementById('qaihub-output');
+            const meta = document.getElementById('qaihub-meta');
+            const result = document.getElementById('qaihub-result');
+            const error = document.getElementById('qaihub-error');
+
+            const onnxPath = document.getElementById('qaihub-onnx').value.trim();
+            const target = document.getElementById('qaihub-target').value.trim();
+            const runtime = document.getElementById('qaihub-runtime').value.trim();
+
+            if (!onnxPath) {
+                error.textContent = 'ONNX path is required';
+                error.classList.remove('hidden');
+                return;
+            }
+            if (!target) {
+                error.textContent = 'Target device is required';
+                error.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Compiling...';
+            output.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/qaihub/compile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        onnx_path: onnxPath,
+                        target: target,
+                        runtime: runtime
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Compile failed');
+                }
+
+                meta.innerHTML = `
+                    <strong>Submitted:</strong> ${data.submitted ? 'Yes' : 'No'} |
+                    ${data.job_id ? `<strong>Job ID:</strong> ${escapeHtml(data.job_id)} |` : ''}
+                    <strong>Output:</strong> ${escapeHtml(data.out_dir)}
+                `;
+
+                let notesText = '';
+                if (data.notes && data.notes.length > 0) {
+                    notesText = 'Notes:\n' + data.notes.map(n => '  - ' + n).join('\n');
+                }
+                if (data.raw_output_path) {
+                    notesText += '\n\nLog file: ' + data.raw_output_path;
+                }
+
+                result.textContent = notesText || '(no additional details)';
+                output.classList.remove('hidden');
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Compile Model';
+            }
+        }
+
+        // ===== Local Chat Runtime Functions =====
+
+        // Conversation history for the SLM chat
+        // Refresh chat health status (uses agent endpoint for tool calling)
+        async function refreshChatHealth() {
+            const btn = document.getElementById('chat-health-btn');
+            const status = document.getElementById('chat-health-status');
+
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+
+            try {
+                const response = await fetch('/api/agent/health');
+                const data = await response.json();
+
+                let statusHtml = '';
+                if (data.ok) {
+                    statusHtml += '<span style="color: #34C759;">&#10004; Agent available (with tools)</span>';
+                } else {
+                    statusHtml += '<span style="color: #FF3B30;">&#10008; Agent unavailable</span>';
+                }
+
+                statusHtml += `<br><span style="font-size: 0.85rem; color: #666;">Provider: ${escapeHtml(data.provider || 'none')}`;
+                if (data.base_url) {
+                    statusHtml += ` | URL: ${escapeHtml(data.base_url)}`;
+                }
+                if (data.model) {
+                    statusHtml += ` | Model: ${escapeHtml(data.model)}`;
+                }
+                statusHtml += '</span>';
+
+                if (data.error) {
+                    statusHtml += `<br><span style="font-size: 0.85rem; color: #FF3B30;">Error: ${escapeHtml(data.error)}</span>`;
+                }
+
+                status.innerHTML = statusHtml;
+            } catch (err) {
+                status.innerHTML = `<span style="color: #FF3B30;">Error: ${escapeHtml(err.message)}</span>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Refresh Status';
+            }
+        }
+
+        // Send chat message via agent endpoint (with tool calling)
+        async function sendSlmChat() {
+            const btn = document.getElementById('slm-send-btn');
+            const input = document.getElementById('slm-chat-input');
+            const log = document.getElementById('slm-chat-log');
+            const error = document.getElementById('slm-chat-error');
+
+            const text = input.value.trim();
+            if (!text) return;
+
+            // Add user message to UI
+            log.innerHTML += `
+                <div class="chat-message">
+                    <span class="chat-user">You:</span>
+                    <div class="chat-content">${escapeHtml(text)}</div>
+                </div>
+            `;
+
+            input.value = '';
+            btn.disabled = true;
+            btn.textContent = 'Thinking...';
+            error.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Chat failed');
+                }
+
+                // Show tool calls if any
+                let toolInfo = '';
+                if (data.tool_calls && data.tool_calls.length > 0) {
+                    const toolNames = data.tool_calls.map(tc => tc.tool_name).join(', ');
+                    toolInfo = `<div style="font-size: 0.8rem; color: #666; margin-bottom: 4px;">[${data.iterations} iteration(s), tools: ${escapeHtml(toolNames)}]</div>`;
+                }
+
+                // Add assistant message to UI
+                log.innerHTML += `
+                    <div class="chat-message">
+                        <span class="chat-assistant">Agent:</span>
+                        ${toolInfo}
+                        <div class="chat-content">${escapeHtml(data.reply)}</div>
+                    </div>
+                `;
+            } catch (err) {
+                error.textContent = err.message;
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send';
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+
+        // Handle Enter key in SLM chat input
+        function handleSlmChatEnter(event) {
+            if (event.key === 'Enter') {
+                sendSlmChat();
+            }
+        }
+
+        // Auto-refresh devices on load
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshDevices().then(() => {
+                populateStreamDeviceDropdown();
+                populateDownloadDeviceDropdown();
+            });
+            // Also check chat health on load
+            refreshChatHealth();
+        });
+    </script>
+</body>
+</html>
