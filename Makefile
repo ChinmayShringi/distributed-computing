@@ -93,9 +93,13 @@ bump-version:
 show-version:
 	@echo "Current version: $$(cat VERSION)"
 
-## server: Run the unified server (gRPC :50051 + HTTP Web UI :8080)
+## server: Build web UI and run the unified server (gRPC :50051 + HTTP Web UI :8080)
 ## Loads .env file if present for chat configuration
 server:
+	cd edge_web && npm install && npm run build
+	@mkdir -p cmd/server/webui
+	@rm -rf cmd/server/webui/*
+	cp -r edge_web/dist/* cmd/server/webui/
 	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && go run ./cmd/server
 
 ## qaihub-example: Run QAI Hub compile example (Windows only)
@@ -115,10 +119,6 @@ else
 	@echo "QAI Hub model download requires Windows with Snapdragon."
 	@echo "Run directly: python scripts/qaihub_download_models.py --help"
 endif
-
-## build-server: Build the unified server binary (gRPC + HTTP)
-build-server:
-	go build -o dist/edgecli-server ./cmd/server
 
 ## help: Show this help
 help:

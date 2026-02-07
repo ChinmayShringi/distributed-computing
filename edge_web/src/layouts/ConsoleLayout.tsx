@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Monitor,
   Play,
+  MessageSquare,
   Briefcase,
   Settings,
   Bell,
@@ -21,6 +22,7 @@ const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '/console/dashboard' },
   { icon: Monitor, label: 'Devices', href: '/console/devices' },
   { icon: Play, label: 'Run', href: '/console/run' },
+  { icon: MessageSquare, label: 'Chat', href: '/console/chat' },
   { icon: Briefcase, label: 'Jobs', href: '/console/jobs' },
   { icon: Settings, label: 'Settings', href: '/console/settings' },
 ];

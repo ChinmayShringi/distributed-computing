@@ -7,6 +7,9 @@ omniforge-*
 dist/
 server/build/
 server/admin/
+cmd/server/webui/
+edge_web/dist/
+edge_web/node_modules/
 *.exe
 
 # Test files

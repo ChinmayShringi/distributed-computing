@@ -47,7 +47,7 @@ import (
 	pb "github.com/edgecli/edgecli/proto"
 )
 
-//go:embed index.html
+//go:embed webui/*
 var staticFS embed.FS
 
 const (
@@ -2424,20 +2424,56 @@ func (s *OrchestratorServer) CreateInternalSession(name string) string {
 
 // ---- WebHandler HTTP Methods ----
 
-// handleIndex serves the embedded index.html
+// handleIndex serves the embedded index.html from webui folder
 func (h *WebHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	// Serve index.html for root path and any non-API, non-asset paths (SPA fallback)
+	if r.URL.Path == "/" || (!strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/assets/")) {
+		content, err := staticFS.ReadFile("webui/index.html")
+		if err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(content)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+// handleAssets serves static assets (JS, CSS, images) from webui/assets folder
+func (h *WebHandler) handleAssets(w http.ResponseWriter, r *http.Request) {
+	// Strip /assets/ prefix and read from webui/assets/
+	assetPath := "webui" + r.URL.Path
+
+	content, err := staticFS.ReadFile(assetPath)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	content, err := staticFS.ReadFile("index.html")
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	// Set content type based on file extension
+	ext := filepath.Ext(r.URL.Path)
+	switch ext {
+	case ".js":
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	case ".ico":
+		w.Header().Set("Content-Type", "image/x-icon")
+	case ".json":
+		w.Header().Set("Content-Type", "application/json")
+	case ".woff", ".woff2":
+		w.Header().Set("Content-Type", "font/woff2")
+	default:
+		w.Header().Set("Content-Type", "application/octet-stream")
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Cache assets for 1 year (they have content hashes in filenames)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Write(content)
 }
 
@@ -4205,6 +4241,7 @@ func main() {
 	// Setup HTTP routes
 	httpMux := http.NewServeMux()
 	httpMux.HandleFunc("/", webHandler.handleIndex)
+	httpMux.HandleFunc("/assets/", webHandler.handleAssets)
 	httpMux.HandleFunc("/api/devices", webHandler.handleDevices)
 	httpMux.HandleFunc("/api/routed-cmd", webHandler.handleRoutedCmd)
 	httpMux.HandleFunc("/api/assistant", webHandler.handleAssistant)

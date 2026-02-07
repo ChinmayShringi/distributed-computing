@@ -23,6 +23,7 @@ import { DownloadsPage } from "@/pages/console/DownloadsPage";
 import { DevicesPage } from "@/pages/console/DevicesPage";
 import { DeviceDetailPage } from "@/pages/console/DeviceDetailPage";
 import { RunPage } from "@/pages/console/RunPage";
+import { ChatPage } from "@/features/chat";
 import { JobsPage } from "@/pages/console/JobsPage";
 import { SettingsPage } from "@/pages/console/SettingsPage";
 
@@ -54,6 +55,7 @@ const App = () => (
             <Route path="devices" element={<DevicesPage />} />
             <Route path="devices/:id" element={<DeviceDetailPage />} />
             <Route path="run" element={<RunPage />} />
+            <Route path="chat" element={<ChatPage />} />
             <Route path="jobs" element={<JobsPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
