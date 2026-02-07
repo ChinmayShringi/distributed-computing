@@ -30,6 +30,13 @@ This script:
 
 See `docs/connection.md` for detailed Windows machine setup (SSH credentials, manual deployment, multi-device demo).
 
+**Flutter Mobile App:**
+```bash
+cd edge_mobile && flutter pub get   # Install dependencies
+cd edge_mobile && flutter run       # Run on connected device
+cd edge_mobile && flutter build apk # Build Android APK
+```
+
 ## Documentation
 
 Feature documentation should be placed under `docs/` directory:
@@ -49,6 +56,7 @@ EdgeCLI is a distributed orchestration system with a gRPC control plane for mult
 | `cmd/client` | CLI client for device registration and commands | - |
 | `cmd/edgecli` | Main CLI with safe/dangerous mode execution | - |
 | `brain/windows-ai-cli` | C#/.NET CLI for AI-powered plan generation (Windows only, separate `dotnet build`) | - |
+| `edge_mobile` | Flutter mobile app with native Android gRPC integration (separate `flutter build`) | - |
 
 ### Control Flow
 
