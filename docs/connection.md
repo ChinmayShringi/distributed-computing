@@ -206,6 +206,18 @@ P2P_DISCOVERY=false go run ./cmd/server
 |----------|---------|---------|
 | `P2P_DISCOVERY` | `true` | UDP broadcast discovery (set `false` to disable) |
 | `DISCOVERY_PORT` | `50050` | UDP port for broadcasts |
+| `SEED_PEERS` | (empty) | Comma-separated IPs for cross-subnet discovery |
+
+**Cross-Subnet Discovery:**
+
+UDP broadcast only works within the same subnet. For devices on different subnets, use `SEED_PEERS`:
+
+```bash
+# In .env - all team devices
+SEED_PEERS=10.206.187.34,10.206.197.101,10.206.227.186,10.206.8.90,10.206.66.173,10.206.87.35,10.206.56.57
+```
+
+Each device sends announcements directly to all seed peers, enabling discovery across subnets.
 
 **Windows Firewall (PowerShell Admin):**
 ```powershell

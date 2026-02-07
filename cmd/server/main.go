@@ -1582,6 +1582,26 @@ func main() {
 		}
 
 		discoverySvc := discovery.NewService(discoveryPort, selfDevice, &discoveryCallback{registry: orchestrator.registry})
+
+		// Add seed peers for cross-subnet discovery
+		if seedPeers := os.Getenv("SEED_PEERS"); seedPeers != "" {
+			for _, peer := range strings.Split(seedPeers, ",") {
+				peer = strings.TrimSpace(peer)
+				if peer == "" {
+					continue
+				}
+				// Add discovery port if not specified
+				if !strings.Contains(peer, ":") {
+					peer = peer + ":" + strconv.Itoa(discoveryPort)
+				}
+				if err := discoverySvc.AddSeedPeer(peer); err != nil {
+					log.Printf("[WARN] Invalid seed peer %s: %v", peer, err)
+				} else {
+					log.Printf("[INFO] Added seed peer: %s", peer)
+				}
+			}
+		}
+
 		if err := discoverySvc.Start(); err != nil {
 			log.Printf("[WARN] Failed to start P2P discovery: %v", err)
 		} else {
