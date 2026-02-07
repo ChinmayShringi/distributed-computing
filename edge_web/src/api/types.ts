@@ -246,12 +246,15 @@ export interface AgentHealthResponse {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
+  timestamp_ms?: number;
 }
 
 export interface ChatMemoryResponse {
   messages: ChatMessage[];
+  last_updated_ms: number;
+  summary?: string;
 }
 
 // QAI Hub types

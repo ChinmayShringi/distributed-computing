@@ -12,6 +12,7 @@ import {
 import {
   sendAssistantMessage,
   getJobStatus,
+  getChatMemory,
   type AssistantResponse,
   type JobStatusResponse,
 } from '@/api';
@@ -28,7 +29,7 @@ import {
 
 interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
   response?: AssistantResponse;
@@ -41,12 +42,43 @@ export const ChatPage = () => {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollingJobId, setPollingJobId] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  // Poll chat history
+  const pollHistory = useCallback(async () => {
+    try {
+      const data = await getChatMemory();
+      if (data.last_updated_ms > lastUpdated) {
+        setLastUpdated(data.last_updated_ms);
+
+        // Transform backend messages to frontend format
+        const transformedMgs: ChatMessage[] = data.messages.map((m, idx) => ({
+          id: `msg-${m.timestamp_ms || idx}`,
+          role: m.role === 'system' ? 'assistant' : m.role as 'user' | 'assistant',
+          content: m.content,
+          timestamp: m.timestamp_ms
+            ? new Date(m.timestamp_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '',
+        }));
+
+        setMessages(transformedMgs);
+      }
+    } catch (err) {
+      console.error('Failed to poll chat history:', err);
+    }
+  }, [lastUpdated]);
+
+  useEffect(() => {
+    pollHistory(); // Initial load
+    const interval = setInterval(pollHistory, 2000);
+    return () => clearInterval(interval);
+  }, [pollHistory]);
 
   useEffect(() => {
     scrollToBottom();
@@ -163,11 +195,10 @@ export const ChatPage = () => {
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                  message.role === 'user'
+                className={`max-w-[85%] rounded-2xl px-4 py-3 ${message.role === 'user'
                     ? 'bg-primary text-primary-foreground rounded-br-md'
                     : 'bg-surface-2 rounded-bl-md'
-                }`}
+                  }`}
               >
                 <p className="text-sm whitespace-pre-wrap">{message.content}</p>
 
@@ -205,8 +236,8 @@ export const ChatPage = () => {
                             message.jobStatus.state === 'FAILED'
                               ? 'bg-danger-pink'
                               : message.jobStatus.state === 'DONE'
-                              ? 'bg-safe-green'
-                              : ''
+                                ? 'bg-safe-green'
+                                : ''
                           }
                         >
                           {message.jobStatus.state}
@@ -248,9 +279,8 @@ export const ChatPage = () => {
                 )}
 
                 <p
-                  className={`text-xs mt-2 ${
-                    message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                  }`}
+                  className={`text-xs mt-2 ${message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                    }`}
                 >
                   {message.timestamp}
                 </p>
