@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for gRPC communication -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    
     <application
         android:label="edge_mobile"
         android:name="${applicationName}"
