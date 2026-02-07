@@ -41,6 +41,9 @@ const (
 	OrchestratorService_SyncChatMemory_FullMethodName       = "/edgemesh.OrchestratorService/SyncChatMemory"
 	OrchestratorService_GetChatMemory_FullMethodName        = "/edgemesh.OrchestratorService/GetChatMemory"
 	OrchestratorService_RunLLMTask_FullMethodName           = "/edgemesh.OrchestratorService/RunLLMTask"
+	OrchestratorService_GetActivity_FullMethodName          = "/edgemesh.OrchestratorService/GetActivity"
+	OrchestratorService_GetDeviceMetrics_FullMethodName     = "/edgemesh.OrchestratorService/GetDeviceMetrics"
+	OrchestratorService_GetJobDetail_FullMethodName         = "/edgemesh.OrchestratorService/GetJobDetail"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -83,6 +86,10 @@ type OrchestratorServiceClient interface {
 	GetChatMemory(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ChatMemoryData, error)
 	// Remote LLM task execution
 	RunLLMTask(ctx context.Context, in *LLMTaskRequest, opts ...grpc.CallOption) (*LLMTaskResponse, error)
+	// Activity tracking and metrics
+	GetActivity(ctx context.Context, in *GetActivityRequest, opts ...grpc.CallOption) (*GetActivityResponse, error)
+	GetDeviceMetrics(ctx context.Context, in *DeviceId, opts ...grpc.CallOption) (*MetricsHistoryResponse, error)
+	GetJobDetail(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*JobDetailResponse, error)
 }
 
 type orchestratorServiceClient struct {
@@ -313,6 +320,36 @@ func (c *orchestratorServiceClient) RunLLMTask(ctx context.Context, in *LLMTaskR
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) GetActivity(ctx context.Context, in *GetActivityRequest, opts ...grpc.CallOption) (*GetActivityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetActivityResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_GetActivity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) GetDeviceMetrics(ctx context.Context, in *DeviceId, opts ...grpc.CallOption) (*MetricsHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MetricsHistoryResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_GetDeviceMetrics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) GetJobDetail(ctx context.Context, in *JobId, opts ...grpc.CallOption) (*JobDetailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JobDetailResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_GetJobDetail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -353,6 +390,10 @@ type OrchestratorServiceServer interface {
 	GetChatMemory(context.Context, *Empty) (*ChatMemoryData, error)
 	// Remote LLM task execution
 	RunLLMTask(context.Context, *LLMTaskRequest) (*LLMTaskResponse, error)
+	// Activity tracking and metrics
+	GetActivity(context.Context, *GetActivityRequest) (*GetActivityResponse, error)
+	GetDeviceMetrics(context.Context, *DeviceId) (*MetricsHistoryResponse, error)
+	GetJobDetail(context.Context, *JobId) (*JobDetailResponse, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -428,6 +469,15 @@ func (UnimplementedOrchestratorServiceServer) GetChatMemory(context.Context, *Em
 }
 func (UnimplementedOrchestratorServiceServer) RunLLMTask(context.Context, *LLMTaskRequest) (*LLMTaskResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunLLMTask not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) GetActivity(context.Context, *GetActivityRequest) (*GetActivityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetActivity not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) GetDeviceMetrics(context.Context, *DeviceId) (*MetricsHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDeviceMetrics not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) GetJobDetail(context.Context, *JobId) (*JobDetailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetJobDetail not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -846,6 +896,60 @@ func _OrchestratorService_RunLLMTask_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_GetActivity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetActivityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).GetActivity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_GetActivity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).GetActivity(ctx, req.(*GetActivityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_GetDeviceMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeviceId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).GetDeviceMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_GetDeviceMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).GetDeviceMetrics(ctx, req.(*DeviceId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_GetJobDetail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JobId)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).GetJobDetail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_GetJobDetail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).GetJobDetail(ctx, req.(*JobId))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -940,6 +1044,18 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunLLMTask",
 			Handler:    _OrchestratorService_RunLLMTask_Handler,
+		},
+		{
+			MethodName: "GetActivity",
+			Handler:    _OrchestratorService_GetActivity_Handler,
+		},
+		{
+			MethodName: "GetDeviceMetrics",
+			Handler:    _OrchestratorService_GetDeviceMetrics_Handler,
+		},
+		{
+			MethodName: "GetJobDetail",
+			Handler:    _OrchestratorService_GetJobDetail_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

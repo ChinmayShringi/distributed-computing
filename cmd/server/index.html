@@ -269,7 +269,116 @@
         .inline-inputs input {
             width: 100%;
         }
+
+        /* Activity Panel Styles */
+        .activity-status {
+            font-size: 0.8rem;
+            color: #888;
+            margin-left: 10px;
+        }
+
+        .activity-status.live {
+            color: #4CAF50;
+        }
+
+        .task-card {
+            background: #f0f8ff;
+            border: 1px solid #b8daff;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+
+        .task-card.running {
+            background: #fff3cd;
+            border-color: #ffc107;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .resource-bar {
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .resource-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .resource-fill.cpu { background: #2196F3; }
+        .resource-fill.memory { background: #4CAF50; }
+        .resource-fill.gpu { background: #9C27B0; }
+
+        .chart-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 12px;
+        }
+
+        .chart-box {
+            flex: 1;
+            min-width: 280px;
+            height: 200px;
+        }
+
+        .sub-section {
+            margin-bottom: 16px;
+        }
+
+        .sub-section h3 {
+            font-size: 0.95rem;
+            color: #555;
+            margin-bottom: 8px;
+        }
+
+        .task-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .task-table th,
+        .task-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .task-table th {
+            background: #f5f5f5;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .state-badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            color: white;
+        }
+
+        .state-badge.queued { background: #9E9E9E; }
+        .state-badge.running { background: #FF9800; }
+        .state-badge.done { background: #4CAF50; }
+        .state-badge.failed { background: #f44336; }
+
+        .text-truncate {
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 
 <body>
@@ -283,6 +392,69 @@
         </h2>
         <div id="device-list" class="device-list">
             <div class="device-info">Click Refresh to load devices</div>
+        </div>
+    </div>
+
+    <!-- Activity Panel Section -->
+    <div class="card" id="activity-panel">
+        <h2>
+            Activity Panel
+            <span id="activity-status" class="activity-status"></span>
+            <button onclick="toggleActivityPolling()" id="activity-toggle-btn" class="secondary">Start Polling</button>
+        </h2>
+
+        <!-- Running Tasks -->
+        <div class="sub-section">
+            <h3>Running Tasks</h3>
+            <div id="running-tasks-list" class="device-list">
+                <div class="device-info">No active tasks</div>
+            </div>
+        </div>
+
+        <!-- Device Resources -->
+        <div class="sub-section">
+            <h3>Device Resources</h3>
+            <div id="device-resources-list" class="device-list">
+                <div class="device-info">Start polling to see device resources</div>
+            </div>
+        </div>
+
+        <!-- Resource Charts -->
+        <div class="sub-section">
+            <h3>Resource History</h3>
+            <div class="chart-container">
+                <div class="chart-box">
+                    <canvas id="cpu-chart"></canvas>
+                </div>
+                <div class="chart-box">
+                    <canvas id="memory-chart"></canvas>
+                </div>
+                <div class="chart-box" id="gpu-chart-container" style="display: none;">
+                    <canvas id="gpu-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Visualization Section -->
+    <div class="card" id="task-visualization" style="display: none;">
+        <h2>Task Plan Visualization</h2>
+        <div class="sub-section">
+            <h3>Task Details</h3>
+            <table class="task-table" id="task-table">
+                <thead>
+                    <tr>
+                        <th>Group</th>
+                        <th>Device</th>
+                        <th>Kind</th>
+                        <th>Status</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                    </tr>
+                </thead>
+                <tbody id="task-table-body">
+                </tbody>
+            </table>
         </div>
     </div>
 
@@ -352,6 +524,7 @@
                     style="margin-left: 10px; padding: 4px 8px; font-size: 0.8rem;">Refresh</button>
             </div>
             <pre id="job-output"></pre>
+            <a href="#" id="view-job-details" style="display: none; color: #007AFF; font-size: 0.9rem; margin-top: 8px;">View Task Details</a>
         </div>
         <div class="error hidden" id="job-error"></div>
     </div>
@@ -503,6 +676,337 @@
     <script>
         // Global storage for available devices
         let availableDevices = [];
+
+        // Activity Panel State
+        let activityPolling = false;
+        let activityInterval = null;
+        let cpuChart = null;
+        let memoryChart = null;
+        let gpuChart = null;
+        let metricsHistory = {};  // deviceID -> { name: string, samples: [] }
+
+        // Chart.js initialization
+        function initCharts() {
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Seconds Ago' },
+                        reverse: true,
+                        min: 0,
+                        max: 120
+                    },
+                    y: {
+                        min: 0,
+                        max: 100,
+                        title: { display: true, text: '%' }
+                    }
+                },
+                plugins: {
+                    legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } }
+                }
+            };
+
+            cpuChart = new Chart(document.getElementById('cpu-chart'), {
+                type: 'line',
+                data: { datasets: [] },
+                options: { ...chartOptions, plugins: { ...chartOptions.plugins, title: { display: true, text: 'CPU Usage' } } }
+            });
+
+            memoryChart = new Chart(document.getElementById('memory-chart'), {
+                type: 'line',
+                data: { datasets: [] },
+                options: { ...chartOptions, plugins: { ...chartOptions.plugins, title: { display: true, text: 'Memory Usage' } } }
+            });
+
+            gpuChart = new Chart(document.getElementById('gpu-chart'), {
+                type: 'line',
+                data: { datasets: [] },
+                options: { ...chartOptions, plugins: { ...chartOptions.plugins, title: { display: true, text: 'GPU/NPU Usage' } } }
+            });
+        }
+
+        // Toggle activity polling
+        function toggleActivityPolling() {
+            const btn = document.getElementById('activity-toggle-btn');
+            if (activityPolling) {
+                stopActivityPolling();
+                btn.textContent = 'Start Polling';
+            } else {
+                startActivityPolling();
+                btn.textContent = 'Stop Polling';
+            }
+        }
+
+        function startActivityPolling() {
+            if (activityPolling) return;
+            activityPolling = true;
+            fetchActivity();  // Immediate fetch
+            activityInterval = setInterval(fetchActivity, 2000);  // Poll every 2 seconds
+            document.getElementById('activity-status').textContent = 'Live';
+            document.getElementById('activity-status').classList.add('live');
+        }
+
+        function stopActivityPolling() {
+            activityPolling = false;
+            if (activityInterval) {
+                clearInterval(activityInterval);
+                activityInterval = null;
+            }
+            document.getElementById('activity-status').textContent = 'Paused';
+            document.getElementById('activity-status').classList.remove('live');
+        }
+
+        // Fetch activity data
+        async function fetchActivity() {
+            try {
+                const response = await fetch('/api/activity?include_metrics_history=true');
+                const data = await response.json();
+
+                if (!response.ok) throw new Error(data.error);
+
+                updateRunningTasks(data.activity?.running_tasks || []);
+                updateDeviceResources(data.activity?.device_activities || []);
+                updateMetricsHistory(data.device_metrics || {});
+                updateCharts();
+            } catch (err) {
+                console.error('Activity fetch error:', err);
+            }
+        }
+
+        // Update running tasks display
+        function updateRunningTasks(tasks) {
+            const container = document.getElementById('running-tasks-list');
+
+            if (!tasks || tasks.length === 0) {
+                container.innerHTML = '<div class="device-info">No active tasks</div>';
+                return;
+            }
+
+            container.innerHTML = tasks.map(task => {
+                const elapsed = Math.floor((task.elapsed_ms || 0) / 1000);
+                return `
+                    <div class="task-card running">
+                        <div style="font-weight: 600;">${escapeHtml(task.kind || 'Unknown')}</div>
+                        <div style="font-size: 0.85rem; color: #555;">
+                            Device: ${escapeHtml(task.device_name || 'Unknown')} |
+                            Elapsed: ${elapsed}s |
+                            Job: ${(task.job_id || '').substring(0, 8)}...
+                        </div>
+                        <div style="font-size: 0.8rem; color: #888; margin-top: 4px;">
+                            Input: ${escapeHtml(truncateText(task.input || '', 100))}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Update device resources display
+        function updateDeviceResources(activities) {
+            const container = document.getElementById('device-resources-list');
+
+            if (!activities || activities.length === 0) {
+                container.innerHTML = '<div class="device-info">No device data</div>';
+                return;
+            }
+
+            container.innerHTML = activities.map(activity => {
+                const status = activity.current_status || {};
+                const cpuPercent = status.cpu_load >= 0 ? Math.round(status.cpu_load * 100) : -1;
+                const memPercent = status.mem_total_mb > 0 ? Math.round((status.mem_used_mb / status.mem_total_mb) * 100) : 0;
+                const gpuPercent = status.gpu_load >= 0 ? Math.round(status.gpu_load * 100) : -1;
+
+                return `
+                    <div class="device-card">
+                        <div class="device-name">${escapeHtml(activity.device_name || 'Unknown')}</div>
+                        <div class="device-info">Tasks running: ${activity.running_task_count || 0}</div>
+
+                        <div style="margin-top: 8px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+                                <span>CPU</span>
+                                <span>${cpuPercent >= 0 ? cpuPercent + '%' : 'N/A'}</span>
+                            </div>
+                            <div class="resource-bar">
+                                <div class="resource-fill cpu" style="width: ${cpuPercent >= 0 ? cpuPercent : 0}%"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 4px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+                                <span>Memory</span>
+                                <span>${memPercent}% (${status.mem_used_mb || 0}/${status.mem_total_mb || 0} MB)</span>
+                            </div>
+                            <div class="resource-bar">
+                                <div class="resource-fill memory" style="width: ${memPercent}%"></div>
+                            </div>
+                        </div>
+
+                        ${gpuPercent >= 0 ? `
+                        <div style="margin-top: 4px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+                                <span>GPU/NPU</span>
+                                <span>${gpuPercent}%</span>
+                            </div>
+                            <div class="resource-bar">
+                                <div class="resource-fill gpu" style="width: ${gpuPercent}%"></div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Update metrics history from server response
+        function updateMetricsHistory(deviceMetrics) {
+            for (const [deviceId, data] of Object.entries(deviceMetrics)) {
+                if (!metricsHistory[deviceId]) {
+                    metricsHistory[deviceId] = { samples: [], name: data.device_name || deviceId };
+                }
+                metricsHistory[deviceId].name = data.device_name || metricsHistory[deviceId].name;
+                // Append new samples, keep last 120
+                const newSamples = (data.samples || []).map(s => ({
+                    timestamp_ms: s.timestamp_ms,
+                    cpu_load: s.cpu_load,
+                    mem_used_mb: s.mem_used_mb,
+                    mem_total_mb: s.mem_total_mb,
+                    gpu_load: s.gpu_load,
+                    npu_load: s.npu_load
+                }));
+                metricsHistory[deviceId].samples = [
+                    ...metricsHistory[deviceId].samples,
+                    ...newSamples
+                ].slice(-120);
+            }
+        }
+
+        // Update charts with metrics history
+        function updateCharts() {
+            const colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#f44336', '#00BCD4'];
+            const now = Date.now();
+
+            const cpuDatasets = [];
+            const memDatasets = [];
+            const gpuDatasets = [];
+
+            let colorIndex = 0;
+            let hasGpuData = false;
+
+            for (const [deviceId, data] of Object.entries(metricsHistory)) {
+                const color = colors[colorIndex % colors.length];
+                const samples = data.samples;
+                const label = data.name || deviceId.substring(0, 8);
+
+                if (samples.length === 0) continue;
+
+                cpuDatasets.push({
+                    label: label,
+                    data: samples.map(s => ({
+                        x: (now - s.timestamp_ms) / 1000,
+                        y: (s.cpu_load >= 0 ? s.cpu_load * 100 : null)
+                    })).filter(p => p.y !== null),
+                    borderColor: color,
+                    backgroundColor: color + '20',
+                    fill: false,
+                    tension: 0.1,
+                    pointRadius: 0
+                });
+
+                memDatasets.push({
+                    label: label,
+                    data: samples.map(s => ({
+                        x: (now - s.timestamp_ms) / 1000,
+                        y: s.mem_total_mb > 0 ? (s.mem_used_mb / s.mem_total_mb) * 100 : 0
+                    })),
+                    borderColor: color,
+                    backgroundColor: color + '20',
+                    fill: false,
+                    tension: 0.1,
+                    pointRadius: 0
+                });
+
+                const gpuSamples = samples.filter(s => s.gpu_load >= 0);
+                if (gpuSamples.length > 0) {
+                    hasGpuData = true;
+                    gpuDatasets.push({
+                        label: label,
+                        data: gpuSamples.map(s => ({
+                            x: (now - s.timestamp_ms) / 1000,
+                            y: s.gpu_load * 100
+                        })),
+                        borderColor: color,
+                        backgroundColor: color + '20',
+                        fill: false,
+                        tension: 0.1,
+                        pointRadius: 0
+                    });
+                }
+
+                colorIndex++;
+            }
+
+            cpuChart.data.datasets = cpuDatasets;
+            cpuChart.update('none');
+
+            memoryChart.data.datasets = memDatasets;
+            memoryChart.update('none');
+
+            if (hasGpuData) {
+                document.getElementById('gpu-chart-container').style.display = 'block';
+                gpuChart.data.datasets = gpuDatasets;
+                gpuChart.update('none');
+            }
+        }
+
+        // Show job detail visualization
+        async function showJobDetail(jobId) {
+            try {
+                const response = await fetch(`/api/job-detail?id=${jobId}`);
+                const data = await response.json();
+
+                if (!response.ok) throw new Error(data.error);
+
+                renderTaskTable(data.tasks || []);
+                document.getElementById('task-visualization').style.display = 'block';
+            } catch (err) {
+                console.error('Job detail fetch error:', err);
+            }
+        }
+
+        function renderTaskTable(tasks) {
+            const tbody = document.getElementById('task-table-body');
+            tbody.innerHTML = tasks.map(task => `
+                <tr>
+                    <td>${task.group_index}</td>
+                    <td>${escapeHtml(task.assigned_device_name || 'Unknown')}</td>
+                    <td>${escapeHtml(task.kind || 'Unknown')}</td>
+                    <td>
+                        <span class="state-badge ${(task.state || '').toLowerCase()}">
+                            ${task.state || 'UNKNOWN'}
+                        </span>
+                    </td>
+                    <td class="text-truncate" title="${escapeHtml(task.input || '')}">${escapeHtml(truncateText(task.input || '', 30))}</td>
+                    <td class="text-truncate" title="${escapeHtml(task.result || task.error || '')}">
+                        ${task.error ? '<span style="color: red;">' + escapeHtml(truncateText(task.error, 40)) + '</span>' : escapeHtml(truncateText(task.result || '-', 40))}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function truncateText(text, maxLen) {
+            if (!text) return '';
+            return text.length > maxLen ? text.substring(0, maxLen) + '...' : text;
+        }
+
+        // Initialize charts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof Chart !== 'undefined') {
+                initCharts();
+            }
+        });
 
         // Refresh devices list
         async function refreshDevices() {
@@ -807,6 +1311,12 @@
 
                 if (data.state === 'DONE' || data.state === 'FAILED') {
                     output.textContent = data.final_result || '(no result)';
+                    // Show View Details link
+                    const detailsLink = document.getElementById('view-job-details');
+                    if (detailsLink) {
+                        detailsLink.style.display = 'inline';
+                        detailsLink.onclick = () => showJobDetail(currentJobId);
+                    }
                 } else if (data.state === 'RUNNING') {
                     // Show task progress
                     let progressText = `Tasks: ${data.tasks.length}\n`;
