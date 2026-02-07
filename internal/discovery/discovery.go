@@ -83,19 +83,22 @@ func (s *Service) Start() error {
 	}
 	s.conn = conn
 
-	// Setup broadcast address
-	// Try to find a specific subnet broadcast address first (e.g. 192.168.1.255)
-	// identifying the interface we are likely using.
-	bcastIP := detectBroadcastAddress()
-	if bcastIP == nil {
-		bcastIP = net.IPv4bcast // Fallback to 255.255.255.255
+	// Setup broadcast addresses for ALL valid interfaces
+	// This ensures we reach the wifi network even if docker0 is found first
+	bcastIPs := detectBroadcastAddresses()
+	if len(bcastIPs) == 0 {
+		bcastIPs = []net.IP{net.IPv4bcast} // Fallback to 255.255.255.255
 	}
 
-	s.broadcast = &net.UDPAddr{
-		IP:   bcastIP,
-		Port: s.port,
+	s.broadcasts = make([]*net.UDPAddr, 0, len(bcastIPs))
+	for _, ip := range bcastIPs {
+		addr := &net.UDPAddr{
+			IP:   ip,
+			Port: s.port,
+		}
+		s.broadcasts = append(s.broadcasts, addr)
+		log.Printf("[INFO] Using broadcast address: %s:%d", addr.IP, addr.Port)
 	}
-	log.Printf("[INFO] Using broadcast address: %s:%d", s.broadcast.IP, s.broadcast.Port)
 
 	// Set buffer sizes
 	if err := conn.SetWriteBuffer(MaxMessageSize * 10); err != nil {
