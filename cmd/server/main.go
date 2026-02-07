@@ -140,14 +140,16 @@ type RoutedCmdResponse struct {
 
 // AssistantRequest is the JSON request for /api/assistant
 type AssistantRequest struct {
-	Message  string `json:"message"`
-	DeviceID string `json:"device_id,omitempty"`
+	Message        string `json:"message"`
+	DeviceID       string `json:"device_id,omitempty"`
+	SenderDeviceID string `json:"sender_device_id,omitempty"`
 }
 
 // AgentRequest is the JSON request for /api/agent
 type AgentRequest struct {
-	Message    string `json:"message"`
-	DeviceID   string `json:"device_id,omitempty"`
+	Message        string `json:"message"`
+	DeviceID       string `json:"device_id,omitempty"`
+	SenderDeviceID string `json:"sender_device_id,omitempty"`
 	Iterations int    `json:"iterations,omitempty"`
 }
 
@@ -302,8 +304,9 @@ type CompileRequest struct {
 }
 
 type ChatRequest struct {
-	Messages []chatmem.ChatMessage `json:"messages"`
-	DeviceID string                `json:"device_id,omitempty"`
+	Messages       []chatmem.ChatMessage `json:"messages"`
+	DeviceID       string                `json:"device_id,omitempty"`
+	SenderDeviceID string                `json:"sender_device_id,omitempty"`
 }
 
 // ChatResponse is the JSON response for /api/chat
@@ -521,10 +524,23 @@ func (s *OrchestratorServer) RegisterDevice(ctx context.Context, req *pb.DeviceI
 	log.Printf("[INFO] Device registered: id=%s name=%s platform=%s arch=%s addr=%s",
 		req.DeviceId, req.DeviceName, req.Platform, req.Arch, req.GrpcAddr)
 
+	// Sync-on-Join: Push our memories to the joining device
+	go s.syncAllChatMemoriesToPeer(req.DeviceId, req.GrpcAddr)
+
 	return &pb.DeviceAck{
 		Ok:           true,
 		RegisteredAt: registeredAt.Unix(),
 	}, nil
+}
+
+// syncAllChatMemoriesToAllPeers pushes all locally known chat memories to every registered device.
+func (s *OrchestratorServer) syncAllChatMemoriesToAllPeers() {
+	for _, info := range s.registry.List() {
+		if info.DeviceId == s.selfDeviceID {
+			continue
+		}
+		s.syncAllChatMemoriesToPeer(info.DeviceId, info.GrpcAddr)
+	}
 }
 
 // ListDevices returns all registered devices
@@ -917,6 +933,12 @@ func (s *OrchestratorServer) autoRegisterWithCoordinator(coordinatorAddr string)
 
 		// Also sync: pull the coordinator's device list and add to our local registry
 		s.syncDevicesFromCoordinator(coordinatorAddr)
+
+		// Sync-on-Join: Ask the coordinator for its chat memories (by pushing our empty ones if needed, 
+		// but actually we should just trigger a push from the coordinator to us)
+		// The coordinator already does this in RegisterDevice.
+		// However, we should also push OUR existing memories to the coordinator just in case.
+		go s.syncAllChatMemoriesToPeer("coordinator", coordinatorAddr)
 
 		// Re-register periodically (heartbeat) every 30 seconds
 		time.Sleep(30 * time.Second)
@@ -2403,14 +2425,63 @@ func (s *OrchestratorServer) broadcastChatMemory(deviceID string) {
 	}
 }
 
+// syncAllChatMemoriesToPeer pushes all locally known chat memories to a target peer.
+// This is used for "Sync-on-Join" so new devices get existing history.
+func (s *OrchestratorServer) syncAllChatMemoriesToPeer(targetID, addr string) {
+	deviceIDs, err := chatmem.ListAllDeviceIDsWithMemory()
+	if err != nil {
+		log.Printf("[WARN] syncAllChatMemoriesToPeer: failed to list memories: %v", err)
+		return
+	}
+
+	log.Printf("[INFO] Pushing %d chat memories to joined device %s (%s)", len(deviceIDs), targetID, addr)
+
+	for _, deviceID := range deviceIDs {
+		mem, err := s.getChatMemoryForDevice(deviceID)
+		if err != nil {
+			continue
+		}
+
+		jsonStr, err := mem.ToJSON()
+		if err != nil {
+			continue
+		}
+
+		syncReq := &pb.ChatMemorySync{
+			DeviceId:      deviceID,
+			LastUpdatedMs: mem.GetLastUpdated(),
+			MemoryJson:    jsonStr,
+		}
+
+		go func(id, targetAddr string, r *pb.ChatMemorySync) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			conn, err := grpc.DialContext(ctx, targetAddr,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+
+			client := pb.NewOrchestratorServiceClient(conn)
+			_, err = client.SyncChatMemory(ctx, r)
+			if err != nil {
+				log.Printf("[DEBUG] syncAllChatMemoriesToPeer: push %s to %s failed: %v", id, targetID, err)
+			}
+		}(deviceID, addr, syncReq)
+	}
+}
+
 // AddChatMessage adds a message to chat memory for a specific device and broadcasts it.
-func (s *OrchestratorServer) AddChatMessage(deviceID, role, content string) {
+func (s *OrchestratorServer) AddChatMessage(deviceID, senderDeviceID, role, content string) {
 	mem, err := s.getChatMemoryForDevice(deviceID)
 	if err != nil {
 		log.Printf("[ERROR] AddChatMessage: failed to get memory for %s: %v", deviceID, err)
 		return
 	}
-	mem.AddMessage(role, content)
+	mem.AddMessage(role, content, senderDeviceID)
 	if err := mem.SaveToFile(); err != nil {
 		log.Printf("[WARN] AddChatMessage: failed to save for %s: %v", deviceID, err)
 	}
@@ -2676,10 +2747,16 @@ func (h *WebHandler) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	if deviceID == "" {
 		deviceID = h.orchestrator.selfDeviceID
 	}
+	
+	senderID := req.SenderDeviceID
+	if senderID == "" {
+		senderID = h.orchestrator.selfDeviceID
+	}
+
 	mem, err := h.orchestrator.getChatMemoryForDevice(deviceID)
 	if err == nil {
-		mem.AddMessage("user", req.Message)
-		mem.AddMessage("assistant", reply)
+		mem.AddMessage("user", req.Message, senderID)
+		mem.AddMessage("assistant", reply, h.orchestrator.selfDeviceID)
 		
 		if err := mem.SaveToFile(); err != nil {
 			log.Printf("[WARN] handleAssistant: failed to save memory: %v", err)
@@ -3862,10 +3939,14 @@ func (h *WebHandler) handleChat(w http.ResponseWriter, r *http.Request) {
 	if len(req.Messages) > 0 {
 		lastMsg := req.Messages[len(req.Messages)-1]
 		if lastMsg.Role == "user" {
-			mem.AddMessage("user", lastMsg.Content)
+			senderID := req.SenderDeviceID
+			if senderID == "" {
+				senderID = h.orchestrator.selfDeviceID
+			}
+			mem.AddMessage("user", lastMsg.Content, senderID)
 		}
 	}
-	mem.AddMessage("assistant", reply)
+	mem.AddMessage("assistant", reply, h.orchestrator.selfDeviceID)
 
 	// Trigger broadcast
 	go h.orchestrator.broadcastChatMemory(deviceID)
@@ -4002,9 +4083,14 @@ func (h *WebHandler) handleAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	senderID := req.SenderDeviceID
+	if senderID == "" {
+		senderID = h.orchestrator.selfDeviceID
+	}
+
 	// Update chat memory with user and agent messages
-	mem.AddMessage("user", req.Message)
-	mem.AddMessage("assistant", resp.Reply)
+	mem.AddMessage("user", req.Message, senderID)
+	mem.AddMessage("assistant", resp.Reply, h.orchestrator.selfDeviceID)
 
 	// Persist to disk immediately
 	if err := mem.SaveToFile(); err != nil {

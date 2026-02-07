@@ -230,6 +230,7 @@ export interface DownloadTicketResponse {
 export interface AssistantRequest {
   message: string;
   device_id?: string;
+  sender_device_id?: string;
 }
 
 export interface AssistantResponse {
@@ -243,6 +244,7 @@ export interface AssistantResponse {
 export interface AgentRequest {
   message: string;
   device_id?: string;
+  sender_device_id?: string;
 }
 
 export interface AgentResponse {
@@ -263,6 +265,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp_ms?: number;
+  sender_device_id?: string;
 }
 
 export interface ChatMemoryResponse {

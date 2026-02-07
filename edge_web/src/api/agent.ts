@@ -1,10 +1,11 @@
 import { apiGet, apiPost } from './client';
 import type { AgentRequest, AgentResponse, AgentHealthResponse, ChatMemoryResponse } from './types';
 
-export async function sendAgentMessage(message: string, deviceId?: string): Promise<AgentResponse> {
+export async function sendAgentMessage(message: string, deviceId?: string, senderDeviceId?: string): Promise<AgentResponse> {
   const request: AgentRequest = {
     message,
-    device_id: deviceId
+    device_id: deviceId,
+    sender_device_id: senderDeviceId
   };
   return apiPost<AgentResponse>('/api/agent', request);
 }

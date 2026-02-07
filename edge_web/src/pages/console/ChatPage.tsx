@@ -15,9 +15,11 @@ import {
   getJobStatus,
   getChatMemory,
   listDevices,
+  getAgentHealth,
   type AssistantResponse,
   type JobStatusResponse,
   type Device,
+  type AgentHealthResponse,
 } from '@/api';
 import {
   Bot,
@@ -40,6 +42,7 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  sender_device_id?: string;
   response?: AssistantResponse;
   jobStatus?: JobStatusResponse;
 }
@@ -54,6 +57,7 @@ export const ChatPage = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('self');
   const [deviceSearch, setDeviceSearch] = useState('');
+  const [agentHealth, setAgentHealth] = useState<AgentHealthResponse | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -88,6 +92,7 @@ export const ChatPage = () => {
           id: `msg-${m.role}-${m.timestamp_ms || idx}`,
           role: m.role === 'system' ? 'assistant' : m.role as 'user' | 'assistant',
           content: m.content,
+          sender_device_id: m.sender_device_id,
           timestamp: m.timestamp_ms
             ? new Date(m.timestamp_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             : '',
@@ -112,6 +117,21 @@ export const ChatPage = () => {
     }, 3000);
     return () => clearInterval(interval);
   }, [pollHistory]);
+
+  // Poll agent health
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const h = await getAgentHealth();
+        setAgentHealth(h);
+      } catch (err) {
+        console.error('Failed to fetch agent health:', err);
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
@@ -152,7 +172,11 @@ export const ChatPage = () => {
     setError(null);
 
     try {
-      const response = await sendAssistantMessage(userMessage.content, selectedDeviceId === 'self' ? undefined : selectedDeviceId);
+      const response = await sendAssistantMessage(
+        userMessage.content,
+        selectedDeviceId === 'self' ? undefined : selectedDeviceId,
+        'self'
+      );
 
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
@@ -277,6 +301,15 @@ export const ChatPage = () => {
               <Badge variant="outline" className="ml-2 font-normal text-muted-foreground">
                 {selectedDeviceName}
               </Badge>
+              {agentHealth && (
+                <Badge
+                  variant="outline"
+                  className={`ml-2 font-normal ${agentHealth.ok ? 'text-safe-green border-safe-green/30 bg-safe-green/5' : 'text-danger-pink border-danger-pink/30 bg-danger-pink/5'}`}
+                >
+                  <div className={`w-1.5 h-1.5 rounded-full mr-2 ${agentHealth.ok ? 'bg-safe-green animate-pulse' : 'bg-danger-pink'}`} />
+                  {agentHealth.ok ? (agentHealth.model || 'Connected') : 'Agent Offline'}
+                </Badge>
+              )}
             </h1>
           </div>
         </div>
@@ -308,92 +341,99 @@ export const ChatPage = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 ${message.role === 'user'
-                      ? 'bg-primary text-primary-foreground rounded-br-md'
-                      : 'bg-surface-2 rounded-bl-md'
-                      }`}
-                  >
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-
-                    {message.response && (
-                      <div className="mt-3 pt-3 border-t border-outline/50 space-y-2">
-                        <div className="flex items-center gap-2">
-                          {message.response.mode === 'safe' ? (
-                            <Badge variant="outline" className="gap-1 text-safe-green border-safe-green">
-                              <Shield className="w-3 h-3" />
-                              Safe Mode
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="gap-1 text-danger-pink border-danger-pink">
-                              <ShieldAlert className="w-3 h-3" />
-                              Dangerous Mode
-                            </Badge>
-                          )}
-
-                          {message.response.job_id && (
-                            <Badge variant="secondary" className="font-mono text-xs">
-                              Job: {message.response.job_id.slice(0, 8)}...
-                            </Badge>
-                          )}
-                        </div>
-
-                        {message.jobStatus && (
-                          <div className="text-xs">
-                            <span className="text-muted-foreground">Status: </span>
-                            <Badge
-                              variant={message.jobStatus.state === 'DONE' ? 'default' : 'outline'}
-                              className={
-                                message.jobStatus.state === 'FAILED'
-                                  ? 'bg-danger-pink'
-                                  : message.jobStatus.state === 'DONE'
-                                    ? 'bg-safe-green'
-                                    : ''
-                              }
-                            >
-                              {message.jobStatus.state}
-                              {pollingJobId === message.response?.job_id && (
-                                <Loader2 className="w-3 h-3 ml-1 animate-spin" />
-                              )}
-                            </Badge>
-                            {message.jobStatus.final_result && (
-                              <pre className="mt-2 p-2 rounded bg-background text-xs font-mono overflow-auto max-h-[200px]">
-                                {message.jobStatus.final_result}
-                              </pre>
-                            )}
-                            {message.jobStatus.error && (
-                              <p className="mt-2 text-danger-pink">{message.jobStatus.error}</p>
-                            )}
-                          </div>
-                        )}
-
-                        {message.response.plan && (
-                          <Collapsible>
-                            <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="sm" className="w-full justify-between p-2 h-auto">
-                                <span className="flex items-center gap-1 text-xs">
-                                  <FileText className="w-3 h-3" />
-                                  View Execution Plan
-                                </span>
-                                <ChevronDown className="w-3 h-3" />
-                              </Button>
-                            </CollapsibleTrigger>
-                            <CollapsibleContent>
-                              <pre className="mt-2 p-2 rounded bg-background text-xs font-mono overflow-auto max-h-[200px]">
-                                {JSON.stringify(message.response.plan, null, 2)}
-                              </pre>
-                            </CollapsibleContent>
-                          </Collapsible>
-                        )}
-                      </div>
-                    )}
-
-                    <p
-                      className={`text-xs mt-2 ${message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                  <div className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div
+                      className={`max-w-[85%] rounded-2xl px-4 py-3 ${message.role === 'user'
+                        ? 'bg-primary text-primary-foreground rounded-br-md'
+                        : 'bg-surface-2 rounded-bl-md'
                         }`}
                     >
-                      {message.timestamp}
-                    </p>
+                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+
+                      {message.response && (
+                        <div className="mt-3 pt-3 border-t border-outline/50 space-y-2">
+                          <div className="flex items-center gap-2">
+                            {message.response.mode === 'safe' ? (
+                              <Badge variant="outline" className="gap-1 text-safe-green border-safe-green">
+                                <Shield className="w-3 h-3" />
+                                Safe Mode
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="gap-1 text-danger-pink border-danger-pink">
+                                <ShieldAlert className="w-3 h-3" />
+                                Dangerous Mode
+                              </Badge>
+                            )}
+
+                            {message.response.job_id && (
+                              <Badge variant="secondary" className="font-mono text-xs">
+                                Job: {message.response.job_id.slice(0, 8)}...
+                              </Badge>
+                            )}
+                          </div>
+
+                          {message.jobStatus && (
+                            <div className="text-xs">
+                              <span className="text-muted-foreground">Status: </span>
+                              <Badge
+                                variant={message.jobStatus.state === 'DONE' ? 'default' : 'outline'}
+                                className={
+                                  message.jobStatus.state === 'FAILED'
+                                    ? 'bg-danger-pink'
+                                    : message.jobStatus.state === 'DONE'
+                                      ? 'bg-safe-green'
+                                      : ''
+                                }
+                              >
+                                {message.jobStatus.state}
+                                {pollingJobId === message.response?.job_id && (
+                                  <Loader2 className="w-3 h-3 ml-1 animate-spin" />
+                                )}
+                              </Badge>
+                              {message.jobStatus.final_result && (
+                                <pre className="mt-2 p-2 rounded bg-background text-xs font-mono overflow-auto max-h-[200px]">
+                                  {message.jobStatus.final_result}
+                                </pre>
+                              )}
+                              {message.jobStatus.error && (
+                                <p className="mt-2 text-danger-pink">{message.jobStatus.error}</p>
+                              )}
+                            </div>
+                          )}
+
+                          {message.response.plan && (
+                            <Collapsible>
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="sm" className="w-full justify-between p-2 h-auto">
+                                  <span className="flex items-center gap-1 text-xs">
+                                    <FileText className="w-3 h-3" />
+                                    View Execution Plan
+                                  </span>
+                                  <ChevronDown className="w-3 h-3" />
+                                </Button>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <pre className="mt-2 p-2 rounded bg-background text-xs font-mono overflow-auto max-h-[200px]">
+                                  {JSON.stringify(message.response.plan, null, 2)}
+                                </pre>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          )}
+                        </div>
+                      )}
+
+                      <p
+                        className={`text-xs mt-2 ${message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                          }`}
+                      >
+                        {message.timestamp}
+                      </p>
+                    </div>
+                    {message.sender_device_id && (
+                      <span className="text-[10px] opacity-40 px-2 mt-1">
+                        via {message.sender_device_id === 'self' ? 'Local Device' : (devices.find(d => d.device_id === message.sender_device_id)?.device_name || message.sender_device_id)}
+                      </span>
+                    )}
                   </div>
                 </motion.div>
               ))}
