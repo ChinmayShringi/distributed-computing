@@ -125,11 +125,11 @@ class AppSidebar extends ConsumerWidget {
   }
 
   void _navigate(BuildContext context, int index) {
+    context.pop(); // Close drawer first
     navigationShell.goBranch(
       index,
       initialLocation: index == navigationShell.currentIndex,
     );
-    context.pop(); // Close drawer
   }
 }
 
@@ -346,10 +346,12 @@ class _SidebarFooter extends StatelessWidget {
                 Text(
                   'Sariya Rizwan',
                   style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   'Admin Mode',
                   style: GoogleFonts.inter(fontSize: 11, color: AppColors.mutedIcon),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

@@ -86,49 +86,67 @@ class _ChatBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const EdgeMeshLogo(size: 68),
-            const SizedBox(height: 24),
-            Text(
-              'Hello! I am EDGE MESH.',
-              textAlign: TextAlign.center,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Spacer(flex: 3),
+          const EdgeMeshLogo(size: 80),
+          const SizedBox(height: 32),
+          RichText(
+            textAlign: TextAlign.center,
+            text: TextSpan(
               style: GoogleFonts.inter(
-                color: const Color(0xFFE6EDF6),
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: FontWeight.w700,
                 letterSpacing: -0.5,
               ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Ask me to run commands, check devices, or manage your network.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                color: const Color(0xFFA7B1C2),
-                fontSize: 15,
-                height: 1.4,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 32),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              alignment: WrapAlignment.center,
-              children: const [
-                _SuggestionChip('Show my devices'),
-                _SuggestionChip('Run status check'),
-                _SuggestionChip('Start stream on laptop'),
-                _SuggestionChip('Download shared/report.txt'),
+              children: [
+                 const TextSpan(text: 'Hello! I am ', style: TextStyle(color: Color(0xFFE6EDF6))),
+                 const TextSpan(text: 'Edge', style: TextStyle(color: AppColors.safeGreen)),
+                 const TextSpan(text: 'Mesh', style: TextStyle(color: AppColors.primaryRed)),
+                 const TextSpan(text: '.', style: TextStyle(color: Color(0xFFE6EDF6))),
               ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Ask me to run commands, check devices, or manage your network.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              color: const Color(0xFFA7B1C2),
+              fontSize: 15,
+              height: 1.45,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 48),
+          
+          // Formal 2x2 Grid for Suggestion Chips
+          Column(
+            children: [
+              Row(
+                children: const [
+                  Expanded(child: _SuggestionChip('Show my devices')),
+                  SizedBox(width: 12),
+                  Expanded(child: _SuggestionChip('Run status check')),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: const [
+                  Expanded(child: _SuggestionChip('Start stream on laptop')),
+                  SizedBox(width: 12),
+                  Expanded(child: _SuggestionChip('Download shared report')),
+                ],
+              ),
+            ],
+          ),
+          
+          const Spacer(flex: 4),
+        ],
       ),
     ).animate().fadeIn(duration: 600.ms).scale(begin: const Offset(0.98, 0.98), curve: Curves.easeOut);
   }
@@ -144,13 +162,15 @@ class _SuggestionChip extends StatelessWidget {
       onTap: () {},
       borderRadius: BorderRadius.circular(999),
       child: Container(
+        alignment: Alignment.center,
+        width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: const Color(0xFF121B2B).withOpacity(0.45),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(color: const Color(0xFF233043).withOpacity(0.9)),
         ),
-        child: Text(text, style: const TextStyle(color: Color(0xFFE6EDF6), fontSize: 13)),
+        child: Text(text, style: const TextStyle(color: Color(0xFFE6EDF6), fontSize: 10, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
       ),
     );
   }
@@ -165,66 +185,80 @@ class _ComposerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+      padding: const EdgeInsets.fromLTRB(24, 10, 24, 14),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _CircleIconBtn(
-            icon: Icons.add_rounded,
-            onTap: () => _openActionsSheet(context),
-          ),
-          const SizedBox(width: 10),
-
           Expanded(
             child: Container(
-              constraints: const BoxConstraints(minHeight: 46),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              constraints: const BoxConstraints(minHeight: 48),
               decoration: BoxDecoration(
-                color: const Color(0xFF121B2B).withOpacity(0.55),
+                color: const Color(0xFF1E2636),
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: const Color(0xFF233043).withOpacity(0.9)),
               ),
               child: Row(
                 children: [
+                   const SizedBox(width: 8),
+                   IconButton(
+                    icon: const Icon(Icons.add_rounded, color: Color(0xFFA7B1C2), size: 24),
+                    onPressed: () => _openActionsSheet(context),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
                       controller: controller,
-                      maxLines: 5,
+                      maxLines: 1,
                       minLines: 1,
                       style: const TextStyle(color: Color(0xFFE6EDF6), fontSize: 14),
                       decoration: const InputDecoration(
-                        hintText: 'Message EDGE MESH…',
+                        hintText: 'Message Edge Mesh...',
                         hintStyle: TextStyle(color: Color(0xFF7C879A), fontSize: 14),
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(vertical: 12),
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        contentPadding: EdgeInsets.symmetric(vertical: 14),
+                        isDense: true,
                       ),
                     ),
                   ),
-                  Icon(Icons.mic_none_rounded, color: const Color(0xFFA7B1C2), size: 20),
+                   const SizedBox(width: 8),
+                   IconButton(
+                    icon: const Icon(Icons.mic_none_rounded, color: Color(0xFFA7B1C2), size: 20),
+                    onPressed: () {},
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                   const SizedBox(width: 12),
                 ],
               ),
             ),
           ),
+          const SizedBox(width: 8),
 
-          const SizedBox(width: 10),
-
-          // Send button like screenshot
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              color: const Color(0xFFE6EDF6),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.arrow_upward_rounded, color: Color(0xFF0A0D12), size: 22),
-              onPressed: onSend,
+          // Send Button
+          GestureDetector(
+            onTap: onSend,
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                color: Color(0xFFE6EDF6),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.arrow_upward_rounded, color: AppColors.backgroundDark, size: 20),
             ),
           ),
         ],
       ),
     );
   }
+}
+
 
   void _openActionsSheet(BuildContext context) {
     showModalBottomSheet(
@@ -247,7 +281,6 @@ class _ComposerBar extends StatelessWidget {
       ),
     );
   }
-}
 
 class _CircleIconBtn extends StatelessWidget {
   final IconData icon;
