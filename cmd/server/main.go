@@ -1244,8 +1244,11 @@ func (s *OrchestratorServer) runLLMGenerate(ctx context.Context, prompt string) 
 		return "", fmt.Errorf("chat provider not configured (set CHAT_PROVIDER in .env)")
 	}
 
+	// Convert prompt to chat message format
+	messages := []llm.ChatMessage{{Role: "user", Content: prompt}}
+
 	// Use chat provider directly for simple text generation
-	result, err := s.chatProvider.Chat(ctx, prompt)
+	result, err := s.chatProvider.Chat(ctx, messages)
 	if err != nil {
 		return "", fmt.Errorf("chat provider error: %w", err)
 	}
