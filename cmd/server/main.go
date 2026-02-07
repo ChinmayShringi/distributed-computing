@@ -3549,9 +3549,14 @@ func main() {
 	}
 
 	// Initialize Agent (LLM tool-calling)
+	// Extract port from addr (e.g., "0.0.0.0:50051" -> ":50051")
+	agentGRPCAddr := "localhost:50051"
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		agentGRPCAddr = "localhost" + addr[idx:]
+	}
 	var agentLoop *llm.AgentLoop
 	agentLoop, err = llm.NewAgentLoop(llm.AgentLoopConfig{
-		GRPCAddr: "localhost" + addr, // dial self for tools
+		GRPCAddr: agentGRPCAddr, // dial self for tools
 	})
 	if err != nil {
 		log.Printf("[WARN] Agent init failed: %v — agent endpoint will be disabled", err)
@@ -3616,7 +3621,12 @@ func main() {
 
 	go func() {
 		log.Printf("[INFO] HTTP Web UI listening on %s", webAddr)
-		log.Printf("[INFO] Open http://localhost%s in your browser", webAddr)
+		// Extract port for localhost URL (e.g., "0.0.0.0:8080" -> ":8080")
+		webPort := webAddr
+		if idx := strings.LastIndex(webAddr, ":"); idx >= 0 {
+			webPort = webAddr[idx:]
+		}
+		log.Printf("[INFO] Open http://localhost%s in your browser", webPort)
 		if err := http.ListenAndServe(webAddr, httpMux); err != nil {
 			log.Fatalf("[FATAL] HTTP server failed: %v", err)
 		}
