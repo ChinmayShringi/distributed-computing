@@ -8,8 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make build          # Build CLI binary
-make server         # Run gRPC server (go run ./cmd/server)
-make web            # Run web UI server (go run ./cmd/web)
+make server         # Run unified server (gRPC :50051 + HTTP Web UI :8080)
 make proto          # Generate gRPC code from proto/orchestrator.proto
 make test           # Run tests (go test -v ./...)
 make lint           # Run golangci-lint
@@ -26,7 +25,7 @@ This script:
 1. Builds `dist/server-windows.exe`
 2. Stops existing server on Windows
 3. Copies binary via SCP
-4. Starts server with `GRPC_ADDR=0.0.0.0:50051`
+4. Starts server with `GRPC_ADDR=0.0.0.0:50051` and `WEB_ADDR=0.0.0.0:8080`
 5. Verifies server is listening
 
 See `docs/connection.md` for detailed Windows machine setup (SSH credentials, manual deployment, multi-device demo).
@@ -46,8 +45,7 @@ EdgeCLI is a distributed orchestration system with a gRPC control plane for mult
 
 | Binary | Purpose | Default Port |
 |--------|---------|--------------|
-| `cmd/server` | gRPC orchestrator (device registry, job management, task routing, WebRTC streaming, bulk HTTP file server) | `:50051` (gRPC), `:8081` (HTTP bulk) |
-| `cmd/web` | HTTP server with embedded web UI (REST-to-gRPC bridge) | `:8080` |
+| `cmd/server` | Unified server: gRPC orchestrator + HTTP Web UI (device registry, job management, task routing, WebRTC streaming, LLM chat/agent, QAI Hub) | `:50051` (gRPC), `:8080` (HTTP), `:8081` (bulk download) |
 | `cmd/client` | CLI client for device registration and commands | - |
 | `cmd/edgecli` | Main CLI with safe/dangerous mode execution | - |
 | `brain/windows-ai-cli` | C#/.NET CLI for AI-powered plan generation (Windows only, separate `dotnet build`) | - |
@@ -55,18 +53,22 @@ EdgeCLI is a distributed orchestration system with a gRPC control plane for mult
 ### Control Flow
 
 ```
-┌─────────────┐     HTTP      ┌─────────────┐     gRPC      ┌─────────────┐
-│   Browser   │──────────────▶│  Web Server  │──────────────▶│   Server    │
-│             │               │  (cmd/web)   │               │(coordinator)│
-└─────────────┘               └──────────────┘               └──────┬──────┘
-                                                                    │
-                                                     ┌──────────────┼──────────────┐
-                                                     │              │              │
-                                                     ▼              ▼              ▼
-                                               ┌──────────┐  ┌──────────┐  ┌────────────┐
-                                               │ Worker A  │  │ Worker B │  │  Brain CLI │
-                                               │ (remote)  │  │ (remote) │  │ (Windows)  │
-                                               └──────────┘  └──────────┘  └────────────┘
+┌─────────────┐     HTTP      ┌───────────────────────────────────┐
+│   Browser   │──────────────▶│         Unified Server            │
+│             │               │         (cmd/server)              │
+└─────────────┘               │  ┌─────────────┬─────────────┐   │
+                              │  │ HTTP Handler │ gRPC Handler│   │
+                              │  │  (in-process call)         │   │
+                              │  └─────────────┴─────────────┘   │
+                              └───────────────┬───────────────────┘
+                                              │
+                               ┌──────────────┼──────────────┐
+                               │              │              │
+                               ▼              ▼              ▼
+                         ┌──────────┐  ┌──────────┐  ┌────────────┐
+                         │ Worker A  │  │ Worker B │  │  Brain CLI │
+                         │ (remote)  │  │ (remote) │  │ (Windows)  │
+                         └──────────┘  └──────────┘  └────────────┘
 ```
 
 ### Key Flows
@@ -138,8 +140,8 @@ When modifying `proto/orchestrator.proto`:
 1. Run `make proto` to regenerate
 2. Generated files go to `proto/*.pb.go`
 3. Update corresponding handlers in `cmd/server/main.go`
-4. Update REST bridge in `cmd/web/main.go` if new RPC is web-exposed
-5. Update `cmd/web/index.html` if new UI needed
+4. Update REST handlers in `cmd/server/main.go` (WebHandler) if new RPC is web-exposed
+5. Update `cmd/server/index.html` if new UI needed
 6. Update `docs/features/grpc.md`
 
 ### Current gRPC RPCs (16 total)
@@ -215,10 +217,9 @@ When modifying `proto/orchestrator.proto`:
 
 ## Multi-Device Setup
 
-1. Start coordinator: `make server`
-2. Start web UI: `make web`
-3. Register remote device: `go run ./cmd/client register --name "device-name" --self-addr "IP:50051" --platform "windows" --arch "amd64"`
-4. Open http://localhost:8080
+1. Start server: `make server` (starts both gRPC and HTTP Web UI)
+2. Register remote device: `go run ./cmd/client register --name "device-name" --self-addr "IP:50051" --platform "windows" --arch "amd64"`
+3. Open http://localhost:8080
 
 ## Windows Machine
 
