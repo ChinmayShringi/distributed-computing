@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -1624,6 +1625,11 @@ func (s *OrchestratorServer) startBulkHTTP() {
 }
 
 func main() {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Printf("[INFO] No .env file found: %v", err)
+	}
+
 	// Get address from environment or use default
 	addr := os.Getenv("GRPC_ADDR")
 	if addr == "" {
