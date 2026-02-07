@@ -6,7 +6,7 @@ import { CapabilityChip } from '@/components/CapabilityChip';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { listDevices, type Device } from '@/api';
+import { listDevices, hasCapability, type Device } from '@/api';
 import {
   Search,
   RefreshCw,
@@ -130,13 +130,13 @@ export const DevicesPage = () => {
 
                     {/* Capabilities */}
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {device.has_gpu && (
+                      {hasCapability(device, 'gpu') && (
                         <Badge variant="outline" className="gap-1 text-safe-green border-safe-green">
                           <Cpu className="w-3 h-3" />
                           GPU
                         </Badge>
                       )}
-                      {device.has_npu && (
+                      {hasCapability(device, 'npu') && (
                         <Badge variant="outline" className="gap-1 text-primary border-primary">
                           <Zap className="w-3 h-3" />
                           NPU
@@ -145,7 +145,7 @@ export const DevicesPage = () => {
                       {device.has_local_model && (
                         <Badge variant="outline" className="gap-1 text-info-blue border-info-blue">
                           <Bot className="w-3 h-3" />
-                          LLM
+                          {device.local_model_name || 'LLM'}
                         </Badge>
                       )}
                       {device.can_screen_capture && (
@@ -158,7 +158,7 @@ export const DevicesPage = () => {
 
                     {/* Address */}
                     <p className="text-xs text-muted-foreground font-mono">
-                      {device.self_addr}
+                      {device.grpc_addr}
                     </p>
                   </div>
 

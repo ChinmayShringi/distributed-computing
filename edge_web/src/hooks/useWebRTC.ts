@@ -161,7 +161,11 @@ export function useWebRTC(options: UseWebRTCOptions = {}): UseWebRTCResult {
           throw new Error('No local description');
         }
 
-        await sendStreamAnswer(startResponse.stream_id, localDesc.sdp);
+        await sendStreamAnswer(
+          startResponse.stream_id,
+          localDesc.sdp,
+          startResponse.selected_device_addr
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to start stream';
         setError(message);

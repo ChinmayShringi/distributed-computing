@@ -66,15 +66,15 @@ export const AgentPage = () => {
       const result = await getAgentHealth();
       setHealth(result);
       toast({
-        title: result.available ? 'Agent Available' : 'Agent Unavailable',
-        description: result.available
+        title: result.ok ? 'Agent Available' : 'Agent Unavailable',
+        description: result.ok
           ? `Provider: ${result.provider}, Model: ${result.model}`
-          : result.error,
-        variant: result.available ? 'default' : 'destructive',
+          : result.error || 'Agent is not available',
+        variant: result.ok ? 'default' : 'destructive',
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to check health';
-      setHealth({ provider: '', model: '', available: false, error: message });
+      setHealth({ provider: '', model: '', base_url: '', ok: false, error: message });
     } finally {
       setHealthLoading(false);
     }
@@ -175,14 +175,14 @@ export const AgentPage = () => {
           {health && (
             <Badge
               variant="outline"
-              className={health.available ? 'text-safe-green border-safe-green' : 'text-danger-pink border-danger-pink'}
+              className={health.ok ? 'text-safe-green border-safe-green' : 'text-danger-pink border-danger-pink'}
             >
-              {health.available ? (
+              {health.ok ? (
                 <CheckCircle className="w-3 h-3 mr-1" />
               ) : (
                 <XCircle className="w-3 h-3 mr-1" />
               )}
-              {health.available ? health.model : 'Unavailable'}
+              {health.ok ? health.model : 'Unavailable'}
             </Badge>
           )}
           <Button
