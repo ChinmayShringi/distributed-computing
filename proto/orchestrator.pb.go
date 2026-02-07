@@ -662,12 +662,18 @@ func (x *DeviceAck) GetRegisteredAt() int64 {
 }
 
 type DeviceStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	LastSeen      int64                  `protobuf:"varint,2,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"` // unix seconds
-	CpuLoad       float64                `protobuf:"fixed64,3,opt,name=cpu_load,json=cpuLoad,proto3" json:"cpu_load,omitempty"`   // 0..1, or -1 if unavailable
-	MemUsedMb     uint64                 `protobuf:"varint,4,opt,name=mem_used_mb,json=memUsedMb,proto3" json:"mem_used_mb,omitempty"`
-	MemTotalMb    uint64                 `protobuf:"varint,5,opt,name=mem_total_mb,json=memTotalMb,proto3" json:"mem_total_mb,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId   string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	LastSeen   int64                  `protobuf:"varint,2,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"` // unix seconds
+	CpuLoad    float64                `protobuf:"fixed64,3,opt,name=cpu_load,json=cpuLoad,proto3" json:"cpu_load,omitempty"`   // 0..1, or -1 if unavailable
+	MemUsedMb  uint64                 `protobuf:"varint,4,opt,name=mem_used_mb,json=memUsedMb,proto3" json:"mem_used_mb,omitempty"`
+	MemTotalMb uint64                 `protobuf:"varint,5,opt,name=mem_total_mb,json=memTotalMb,proto3" json:"mem_total_mb,omitempty"`
+	// GPU/NPU metrics for activity tracking
+	GpuLoad       float64 `protobuf:"fixed64,6,opt,name=gpu_load,json=gpuLoad,proto3" json:"gpu_load,omitempty"` // 0..1, or -1 if unavailable
+	GpuMemUsedMb  uint64  `protobuf:"varint,7,opt,name=gpu_mem_used_mb,json=gpuMemUsedMb,proto3" json:"gpu_mem_used_mb,omitempty"`
+	GpuMemTotalMb uint64  `protobuf:"varint,8,opt,name=gpu_mem_total_mb,json=gpuMemTotalMb,proto3" json:"gpu_mem_total_mb,omitempty"`
+	NpuLoad       float64 `protobuf:"fixed64,9,opt,name=npu_load,json=npuLoad,proto3" json:"npu_load,omitempty"`             // 0..1, or -1 if unavailable
+	TimestampMs   int64   `protobuf:"varint,10,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"` // sample timestamp (unix milliseconds)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -733,6 +739,41 @@ func (x *DeviceStatus) GetMemUsedMb() uint64 {
 func (x *DeviceStatus) GetMemTotalMb() uint64 {
 	if x != nil {
 		return x.MemTotalMb
+	}
+	return 0
+}
+
+func (x *DeviceStatus) GetGpuLoad() float64 {
+	if x != nil {
+		return x.GpuLoad
+	}
+	return 0
+}
+
+func (x *DeviceStatus) GetGpuMemUsedMb() uint64 {
+	if x != nil {
+		return x.GpuMemUsedMb
+	}
+	return 0
+}
+
+func (x *DeviceStatus) GetGpuMemTotalMb() uint64 {
+	if x != nil {
+		return x.GpuMemTotalMb
+	}
+	return 0
+}
+
+func (x *DeviceStatus) GetNpuLoad() float64 {
+	if x != nil {
+		return x.NpuLoad
+	}
+	return 0
+}
+
+func (x *DeviceStatus) GetTimestampMs() int64 {
+	if x != nil {
+		return x.TimestampMs
 	}
 	return 0
 }
@@ -3155,6 +3196,731 @@ func (x *LLMTaskResponse) GetError() string {
 	return ""
 }
 
+type MetricsSample struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TimestampMs   int64                  `protobuf:"varint,1,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
+	CpuLoad       float64                `protobuf:"fixed64,2,opt,name=cpu_load,json=cpuLoad,proto3" json:"cpu_load,omitempty"`
+	MemUsedMb     uint64                 `protobuf:"varint,3,opt,name=mem_used_mb,json=memUsedMb,proto3" json:"mem_used_mb,omitempty"`
+	MemTotalMb    uint64                 `protobuf:"varint,4,opt,name=mem_total_mb,json=memTotalMb,proto3" json:"mem_total_mb,omitempty"`
+	GpuLoad       float64                `protobuf:"fixed64,5,opt,name=gpu_load,json=gpuLoad,proto3" json:"gpu_load,omitempty"`
+	GpuMemUsedMb  uint64                 `protobuf:"varint,6,opt,name=gpu_mem_used_mb,json=gpuMemUsedMb,proto3" json:"gpu_mem_used_mb,omitempty"`
+	GpuMemTotalMb uint64                 `protobuf:"varint,7,opt,name=gpu_mem_total_mb,json=gpuMemTotalMb,proto3" json:"gpu_mem_total_mb,omitempty"`
+	NpuLoad       float64                `protobuf:"fixed64,8,opt,name=npu_load,json=npuLoad,proto3" json:"npu_load,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetricsSample) Reset() {
+	*x = MetricsSample{}
+	mi := &file_orchestrator_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetricsSample) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetricsSample) ProtoMessage() {}
+
+func (x *MetricsSample) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetricsSample.ProtoReflect.Descriptor instead.
+func (*MetricsSample) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *MetricsSample) GetTimestampMs() int64 {
+	if x != nil {
+		return x.TimestampMs
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetCpuLoad() float64 {
+	if x != nil {
+		return x.CpuLoad
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetMemUsedMb() uint64 {
+	if x != nil {
+		return x.MemUsedMb
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetMemTotalMb() uint64 {
+	if x != nil {
+		return x.MemTotalMb
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetGpuLoad() float64 {
+	if x != nil {
+		return x.GpuLoad
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetGpuMemUsedMb() uint64 {
+	if x != nil {
+		return x.GpuMemUsedMb
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetGpuMemTotalMb() uint64 {
+	if x != nil {
+		return x.GpuMemTotalMb
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetNpuLoad() float64 {
+	if x != nil {
+		return x.NpuLoad
+	}
+	return 0
+}
+
+type RunningTask struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	JobId         string                 `protobuf:"bytes,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Kind          string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Input         string                 `protobuf:"bytes,4,opt,name=input,proto3" json:"input,omitempty"`
+	DeviceId      string                 `protobuf:"bytes,5,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DeviceName    string                 `protobuf:"bytes,6,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	StartedAtMs   int64                  `protobuf:"varint,7,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	ElapsedMs     int64                  `protobuf:"varint,8,opt,name=elapsed_ms,json=elapsedMs,proto3" json:"elapsed_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunningTask) Reset() {
+	*x = RunningTask{}
+	mi := &file_orchestrator_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunningTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunningTask) ProtoMessage() {}
+
+func (x *RunningTask) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunningTask.ProtoReflect.Descriptor instead.
+func (*RunningTask) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *RunningTask) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *RunningTask) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *RunningTask) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *RunningTask) GetInput() string {
+	if x != nil {
+		return x.Input
+	}
+	return ""
+}
+
+func (x *RunningTask) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *RunningTask) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
+}
+
+func (x *RunningTask) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
+	}
+	return 0
+}
+
+func (x *RunningTask) GetElapsedMs() int64 {
+	if x != nil {
+		return x.ElapsedMs
+	}
+	return 0
+}
+
+type DeviceActivity struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId         string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DeviceName       string                 `protobuf:"bytes,2,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	RunningTaskCount int32                  `protobuf:"varint,3,opt,name=running_task_count,json=runningTaskCount,proto3" json:"running_task_count,omitempty"`
+	CurrentStatus    *DeviceStatus          `protobuf:"bytes,4,opt,name=current_status,json=currentStatus,proto3" json:"current_status,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DeviceActivity) Reset() {
+	*x = DeviceActivity{}
+	mi := &file_orchestrator_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceActivity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceActivity) ProtoMessage() {}
+
+func (x *DeviceActivity) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceActivity.ProtoReflect.Descriptor instead.
+func (*DeviceActivity) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *DeviceActivity) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *DeviceActivity) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
+}
+
+func (x *DeviceActivity) GetRunningTaskCount() int32 {
+	if x != nil {
+		return x.RunningTaskCount
+	}
+	return 0
+}
+
+func (x *DeviceActivity) GetCurrentStatus() *DeviceStatus {
+	if x != nil {
+		return x.CurrentStatus
+	}
+	return nil
+}
+
+type ActivityData struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RunningTasks     []*RunningTask         `protobuf:"bytes,1,rep,name=running_tasks,json=runningTasks,proto3" json:"running_tasks,omitempty"`
+	DeviceActivities []*DeviceActivity      `protobuf:"bytes,2,rep,name=device_activities,json=deviceActivities,proto3" json:"device_activities,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ActivityData) Reset() {
+	*x = ActivityData{}
+	mi := &file_orchestrator_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivityData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivityData) ProtoMessage() {}
+
+func (x *ActivityData) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivityData.ProtoReflect.Descriptor instead.
+func (*ActivityData) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *ActivityData) GetRunningTasks() []*RunningTask {
+	if x != nil {
+		return x.RunningTasks
+	}
+	return nil
+}
+
+func (x *ActivityData) GetDeviceActivities() []*DeviceActivity {
+	if x != nil {
+		return x.DeviceActivities
+	}
+	return nil
+}
+
+type GetActivityRequest struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	IncludeMetricsHistory bool                   `protobuf:"varint,1,opt,name=include_metrics_history,json=includeMetricsHistory,proto3" json:"include_metrics_history,omitempty"`
+	MetricsSinceMs        int64                  `protobuf:"varint,2,opt,name=metrics_since_ms,json=metricsSinceMs,proto3" json:"metrics_since_ms,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *GetActivityRequest) Reset() {
+	*x = GetActivityRequest{}
+	mi := &file_orchestrator_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetActivityRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetActivityRequest) ProtoMessage() {}
+
+func (x *GetActivityRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetActivityRequest.ProtoReflect.Descriptor instead.
+func (*GetActivityRequest) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *GetActivityRequest) GetIncludeMetricsHistory() bool {
+	if x != nil {
+		return x.IncludeMetricsHistory
+	}
+	return false
+}
+
+func (x *GetActivityRequest) GetMetricsSinceMs() int64 {
+	if x != nil {
+		return x.MetricsSinceMs
+	}
+	return 0
+}
+
+type MetricsHistoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DeviceName    string                 `protobuf:"bytes,2,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	Samples       []*MetricsSample       `protobuf:"bytes,3,rep,name=samples,proto3" json:"samples,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetricsHistoryResponse) Reset() {
+	*x = MetricsHistoryResponse{}
+	mi := &file_orchestrator_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetricsHistoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetricsHistoryResponse) ProtoMessage() {}
+
+func (x *MetricsHistoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetricsHistoryResponse.ProtoReflect.Descriptor instead.
+func (*MetricsHistoryResponse) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *MetricsHistoryResponse) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *MetricsHistoryResponse) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
+}
+
+func (x *MetricsHistoryResponse) GetSamples() []*MetricsSample {
+	if x != nil {
+		return x.Samples
+	}
+	return nil
+}
+
+type GetActivityResponse struct {
+	state         protoimpl.MessageState             `protogen:"open.v1"`
+	Activity      *ActivityData                      `protobuf:"bytes,1,opt,name=activity,proto3" json:"activity,omitempty"`
+	DeviceMetrics map[string]*MetricsHistoryResponse `protobuf:"bytes,2,rep,name=device_metrics,json=deviceMetrics,proto3" json:"device_metrics,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetActivityResponse) Reset() {
+	*x = GetActivityResponse{}
+	mi := &file_orchestrator_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetActivityResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetActivityResponse) ProtoMessage() {}
+
+func (x *GetActivityResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetActivityResponse.ProtoReflect.Descriptor instead.
+func (*GetActivityResponse) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *GetActivityResponse) GetActivity() *ActivityData {
+	if x != nil {
+		return x.Activity
+	}
+	return nil
+}
+
+func (x *GetActivityResponse) GetDeviceMetrics() map[string]*MetricsHistoryResponse {
+	if x != nil {
+		return x.DeviceMetrics
+	}
+	return nil
+}
+
+// Enhanced task status for visualization
+type TaskStatusEnhanced struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	TaskId             string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	JobId              string                 `protobuf:"bytes,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	AssignedDeviceId   string                 `protobuf:"bytes,3,opt,name=assigned_device_id,json=assignedDeviceId,proto3" json:"assigned_device_id,omitempty"`
+	AssignedDeviceName string                 `protobuf:"bytes,4,opt,name=assigned_device_name,json=assignedDeviceName,proto3" json:"assigned_device_name,omitempty"`
+	Kind               string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	Input              string                 `protobuf:"bytes,6,opt,name=input,proto3" json:"input,omitempty"`
+	State              string                 `protobuf:"bytes,7,opt,name=state,proto3" json:"state,omitempty"`
+	Result             string                 `protobuf:"bytes,8,opt,name=result,proto3" json:"result,omitempty"`
+	Error              string                 `protobuf:"bytes,9,opt,name=error,proto3" json:"error,omitempty"`
+	GroupIndex         int32                  `protobuf:"varint,10,opt,name=group_index,json=groupIndex,proto3" json:"group_index,omitempty"`
+	StartedAtMs        int64                  `protobuf:"varint,11,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	EndedAtMs          int64                  `protobuf:"varint,12,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *TaskStatusEnhanced) Reset() {
+	*x = TaskStatusEnhanced{}
+	mi := &file_orchestrator_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatusEnhanced) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatusEnhanced) ProtoMessage() {}
+
+func (x *TaskStatusEnhanced) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatusEnhanced.ProtoReflect.Descriptor instead.
+func (*TaskStatusEnhanced) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *TaskStatusEnhanced) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetAssignedDeviceId() string {
+	if x != nil {
+		return x.AssignedDeviceId
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetAssignedDeviceName() string {
+	if x != nil {
+		return x.AssignedDeviceName
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetInput() string {
+	if x != nil {
+		return x.Input
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *TaskStatusEnhanced) GetGroupIndex() int32 {
+	if x != nil {
+		return x.GroupIndex
+	}
+	return 0
+}
+
+func (x *TaskStatusEnhanced) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
+	}
+	return 0
+}
+
+func (x *TaskStatusEnhanced) GetEndedAtMs() int64 {
+	if x != nil {
+		return x.EndedAtMs
+	}
+	return 0
+}
+
+type JobDetailResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	State         string                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	Tasks         []*TaskStatusEnhanced  `protobuf:"bytes,3,rep,name=tasks,proto3" json:"tasks,omitempty"`
+	FinalResult   string                 `protobuf:"bytes,4,opt,name=final_result,json=finalResult,proto3" json:"final_result,omitempty"`
+	CurrentGroup  int32                  `protobuf:"varint,5,opt,name=current_group,json=currentGroup,proto3" json:"current_group,omitempty"`
+	TotalGroups   int32                  `protobuf:"varint,6,opt,name=total_groups,json=totalGroups,proto3" json:"total_groups,omitempty"`
+	CreatedAtMs   int64                  `protobuf:"varint,7,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	StartedAtMs   int64                  `protobuf:"varint,8,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	EndedAtMs     int64                  `protobuf:"varint,9,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JobDetailResponse) Reset() {
+	*x = JobDetailResponse{}
+	mi := &file_orchestrator_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobDetailResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobDetailResponse) ProtoMessage() {}
+
+func (x *JobDetailResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_orchestrator_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobDetailResponse.ProtoReflect.Descriptor instead.
+func (*JobDetailResponse) Descriptor() ([]byte, []int) {
+	return file_orchestrator_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *JobDetailResponse) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *JobDetailResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *JobDetailResponse) GetTasks() []*TaskStatusEnhanced {
+	if x != nil {
+		return x.Tasks
+	}
+	return nil
+}
+
+func (x *JobDetailResponse) GetFinalResult() string {
+	if x != nil {
+		return x.FinalResult
+	}
+	return ""
+}
+
+func (x *JobDetailResponse) GetCurrentGroup() int32 {
+	if x != nil {
+		return x.CurrentGroup
+	}
+	return 0
+}
+
+func (x *JobDetailResponse) GetTotalGroups() int32 {
+	if x != nil {
+		return x.TotalGroups
+	}
+	return 0
+}
+
+func (x *JobDetailResponse) GetCreatedAtMs() int64 {
+	if x != nil {
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+func (x *JobDetailResponse) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
+	}
+	return 0
+}
+
+func (x *JobDetailResponse) GetEndedAtMs() int64 {
+	if x != nil {
+		return x.EndedAtMs
+	}
+	return 0
+}
+
 var File_orchestrator_proto protoreflect.FileDescriptor
 
 const file_orchestrator_proto_rawDesc = "" +
@@ -3203,14 +3969,20 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x13local_chat_endpoint\x18\x10 \x01(\tR\x11localChatEndpoint\"@\n" +
 	"\tDeviceAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12#\n" +
-	"\rregistered_at\x18\x02 \x01(\x03R\fregisteredAt\"\xa5\x01\n" +
+	"\rregistered_at\x18\x02 \x01(\x03R\fregisteredAt\"\xce\x02\n" +
 	"\fDeviceStatus\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\tlast_seen\x18\x02 \x01(\x03R\blastSeen\x12\x19\n" +
 	"\bcpu_load\x18\x03 \x01(\x01R\acpuLoad\x12\x1e\n" +
 	"\vmem_used_mb\x18\x04 \x01(\x04R\tmemUsedMb\x12 \n" +
 	"\fmem_total_mb\x18\x05 \x01(\x04R\n" +
-	"memTotalMb\"\x14\n" +
+	"memTotalMb\x12\x19\n" +
+	"\bgpu_load\x18\x06 \x01(\x01R\agpuLoad\x12%\n" +
+	"\x0fgpu_mem_used_mb\x18\a \x01(\x04R\fgpuMemUsedMb\x12'\n" +
+	"\x10gpu_mem_total_mb\x18\b \x01(\x04R\rgpuMemTotalMb\x12\x19\n" +
+	"\bnpu_load\x18\t \x01(\x01R\anpuLoad\x12!\n" +
+	"\ftimestamp_ms\x18\n" +
+	" \x01(\x03R\vtimestampMs\"\x14\n" +
 	"\x12ListDevicesRequest\"E\n" +
 	"\x13ListDevicesResponse\x12.\n" +
 	"\adevices\x18\x01 \x03(\v2\x14.edgemesh.DeviceInfoR\adevices\"X\n" +
@@ -3413,12 +4185,81 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\n" +
 	"model_used\x18\x02 \x01(\tR\tmodelUsed\x12)\n" +
 	"\x10tokens_generated\x18\x03 \x01(\x03R\x0ftokensGenerated\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error*[\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x95\x02\n" +
+	"\rMetricsSample\x12!\n" +
+	"\ftimestamp_ms\x18\x01 \x01(\x03R\vtimestampMs\x12\x19\n" +
+	"\bcpu_load\x18\x02 \x01(\x01R\acpuLoad\x12\x1e\n" +
+	"\vmem_used_mb\x18\x03 \x01(\x04R\tmemUsedMb\x12 \n" +
+	"\fmem_total_mb\x18\x04 \x01(\x04R\n" +
+	"memTotalMb\x12\x19\n" +
+	"\bgpu_load\x18\x05 \x01(\x01R\agpuLoad\x12%\n" +
+	"\x0fgpu_mem_used_mb\x18\x06 \x01(\x04R\fgpuMemUsedMb\x12'\n" +
+	"\x10gpu_mem_total_mb\x18\a \x01(\x04R\rgpuMemTotalMb\x12\x19\n" +
+	"\bnpu_load\x18\b \x01(\x01R\anpuLoad\"\xe8\x01\n" +
+	"\vRunningTask\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x15\n" +
+	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05input\x18\x04 \x01(\tR\x05input\x12\x1b\n" +
+	"\tdevice_id\x18\x05 \x01(\tR\bdeviceId\x12\x1f\n" +
+	"\vdevice_name\x18\x06 \x01(\tR\n" +
+	"deviceName\x12\"\n" +
+	"\rstarted_at_ms\x18\a \x01(\x03R\vstartedAtMs\x12\x1d\n" +
+	"\n" +
+	"elapsed_ms\x18\b \x01(\x03R\telapsedMs\"\xbb\x01\n" +
+	"\x0eDeviceActivity\x12\x1b\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1f\n" +
+	"\vdevice_name\x18\x02 \x01(\tR\n" +
+	"deviceName\x12,\n" +
+	"\x12running_task_count\x18\x03 \x01(\x05R\x10runningTaskCount\x12=\n" +
+	"\x0ecurrent_status\x18\x04 \x01(\v2\x16.edgemesh.DeviceStatusR\rcurrentStatus\"\x91\x01\n" +
+	"\fActivityData\x12:\n" +
+	"\rrunning_tasks\x18\x01 \x03(\v2\x15.edgemesh.RunningTaskR\frunningTasks\x12E\n" +
+	"\x11device_activities\x18\x02 \x03(\v2\x18.edgemesh.DeviceActivityR\x10deviceActivities\"v\n" +
+	"\x12GetActivityRequest\x126\n" +
+	"\x17include_metrics_history\x18\x01 \x01(\bR\x15includeMetricsHistory\x12(\n" +
+	"\x10metrics_since_ms\x18\x02 \x01(\x03R\x0emetricsSinceMs\"\x89\x01\n" +
+	"\x16MetricsHistoryResponse\x12\x1b\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1f\n" +
+	"\vdevice_name\x18\x02 \x01(\tR\n" +
+	"deviceName\x121\n" +
+	"\asamples\x18\x03 \x03(\v2\x17.edgemesh.MetricsSampleR\asamples\"\x86\x02\n" +
+	"\x13GetActivityResponse\x122\n" +
+	"\bactivity\x18\x01 \x01(\v2\x16.edgemesh.ActivityDataR\bactivity\x12W\n" +
+	"\x0edevice_metrics\x18\x02 \x03(\v20.edgemesh.GetActivityResponse.DeviceMetricsEntryR\rdeviceMetrics\x1ab\n" +
+	"\x12DeviceMetricsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
+	"\x05value\x18\x02 \x01(\v2 .edgemesh.MetricsHistoryResponseR\x05value:\x028\x01\"\xf7\x02\n" +
+	"\x12TaskStatusEnhanced\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x15\n" +
+	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12,\n" +
+	"\x12assigned_device_id\x18\x03 \x01(\tR\x10assignedDeviceId\x120\n" +
+	"\x14assigned_device_name\x18\x04 \x01(\tR\x12assignedDeviceName\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05input\x18\x06 \x01(\tR\x05input\x12\x14\n" +
+	"\x05state\x18\a \x01(\tR\x05state\x12\x16\n" +
+	"\x06result\x18\b \x01(\tR\x06result\x12\x14\n" +
+	"\x05error\x18\t \x01(\tR\x05error\x12\x1f\n" +
+	"\vgroup_index\x18\n" +
+	" \x01(\x05R\n" +
+	"groupIndex\x12\"\n" +
+	"\rstarted_at_ms\x18\v \x01(\x03R\vstartedAtMs\x12\x1e\n" +
+	"\vended_at_ms\x18\f \x01(\x03R\tendedAtMs\"\xc7\x02\n" +
+	"\x11JobDetailResponse\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\x122\n" +
+	"\x05tasks\x18\x03 \x03(\v2\x1c.edgemesh.TaskStatusEnhancedR\x05tasks\x12!\n" +
+	"\ffinal_result\x18\x04 \x01(\tR\vfinalResult\x12#\n" +
+	"\rcurrent_group\x18\x05 \x01(\x05R\fcurrentGroup\x12!\n" +
+	"\ftotal_groups\x18\x06 \x01(\x05R\vtotalGroups\x12\"\n" +
+	"\rcreated_at_ms\x18\a \x01(\x03R\vcreatedAtMs\x12\"\n" +
+	"\rstarted_at_ms\x18\b \x01(\x03R\vstartedAtMs\x12\x1e\n" +
+	"\vended_at_ms\x18\t \x01(\x03R\tendedAtMs*[\n" +
 	"\bReadMode\x12\x12\n" +
 	"\x0eREAD_MODE_FULL\x10\x00\x12\x12\n" +
 	"\x0eREAD_MODE_HEAD\x10\x01\x12\x12\n" +
 	"\x0eREAD_MODE_TAIL\x10\x02\x12\x13\n" +
-	"\x0fREAD_MODE_RANGE\x10\x032\xb6\v\n" +
+	"\x0fREAD_MODE_RANGE\x10\x032\x8a\r\n" +
 	"\x13OrchestratorService\x12=\n" +
 	"\rCreateSession\x12\x15.edgemesh.AuthRequest\x1a\x15.edgemesh.SessionInfo\x123\n" +
 	"\tHeartbeat\x12\x15.edgemesh.SessionInfo\x1a\x0f.edgemesh.Empty\x12E\n" +
@@ -3443,7 +4284,10 @@ const file_orchestrator_proto_rawDesc = "" +
 	"\x0eSyncChatMemory\x12\x18.edgemesh.ChatMemorySync\x1a .edgemesh.ChatMemorySyncResponse\x12:\n" +
 	"\rGetChatMemory\x12\x0f.edgemesh.Empty\x1a\x18.edgemesh.ChatMemoryData\x12A\n" +
 	"\n" +
-	"RunLLMTask\x12\x18.edgemesh.LLMTaskRequest\x1a\x19.edgemesh.LLMTaskResponseB\"Z github.com/edgecli/edgecli/protob\x06proto3"
+	"RunLLMTask\x12\x18.edgemesh.LLMTaskRequest\x1a\x19.edgemesh.LLMTaskResponse\x12J\n" +
+	"\vGetActivity\x12\x1c.edgemesh.GetActivityRequest\x1a\x1d.edgemesh.GetActivityResponse\x12H\n" +
+	"\x10GetDeviceMetrics\x12\x12.edgemesh.DeviceId\x1a .edgemesh.MetricsHistoryResponse\x12<\n" +
+	"\fGetJobDetail\x12\x0f.edgemesh.JobId\x1a\x1b.edgemesh.JobDetailResponseB\"Z github.com/edgecli/edgecli/protob\x06proto3"
 
 var (
 	file_orchestrator_proto_rawDescOnce sync.Once
@@ -3458,7 +4302,7 @@ func file_orchestrator_proto_rawDescGZIP() []byte {
 }
 
 var file_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
 var file_orchestrator_proto_goTypes = []any{
 	(ReadMode)(0),                  // 0: edgemesh.ReadMode
 	(RoutingPolicy_Mode)(0),        // 1: edgemesh.RoutingPolicy.Mode
@@ -3509,6 +4353,16 @@ var file_orchestrator_proto_goTypes = []any{
 	(*ChatMemoryData)(nil),         // 46: edgemesh.ChatMemoryData
 	(*LLMTaskRequest)(nil),         // 47: edgemesh.LLMTaskRequest
 	(*LLMTaskResponse)(nil),        // 48: edgemesh.LLMTaskResponse
+	(*MetricsSample)(nil),          // 49: edgemesh.MetricsSample
+	(*RunningTask)(nil),            // 50: edgemesh.RunningTask
+	(*DeviceActivity)(nil),         // 51: edgemesh.DeviceActivity
+	(*ActivityData)(nil),           // 52: edgemesh.ActivityData
+	(*GetActivityRequest)(nil),     // 53: edgemesh.GetActivityRequest
+	(*MetricsHistoryResponse)(nil), // 54: edgemesh.MetricsHistoryResponse
+	(*GetActivityResponse)(nil),    // 55: edgemesh.GetActivityResponse
+	(*TaskStatusEnhanced)(nil),     // 56: edgemesh.TaskStatusEnhanced
+	(*JobDetailResponse)(nil),      // 57: edgemesh.JobDetailResponse
+	nil,                            // 58: edgemesh.GetActivityResponse.DeviceMetricsEntry
 }
 var file_orchestrator_proto_depIdxs = []int32{
 	8,  // 0: edgemesh.ListDevicesResponse.devices:type_name -> edgemesh.DeviceInfo
@@ -3526,55 +4380,69 @@ var file_orchestrator_proto_depIdxs = []int32{
 	38, // 12: edgemesh.PlanCostResponse.device_costs:type_name -> edgemesh.DeviceCostEstimate
 	39, // 13: edgemesh.DeviceCostEstimate.step_costs:type_name -> edgemesh.StepCostEstimate
 	0,  // 14: edgemesh.ReadFileRequest.mode:type_name -> edgemesh.ReadMode
-	3,  // 15: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
-	4,  // 16: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
-	5,  // 17: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
-	8,  // 18: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
-	11, // 19: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
-	7,  // 20: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
-	13, // 21: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
-	2,  // 22: edgemesh.OrchestratorService.HealthCheck:input_type -> edgemesh.Empty
-	17, // 23: edgemesh.OrchestratorService.ExecuteRoutedCommand:input_type -> edgemesh.RoutedCommandRequest
-	20, // 24: edgemesh.OrchestratorService.SubmitJob:input_type -> edgemesh.JobRequest
-	19, // 25: edgemesh.OrchestratorService.GetJob:input_type -> edgemesh.JobId
-	28, // 26: edgemesh.OrchestratorService.RunTask:input_type -> edgemesh.TaskRequest
-	34, // 27: edgemesh.OrchestratorService.PreviewPlan:input_type -> edgemesh.PlanPreviewRequest
-	36, // 28: edgemesh.OrchestratorService.PreviewPlanCost:input_type -> edgemesh.PlanCostRequest
-	30, // 29: edgemesh.OrchestratorService.StartWebRTC:input_type -> edgemesh.WebRTCConfig
-	32, // 30: edgemesh.OrchestratorService.CompleteWebRTC:input_type -> edgemesh.WebRTCAnswer
-	33, // 31: edgemesh.OrchestratorService.StopWebRTC:input_type -> edgemesh.WebRTCStop
-	40, // 32: edgemesh.OrchestratorService.CreateDownloadTicket:input_type -> edgemesh.DownloadTicketRequest
-	42, // 33: edgemesh.OrchestratorService.ReadFile:input_type -> edgemesh.ReadFileRequest
-	44, // 34: edgemesh.OrchestratorService.SyncChatMemory:input_type -> edgemesh.ChatMemorySync
-	2,  // 35: edgemesh.OrchestratorService.GetChatMemory:input_type -> edgemesh.Empty
-	47, // 36: edgemesh.OrchestratorService.RunLLMTask:input_type -> edgemesh.LLMTaskRequest
-	4,  // 37: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
-	2,  // 38: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
-	6,  // 39: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
-	9,  // 40: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
-	12, // 41: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
-	10, // 42: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
-	14, // 43: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
-	15, // 44: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
-	18, // 45: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
-	25, // 46: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
-	26, // 47: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
-	29, // 48: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
-	35, // 49: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
-	37, // 50: edgemesh.OrchestratorService.PreviewPlanCost:output_type -> edgemesh.PlanCostResponse
-	31, // 51: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
-	2,  // 52: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
-	2,  // 53: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
-	41, // 54: edgemesh.OrchestratorService.CreateDownloadTicket:output_type -> edgemesh.DownloadTicketResponse
-	43, // 55: edgemesh.OrchestratorService.ReadFile:output_type -> edgemesh.ReadFileResponse
-	45, // 56: edgemesh.OrchestratorService.SyncChatMemory:output_type -> edgemesh.ChatMemorySyncResponse
-	46, // 57: edgemesh.OrchestratorService.GetChatMemory:output_type -> edgemesh.ChatMemoryData
-	48, // 58: edgemesh.OrchestratorService.RunLLMTask:output_type -> edgemesh.LLMTaskResponse
-	37, // [37:59] is the sub-list for method output_type
-	15, // [15:37] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	10, // 15: edgemesh.DeviceActivity.current_status:type_name -> edgemesh.DeviceStatus
+	50, // 16: edgemesh.ActivityData.running_tasks:type_name -> edgemesh.RunningTask
+	51, // 17: edgemesh.ActivityData.device_activities:type_name -> edgemesh.DeviceActivity
+	49, // 18: edgemesh.MetricsHistoryResponse.samples:type_name -> edgemesh.MetricsSample
+	52, // 19: edgemesh.GetActivityResponse.activity:type_name -> edgemesh.ActivityData
+	58, // 20: edgemesh.GetActivityResponse.device_metrics:type_name -> edgemesh.GetActivityResponse.DeviceMetricsEntry
+	56, // 21: edgemesh.JobDetailResponse.tasks:type_name -> edgemesh.TaskStatusEnhanced
+	54, // 22: edgemesh.GetActivityResponse.DeviceMetricsEntry.value:type_name -> edgemesh.MetricsHistoryResponse
+	3,  // 23: edgemesh.OrchestratorService.CreateSession:input_type -> edgemesh.AuthRequest
+	4,  // 24: edgemesh.OrchestratorService.Heartbeat:input_type -> edgemesh.SessionInfo
+	5,  // 25: edgemesh.OrchestratorService.ExecuteCommand:input_type -> edgemesh.CommandRequest
+	8,  // 26: edgemesh.OrchestratorService.RegisterDevice:input_type -> edgemesh.DeviceInfo
+	11, // 27: edgemesh.OrchestratorService.ListDevices:input_type -> edgemesh.ListDevicesRequest
+	7,  // 28: edgemesh.OrchestratorService.GetDeviceStatus:input_type -> edgemesh.DeviceId
+	13, // 29: edgemesh.OrchestratorService.RunAITask:input_type -> edgemesh.AITaskRequest
+	2,  // 30: edgemesh.OrchestratorService.HealthCheck:input_type -> edgemesh.Empty
+	17, // 31: edgemesh.OrchestratorService.ExecuteRoutedCommand:input_type -> edgemesh.RoutedCommandRequest
+	20, // 32: edgemesh.OrchestratorService.SubmitJob:input_type -> edgemesh.JobRequest
+	19, // 33: edgemesh.OrchestratorService.GetJob:input_type -> edgemesh.JobId
+	28, // 34: edgemesh.OrchestratorService.RunTask:input_type -> edgemesh.TaskRequest
+	34, // 35: edgemesh.OrchestratorService.PreviewPlan:input_type -> edgemesh.PlanPreviewRequest
+	36, // 36: edgemesh.OrchestratorService.PreviewPlanCost:input_type -> edgemesh.PlanCostRequest
+	30, // 37: edgemesh.OrchestratorService.StartWebRTC:input_type -> edgemesh.WebRTCConfig
+	32, // 38: edgemesh.OrchestratorService.CompleteWebRTC:input_type -> edgemesh.WebRTCAnswer
+	33, // 39: edgemesh.OrchestratorService.StopWebRTC:input_type -> edgemesh.WebRTCStop
+	40, // 40: edgemesh.OrchestratorService.CreateDownloadTicket:input_type -> edgemesh.DownloadTicketRequest
+	42, // 41: edgemesh.OrchestratorService.ReadFile:input_type -> edgemesh.ReadFileRequest
+	44, // 42: edgemesh.OrchestratorService.SyncChatMemory:input_type -> edgemesh.ChatMemorySync
+	2,  // 43: edgemesh.OrchestratorService.GetChatMemory:input_type -> edgemesh.Empty
+	47, // 44: edgemesh.OrchestratorService.RunLLMTask:input_type -> edgemesh.LLMTaskRequest
+	53, // 45: edgemesh.OrchestratorService.GetActivity:input_type -> edgemesh.GetActivityRequest
+	7,  // 46: edgemesh.OrchestratorService.GetDeviceMetrics:input_type -> edgemesh.DeviceId
+	19, // 47: edgemesh.OrchestratorService.GetJobDetail:input_type -> edgemesh.JobId
+	4,  // 48: edgemesh.OrchestratorService.CreateSession:output_type -> edgemesh.SessionInfo
+	2,  // 49: edgemesh.OrchestratorService.Heartbeat:output_type -> edgemesh.Empty
+	6,  // 50: edgemesh.OrchestratorService.ExecuteCommand:output_type -> edgemesh.CommandResponse
+	9,  // 51: edgemesh.OrchestratorService.RegisterDevice:output_type -> edgemesh.DeviceAck
+	12, // 52: edgemesh.OrchestratorService.ListDevices:output_type -> edgemesh.ListDevicesResponse
+	10, // 53: edgemesh.OrchestratorService.GetDeviceStatus:output_type -> edgemesh.DeviceStatus
+	14, // 54: edgemesh.OrchestratorService.RunAITask:output_type -> edgemesh.AITaskResponse
+	15, // 55: edgemesh.OrchestratorService.HealthCheck:output_type -> edgemesh.HealthStatus
+	18, // 56: edgemesh.OrchestratorService.ExecuteRoutedCommand:output_type -> edgemesh.RoutedCommandResponse
+	25, // 57: edgemesh.OrchestratorService.SubmitJob:output_type -> edgemesh.JobInfo
+	26, // 58: edgemesh.OrchestratorService.GetJob:output_type -> edgemesh.JobStatus
+	29, // 59: edgemesh.OrchestratorService.RunTask:output_type -> edgemesh.TaskResult
+	35, // 60: edgemesh.OrchestratorService.PreviewPlan:output_type -> edgemesh.PlanPreviewResponse
+	37, // 61: edgemesh.OrchestratorService.PreviewPlanCost:output_type -> edgemesh.PlanCostResponse
+	31, // 62: edgemesh.OrchestratorService.StartWebRTC:output_type -> edgemesh.WebRTCOffer
+	2,  // 63: edgemesh.OrchestratorService.CompleteWebRTC:output_type -> edgemesh.Empty
+	2,  // 64: edgemesh.OrchestratorService.StopWebRTC:output_type -> edgemesh.Empty
+	41, // 65: edgemesh.OrchestratorService.CreateDownloadTicket:output_type -> edgemesh.DownloadTicketResponse
+	43, // 66: edgemesh.OrchestratorService.ReadFile:output_type -> edgemesh.ReadFileResponse
+	45, // 67: edgemesh.OrchestratorService.SyncChatMemory:output_type -> edgemesh.ChatMemorySyncResponse
+	46, // 68: edgemesh.OrchestratorService.GetChatMemory:output_type -> edgemesh.ChatMemoryData
+	48, // 69: edgemesh.OrchestratorService.RunLLMTask:output_type -> edgemesh.LLMTaskResponse
+	55, // 70: edgemesh.OrchestratorService.GetActivity:output_type -> edgemesh.GetActivityResponse
+	54, // 71: edgemesh.OrchestratorService.GetDeviceMetrics:output_type -> edgemesh.MetricsHistoryResponse
+	57, // 72: edgemesh.OrchestratorService.GetJobDetail:output_type -> edgemesh.JobDetailResponse
+	48, // [48:73] is the sub-list for method output_type
+	23, // [23:48] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_orchestrator_proto_init() }
@@ -3588,7 +4456,7 @@ func file_orchestrator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orchestrator_proto_rawDesc), len(file_orchestrator_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   47,
+			NumMessages:   57,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

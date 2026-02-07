@@ -123,7 +123,8 @@ Plan generation priority:
 | `internal/tools` | Tool registry interface |
 | `internal/webrtcstream` | WebRTC screen streaming with pion/webrtc |
 | `internal/transfer` | Download ticket manager (one-time-use tokens, TTL, crypto/rand) |
-| `internal/sysinfo` | Host metrics sampling (CPU, memory) |
+| `internal/sysinfo` | Host metrics sampling (CPU, memory, GPU, NPU) with platform-specific implementations |
+| `internal/metrics` | In-memory metrics history storage for activity tracking |
 | `internal/deviceid` | Device ID persistence (`~/.edgemesh/device_id`) |
 | `brain/windows-ai-cli` | C#/.NET CLI tool wrapping Windows AI APIs (Windows only, separate build) |
 
@@ -146,7 +147,7 @@ When modifying `proto/orchestrator.proto`:
 5. Update `cmd/server/index.html` if new UI needed
 6. Update `docs/features/grpc.md`
 
-### Current gRPC RPCs (17 total)
+### Current gRPC RPCs (20 total)
 
 | RPC | Purpose |
 |-----|---------|
@@ -155,11 +156,14 @@ When modifying `proto/orchestrator.proto`:
 | `ExecuteCommand` | Run allowed command on server |
 | `RegisterDevice` | Register device in registry |
 | `ListDevices` | List all registered devices |
-| `GetDeviceStatus` | Get device metrics |
+| `GetDeviceStatus` | Get device metrics (CPU, memory, GPU, NPU) |
 | `RunAITask` | Route AI task to best device (stub) |
 | `ExecuteRoutedCommand` | Run command on best available device via policy |
 | `SubmitJob` | Submit distributed job across devices |
 | `GetJob` | Get job status and results |
+| `GetJobDetail` | Get enhanced job details with task timing |
+| `GetActivity` | Get running tasks and device activity |
+| `GetDeviceMetrics` | Get metrics history for a device |
 | `PreviewPlan` | Preview execution plan without creating a job |
 | `PreviewPlanCost` | Estimate execution cost for a plan before running |
 | `RunTask` | Execute a task locally (worker RPC) |
@@ -169,7 +173,7 @@ When modifying `proto/orchestrator.proto`:
 | `StartWebRTC` / `CompleteWebRTC` / `StopWebRTC` | Screen streaming via WebRTC |
 | `HealthCheck` | Server health status |
 
-### Current REST Endpoints (19 total)
+### Current REST Endpoints (22 total)
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -178,6 +182,9 @@ When modifying `proto/orchestrator.proto`:
 | `/api/routed-cmd` | POST | Execute routed command |
 | `/api/submit-job` | POST | Submit distributed job |
 | `/api/job?id=` | GET | Get job status |
+| `/api/job-detail?id=` | GET | Get enhanced job details with task timing |
+| `/api/activity` | GET | Get running tasks and device activity (Activity Panel) |
+| `/api/device-metrics?device_id=` | GET | Get metrics history for a device |
 | `/api/plan` | POST | Preview execution plan |
 | `/api/plan-cost` | POST | Estimate execution cost for a plan |
 | `/api/assistant` | POST | Natural language interface |
