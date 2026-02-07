@@ -36,51 +36,80 @@ class ChatController {
 
     final messagesNotifier = ref.read(chatMessagesProvider);
     messagesNotifier.value = [...messagesNotifier.value, userMsg];
-    
+
     final thinkingNotifier = ref.read(chatThinkingProvider);
     thinkingNotifier.value = true;
 
-    await Future.delayed(const Duration(milliseconds: 1500));
+    try {
+      // Send message to the real assistant API
+      final response = await _grpcService.sendAssistantMessage(text);
 
-    final query = text.toLowerCase();
-    
-    if (query.contains('device')) {
-      _handleDeviceQuery();
-    } else if (query.contains('run') || query.contains('ls') || query.contains('python')) {
-      _handleRunQuery(text);
-    } else if (query.contains('stream')) {
-      _handleStreamQuery();
-    } else if (query.contains('download')) {
-      _handleDownloadQuery();
-    } else {
-      _handleGenericQuery();
+      // Parse response and determine message type
+      final reply = response['reply'] as String? ?? 'No response from assistant';
+      final raw = response['raw'];
+      final jobId = response['job_id'] as String?;
+      final mode = response['mode'] as String?;
+
+      // Determine how to display the response
+      if (raw is List && raw.isNotEmpty && mode == 'command' && _isDeviceList(raw)) {
+        // Device list response
+        _showDeviceListResponse(reply, raw);
+      } else if (jobId != null && jobId.isNotEmpty) {
+        // Job was submitted - show plan card
+        _showJobSubmittedResponse(reply, response);
+      } else {
+        // Regular text response
+        _showTextResponse(reply);
+      }
+    } catch (e) {
+      // Show error message
+      _showTextResponse('Sorry, I encountered an error: $e');
+    } finally {
+      thinkingNotifier.value = false;
     }
-
-    thinkingNotifier.value = false;
   }
 
-  Future<void> _handleDeviceQuery() async {
+  /// Check if raw data looks like a device list
+  bool _isDeviceList(List raw) {
+    if (raw.isEmpty) return false;
+    final first = raw[0];
+    if (first is Map) {
+      return first.containsKey('device_id') || first.containsKey('device_name');
+    }
+    return false;
+  }
+
+  /// Show a text-only response
+  void _showTextResponse(String text) {
     final assistantMsg = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.text,
       sender: MessageSender.assistant,
-      text: 'Right away. Here are the devices currently connected to your mesh:',
+      text: text,
     );
 
-    // Fetch real device data
-    List<Map<String, dynamic>> devices = [];
-    try {
-      devices = await _grpcService.listDevices();
-    } catch (e) {
-      // Fallback to empty list if error
-      devices = [];
-    }
+    final notifier = ref.read(chatMessagesProvider);
+    notifier.value = [...notifier.value, assistantMsg];
+  }
 
-    final transformedDevices = devices.map((d) => {
-      'name': d['device_name'] ?? 'Unknown',
-      'type': _deviceType(d['platform']),
-      'status': 'online',
-      'os': '${d['platform'] ?? ''} ${d['arch'] ?? ''}',
+  /// Show a device list response
+  void _showDeviceListResponse(String introText, List devices) {
+    final assistantMsg = ChatMessage(
+      id: _uuid.v4(),
+      type: MessageType.text,
+      sender: MessageSender.assistant,
+      text: introText.isNotEmpty ? introText : 'Here are the devices connected to your mesh:',
+    );
+
+    final transformedDevices = devices.map((d) {
+      final device = d as Map;
+      return {
+        'name': device['device_name'] ?? 'Unknown',
+        'type': _deviceType(device['platform']?.toString()),
+        'status': 'online',
+        'os': '${device['platform'] ?? ''} ${device['arch'] ?? ''}'.trim(),
+        'device_id': device['device_id'],
+      };
     }).toList();
 
     final deviceCard = ChatMessage(
@@ -94,28 +123,44 @@ class ChatController {
     notifier.value = [...notifier.value, assistantMsg, deviceCard];
   }
 
-  void _handleRunQuery(String text) {
+  /// Show a job submitted response with plan card
+  void _showJobSubmittedResponse(String introText, Map<String, dynamic> response) {
+    final jobId = response['job_id'] as String? ?? '';
+    final plan = response['plan'];
+
     final assistantMsg = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.text,
       sender: MessageSender.assistant,
-      text: 'I understand. I\'ll prepare a plan to execute that command.',
+      text: introText.isNotEmpty ? introText : 'I\'ve created a job to handle your request.',
     );
+
+    // Extract plan details if available
+    List<String> steps = ['Analyzing request', 'Selecting best device', 'Executing task'];
+    String device = 'Auto-selected';
+    String policy = 'BEST_AVAILABLE';
+
+    if (plan is Map) {
+      if (plan['groups'] is List) {
+        steps = (plan['groups'] as List).map((g) {
+          if (g is Map && g['tasks'] is List) {
+            final tasks = g['tasks'] as List;
+            return tasks.map((t) => t['kind']?.toString() ?? 'Task').join(', ');
+          }
+          return 'Task group';
+        }).toList();
+      }
+    }
 
     final planCard = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.plan,
       sender: MessageSender.assistant,
       payload: {
-        'steps': [
-          'Identify best available device (Samsung Galaxy S24)',
-          'Check execution policy (SAFE)',
-          'Initialize remote shell',
-          'Execute command and stream output'
-        ],
-        'cmd': text,
-        'device': 'Samsung Galaxy S24',
-        'policy': 'SAFE',
+        'steps': steps,
+        'job_id': jobId,
+        'device': device,
+        'policy': policy,
         'risk': 'Low',
       },
     );
@@ -124,99 +169,114 @@ class ChatController {
     notifier.value = [...notifier.value, assistantMsg, planCard];
   }
 
-  Future<void> _handleStreamQuery() async {
-    final assistantMsg = ChatMessage(
-      id: _uuid.v4(),
-      type: MessageType.text,
-      sender: MessageSender.assistant,
-      text: 'Sure. Select a device to start streaming its desktop or terminal:',
-    );
-
-    // Fetch real device data
-    List<Map<String, dynamic>> devices = [];
-    try {
-      devices = await _grpcService.listDevices();
-    } catch (e) {
-      // Fallback to empty list if error
-      devices = [];
-    }
-
-    final transformedDevices = devices.map((d) => {
-      'name': d['device_name'] ?? 'Unknown',
-      'type': _deviceType(d['platform']),
-      'status': 'online',
-      'os': '${d['platform'] ?? ''} ${d['arch'] ?? ''}',
-      'device_id': d['device_id'],
-    }).toList();
-
-    final streamCard = ChatMessage(
-      id: _uuid.v4(),
-      type: MessageType.stream,
-      sender: MessageSender.assistant,
-      payload: {'devices': transformedDevices},
-    );
-
-    final notifier = ref.read(chatMessagesProvider);
-    notifier.value = [...notifier.value, assistantMsg, streamCard];
-  }
-
-  void _handleDownloadQuery() {
-    final assistantMsg = ChatMessage(
-      id: _uuid.v4(),
-      type: MessageType.text,
-      sender: MessageSender.assistant,
-      text: 'Accessing shared file system...',
-    );
-
-    final downloadCard = ChatMessage(
-      id: _uuid.v4(),
-      type: MessageType.download,
-      sender: MessageSender.assistant,
-      payload: {
-        'file': 'shared/test.txt',
-        'device': 'MacBook Pro M3',
-        'size': '2.4 MB',
-      },
-    );
-
-    final notifier = ref.read(chatMessagesProvider);
-    notifier.value = [...notifier.value, assistantMsg, downloadCard];
-  }
-
-  void _handleGenericQuery() {
-    final assistantMsg = ChatMessage(
-      id: _uuid.v4(),
-      type: MessageType.text,
-      sender: MessageSender.assistant,
-      text: 'I\'m not quite sure how to help with that yet. Try asking me to "show devices" or "run a command".',
-    );
-
-    final notifier = ref.read(chatMessagesProvider);
-    notifier.value = [...notifier.value, assistantMsg];
-  }
-
-  void executePlan(Map<String, dynamic> payload) async {
+  /// Execute a plan (called when user taps "Execute" on a plan card)
+  Future<void> executePlan(Map<String, dynamic> payload) async {
     final thinkingNotifier = ref.read(chatThinkingProvider);
     thinkingNotifier.value = true;
-    
-    await Future.delayed(const Duration(milliseconds: 2000));
-    
+
+    final jobId = payload['job_id'] as String?;
+
+    try {
+      if (jobId != null && jobId.isNotEmpty) {
+        // Poll for job completion
+        Map<String, dynamic>? jobResult;
+        for (int i = 0; i < 30; i++) { // Max 30 seconds
+          await Future.delayed(const Duration(seconds: 1));
+          jobResult = await _grpcService.getJob(jobId);
+          final state = jobResult['state'] as String? ?? '';
+          if (state == 'DONE' || state == 'FAILED') {
+            break;
+          }
+        }
+
+        if (jobResult != null) {
+          final state = jobResult['state'] as String? ?? 'UNKNOWN';
+          final result = jobResult['final_result'] as String? ?? '';
+
+          final resultCard = ChatMessage(
+            id: _uuid.v4(),
+            type: MessageType.result,
+            sender: MessageSender.assistant,
+            payload: {
+              'cmd': payload['cmd'] ?? 'job',
+              'device': payload['device'] ?? 'Distributed',
+              'host_compute': 'CPU',
+              'time': 'completed',
+              'exit_code': state == 'DONE' ? 0 : 1,
+              'output': result,
+            },
+          );
+
+          final messagesNotifier = ref.read(chatMessagesProvider);
+          messagesNotifier.value = [...messagesNotifier.value, resultCard];
+        }
+      } else {
+        // No job ID, just show mock result
+        _showMockExecutionResult(payload);
+      }
+    } catch (e) {
+      _showTextResponse('Error executing plan: $e');
+    } finally {
+      thinkingNotifier.value = false;
+    }
+  }
+
+  /// Show mock execution result (fallback when no job ID)
+  void _showMockExecutionResult(Map<String, dynamic> payload) {
     final resultCard = ChatMessage(
       id: _uuid.v4(),
       type: MessageType.result,
       sender: MessageSender.assistant,
       payload: {
-        'cmd': payload['cmd'],
-        'device': payload['device'],
+        'cmd': payload['cmd'] ?? 'command',
+        'device': payload['device'] ?? 'Selected Device',
         'host_compute': 'CPU',
         'time': '124ms',
         'exit_code': 0,
-        'output': 'Active Internet connections (w/o servers)\nProto Recv-Q Send-Q Local Address           Foreign Address         State\ntcp        0      0 192.168.1.10:50051      192.168.1.12:44342      ESTABLISHED',
+        'output': 'Command executed successfully.',
       },
     );
 
     final messagesNotifier = ref.read(chatMessagesProvider);
     messagesNotifier.value = [...messagesNotifier.value, resultCard];
-    thinkingNotifier.value = false;
+  }
+
+  /// Legacy method for stream queries (still uses device list from gRPC)
+  Future<void> handleStreamQuery() async {
+    final thinkingNotifier = ref.read(chatThinkingProvider);
+    thinkingNotifier.value = true;
+
+    try {
+      final devices = await _grpcService.listDevices();
+
+      final assistantMsg = ChatMessage(
+        id: _uuid.v4(),
+        type: MessageType.text,
+        sender: MessageSender.assistant,
+        text: 'Select a device to start streaming:',
+      );
+
+      final transformedDevices = devices.map((d) => {
+        'name': d['device_name'] ?? 'Unknown',
+        'type': _deviceType(d['platform']),
+        'status': 'online',
+        'os': '${d['platform'] ?? ''} ${d['arch'] ?? ''}',
+        'device_id': d['device_id'],
+      }).toList();
+
+      final streamCard = ChatMessage(
+        id: _uuid.v4(),
+        type: MessageType.stream,
+        sender: MessageSender.assistant,
+        payload: {'devices': transformedDevices},
+      );
+
+      final notifier = ref.read(chatMessagesProvider);
+      notifier.value = [...notifier.value, assistantMsg, streamCard];
+    } catch (e) {
+      _showTextResponse('Error fetching devices for streaming: $e');
+    } finally {
+      thinkingNotifier.value = false;
+    }
   }
 }

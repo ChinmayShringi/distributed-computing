@@ -10,10 +10,11 @@ import kotlinx.coroutines.launch
 
 /**
  * GrpcMethodChannelHandler handles method channel calls from Flutter
- * and delegates them to the OrchestratorGrpcClient
+ * and delegates them to the OrchestratorGrpcClient and AssistantClient
  */
 class GrpcMethodChannelHandler(
     private val grpcClient: OrchestratorGrpcClient,
+    private val assistantClient: AssistantClient,
     private val mainActivity: MainActivity
 ) : MethodChannel.MethodCallHandler {
 
@@ -33,6 +34,8 @@ class GrpcMethodChannelHandler(
             "isWorkerRunning" -> handleIsWorkerRunning(result)
             "getJob" -> handleGetJob(call, result)
             "requestScreenCapture" -> handleRequestScreenCapture(result)
+            "sendAssistantMessage" -> handleSendAssistantMessage(call, result)
+            "getActivity" -> handleGetActivity(call, result)
             else -> result.notImplemented()
         }
     }
@@ -205,6 +208,43 @@ class GrpcMethodChannelHandler(
             mainActivity.requestScreenCapture(result)
         } catch (e: Exception) {
             result.error("SCREEN_CAPTURE_ERROR", e.message, e.toString())
+        }
+    }
+
+    /**
+     * Handle sending a message to the assistant via REST API
+     */
+    private fun handleSendAssistantMessage(call: MethodCall, result: MethodChannel.Result) {
+        scope.launch {
+            try {
+                val text = call.argument<String>("text")
+                if (text == null) {
+                    result.error("INVALID_ARGUMENT", "text is required", null)
+                    return@launch
+                }
+
+                val response = assistantClient.sendMessage(text)
+                result.success(response)
+            } catch (e: Exception) {
+                result.error("ASSISTANT_ERROR", e.message, e.toString())
+            }
+        }
+    }
+
+    /**
+     * Handle getting activity data (running tasks, device activities) via gRPC
+     */
+    private fun handleGetActivity(call: MethodCall, result: MethodChannel.Result) {
+        scope.launch {
+            try {
+                val includeMetrics = call.argument<Boolean>("include_metrics") ?: false
+                val metricsSinceMs = call.argument<Long>("metrics_since_ms") ?: 0L
+
+                val activity = grpcClient.getActivity(includeMetrics, metricsSinceMs)
+                result.success(activity)
+            } catch (e: Exception) {
+                result.error("GET_ACTIVITY_ERROR", e.message, e.toString())
+            }
         }
     }
 }
