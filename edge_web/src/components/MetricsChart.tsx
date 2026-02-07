@@ -39,23 +39,32 @@ export function MetricsChart({ data, metric, height = 200 }: MetricsChartProps) 
       return { data: [], devices: [] };
     }
 
-    const devices = deviceEntries.map((d) => d.device_name);
+    const devices = deviceEntries.map((d) => ({
+      id: d.device_id,
+      name: d.device_name,
+      label: `${d.device_name} (${d.device_id.slice(0, 8)})`,
+    }));
     const byTimestamp = new Map<number, Record<string, number | string>>();
+
+    const allDeviceIds = deviceEntries.map(d => d.device_id);
 
     deviceEntries.forEach((device) => {
       device.samples.forEach((sample) => {
-        if (!byTimestamp.has(sample.timestamp_ms)) {
-          byTimestamp.set(sample.timestamp_ms, {
-            time: new Date(sample.timestamp_ms).toLocaleTimeString([], {
+        // Round to nearest 2 seconds to better align polling jitter
+        const bucketTimestamp = Math.floor(sample.timestamp_ms / 2000) * 2000;
+
+        if (!byTimestamp.has(bucketTimestamp)) {
+          byTimestamp.set(bucketTimestamp, {
+            time: new Date(bucketTimestamp).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
               second: '2-digit',
             }),
-            timestamp: sample.timestamp_ms,
+            timestamp: bucketTimestamp,
           });
         }
 
-        const record = byTimestamp.get(sample.timestamp_ms)!;
+        const record = byTimestamp.get(bucketTimestamp)!;
 
         // Get the value based on metric type
         let value = 0;
@@ -71,13 +80,14 @@ export function MetricsChart({ data, metric, height = 200 }: MetricsChartProps) 
           value = Math.max(gpuVal, npuVal) * 100;
         }
 
-        record[device.device_name] = value;
+        // Use device_id as the unique key
+        record[device.device_id] = value;
       });
     });
 
     // Sort by timestamp and take last 60 samples
     const sortedData = Array.from(byTimestamp.values())
-      .sort((a, b) => (a.timestamp as number) - (b.timestamp as number))
+      .sort((a: any, b: any) => (a.timestamp as number) - (b.timestamp as number))
       .slice(-60);
 
     return { data: sortedData, devices };
@@ -104,6 +114,7 @@ export function MetricsChart({ data, metric, height = 200 }: MetricsChartProps) 
           className="fill-muted-foreground"
           tickLine={false}
           axisLine={false}
+          minTickGap={30}
         />
         <YAxis
           domain={[0, 100]}
@@ -128,13 +139,15 @@ export function MetricsChart({ data, metric, height = 200 }: MetricsChartProps) 
         />
         {chartData.devices.map((device, index) => (
           <Line
-            key={device}
+            key={device.id}
             type="monotone"
-            dataKey={device}
-            name={device}
+            dataKey={device.id}
+            name={device.label}
             stroke={deviceColors[index % deviceColors.length]}
             strokeWidth={2}
             dot={false}
+            connectNulls={true}
+            isAnimationActive={false}
             activeDot={{ r: 4 }}
           />
         ))}

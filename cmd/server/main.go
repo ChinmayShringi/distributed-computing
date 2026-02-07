@@ -1485,9 +1485,42 @@ func (s *OrchestratorServer) fetchAndStoreDeviceMetrics(ctx context.Context, dev
 	}
 
 	// Get device status
-	status, err := s.GetDeviceStatus(ctx, &pb.DeviceId{DeviceId: deviceID})
+	var status *pb.DeviceStatus
+	var err error
+
+	if deviceID == s.selfDeviceID {
+		// Self: Get local status directly
+		status, err = s.GetDeviceStatus(ctx, &pb.DeviceId{DeviceId: deviceID})
+	} else {
+		// Remote: Poll via gRPC
+		// Create a short timeout for polling
+		pollCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		// Dial the device
+		var conn *grpc.ClientConn
+		conn, err = grpc.DialContext(pollCtx, device.Info.GrpcAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock(),
+		)
+		if err != nil {
+			// Don't log every failure to avoid spam, or log debug
+			// log.Printf("[DEBUG] Failed to dial device %s: %v", deviceID, err)
+			return
+		}
+		defer conn.Close()
+
+		client := pb.NewOrchestratorServiceClient(conn)
+		status, err = client.GetDeviceStatus(pollCtx, &pb.DeviceId{DeviceId: deviceID})
+
+		// Update registry with fresh status if successful
+		if err == nil && status != nil {
+			s.registry.UpdateStatus(deviceID, status)
+		}
+	}
+
 	if err != nil {
-		log.Printf("[WARN] Failed to get device metrics: %v", err)
+		// log.Printf("[WARN] Failed to get device metrics: %v", err)
 		return
 	}
 
@@ -1547,7 +1580,7 @@ func (s *OrchestratorServer) executeTaskGroup(job *jobs.Job, tasks []*jobs.Task)
 			s.jobManager.SetTaskRunning(job.ID, t.ID)
 
 			// Create context with timeout
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Second)
 			defer cancel()
 
 			// Dial the device

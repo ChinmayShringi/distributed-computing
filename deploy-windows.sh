@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-WINDOWS_HOST="192.168.1.38"
+WINDOWS_HOST="10.206.87.35"
 WINDOWS_USER="chinmay"
 WINDOWS_PASS="root"
 WINDOWS_PATH="C:/Users/chinmay/Desktop/edgecli"
@@ -21,7 +21,7 @@ echo -e "${YELLOW}=== Windows Deployment Script ===${NC}"
 
 # Step 1: Build Windows ARM64 binary (for Snapdragon)
 echo -e "\n${YELLOW}[1/5] Building Windows ARM64 binary...${NC}"
-GOOS=windows GOARCH=arm64 go build -o dist/server-windows.exe ./cmd/server
+CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -tags netgo -o dist/server-windows.exe ./cmd/server
 echo -e "${GREEN}✓ Built dist/server-windows.exe${NC}"
 
 # Step 2: Stop existing server on Windows
