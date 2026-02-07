@@ -78,8 +78,9 @@ type OrchestratorServer struct {
 	registry      *registry.Registry
 	jobManager    *jobs.Manager
 	webrtcManager *webrtcstream.Manager
-	brain         *brain.Brain // Windows AI CLI planner (platform-specific)
-	llmProvider   llm.Provider // Cross-platform LLM planner (openai_compat, etc.)
+	brain         *brain.Brain     // Windows AI CLI planner (platform-specific)
+	llmProvider   llm.Provider     // Cross-platform LLM planner (openai_compat, etc.)
+	chatProvider  llm.ChatProvider // Local chat provider for LLM task execution
 	chatMem       *chatmem.ChatMemory
 	selfDeviceID  string
 	selfAddr      string
@@ -1236,69 +1237,26 @@ func (s *OrchestratorServer) RunTask(ctx context.Context, req *pb.TaskRequest) (
 	}
 }
 
-// runLLMGenerate sends a prompt to this device's /api/assistant HTTP endpoint,
-// which wraps the local LLM (Ollama, LM Studio, etc.) configured via CHAT_PROVIDER.
-// This ensures each device uses its own local model for task execution.
+// runLLMGenerate executes LLM inference using this device's CHAT_PROVIDER.
+// Uses the chat provider library directly (no HTTP overhead).
 func (s *OrchestratorServer) runLLMGenerate(ctx context.Context, prompt string) (string, error) {
-	// Use device's own /api/assistant endpoint
-	// This device's HTTP server is at http://localhost:<WEB_PORT>/api/assistant
-	webPort := os.Getenv("WEB_ADDR")
-	if webPort == "" {
-		webPort = ":8080"
-	}
-	// Strip leading : if present
-	if strings.HasPrefix(webPort, ":") {
-		webPort = "localhost" + webPort
+	if s.chatProvider == nil {
+		return "", fmt.Errorf("chat provider not configured (set CHAT_PROVIDER in .env)")
 	}
 
-	url := fmt.Sprintf("http://%s/api/assistant", webPort)
-
-	reqBody := map[string]interface{}{
-		"text": prompt,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
+	// Use chat provider directly for simple text generation
+	result, err := s.chatProvider.Chat(ctx, prompt)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", fmt.Errorf("chat provider error: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("HTTP request to %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, url, string(respBody[:min(200, len(respBody))]))
+	if result == "" {
+		return "", fmt.Errorf("chat provider returned empty response")
 	}
 
-	var assistantResp struct {
-		Text string `json:"text"`
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
-	}
-
-	if err := json.Unmarshal(respBody, &assistantResp); err != nil {
-		return "", fmt.Errorf("parse response: %w (body: %s)", err, string(respBody[:min(200, len(respBody))]))
-	}
-
-	if assistantResp.Text == "" {
-		return "", fmt.Errorf("assistant returned empty response")
-	}
-
-	log.Printf("[INFO] LLM_GENERATE completed via /api/assistant: prompt_len=%d result_len=%d", len(prompt), len(assistantResp.Text))
-	return assistantResp.Text, nil
+	log.Printf("[INFO] LLM_GENERATE completed: provider=%s prompt_len=%d result_len=%d",
+		s.chatProvider.Name(), len(prompt), len(result))
+	return result, nil
 }
 
 // runLLMGenerateOllama is a fallback that uses Ollama's native /api/chat endpoint.
@@ -4165,6 +4123,7 @@ func main() {
 	}
 	if chatProvider != nil {
 		log.Printf("[INFO] Chat provider: %s", chatProvider.Name())
+		orchestrator.chatProvider = chatProvider // Inject for LLM task execution
 	} else {
 		log.Printf("[INFO] Chat provider: disabled")
 	}
