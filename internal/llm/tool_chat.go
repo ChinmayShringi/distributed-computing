@@ -215,16 +215,11 @@ func NewToolChatFromEnv() (ToolChatProvider, error) {
 			TimeoutSecs: cfg.TimeoutSecs,
 		}), nil
 
-	case "tinyllama":
-		cfg.BaseURL = envOrDefault("CHAT_BASE_URL", "http://localhost:3332")
-		cfg.Model = "TinyLlama-1.1B-Chat"
-		return NewTinyLlamaToolChat(cfg), nil
-
 	case "echo", "mock":
 		return NewEchoToolChat(), nil
 
 	default:
-		return nil, fmt.Errorf("unknown chat provider for tool calling: %s (valid: openai, ollama, tinyllama)", provider)
+		return nil, fmt.Errorf("unknown chat provider for tool calling: %s (valid: openai, ollama, echo)", provider)
 	}
 }
 
