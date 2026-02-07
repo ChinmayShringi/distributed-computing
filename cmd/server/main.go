@@ -30,6 +30,7 @@ import (
 
 	"github.com/edgecli/edgecli/internal/allowlist"
 	"github.com/edgecli/edgecli/internal/brain"
+	"github.com/edgecli/edgecli/internal/chatmem"
 	"github.com/edgecli/edgecli/internal/discovery"
 	"github.com/edgecli/edgecli/internal/cost"
 	"github.com/edgecli/edgecli/internal/deviceid"
@@ -68,6 +69,7 @@ type OrchestratorServer struct {
 	jobManager    *jobs.Manager
 	webrtcManager *webrtcstream.Manager
 	brain         *brain.Brain
+	chatMem       *chatmem.ChatMemory
 	selfDeviceID  string
 	selfAddr      string
 	ticketManager *transfer.Manager
@@ -119,6 +121,16 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		bulkHTTPAddr = defaultBulkHTTPAddr
 	}
 
+	// Load chat memory from file
+	chatMemPath, _ := chatmem.DefaultFilePath()
+	chatMem, err := chatmem.LoadFromFile(chatMemPath)
+	if err != nil {
+		log.Printf("[WARN] Could not load chat memory from %s: %v", chatMemPath, err)
+		chatMem = chatmem.New()
+	} else {
+		log.Printf("[INFO] Loaded chat memory from %s (%d messages)", chatMemPath, len(chatMem.GetMessages()))
+	}
+
 	return &OrchestratorServer{
 		sessions:      make(map[string]*Session),
 		runner:        exec.NewRunner(),
@@ -126,6 +138,7 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		jobManager:    jobs.NewManager(),
 		webrtcManager: webrtcstream.NewManager(),
 		brain:         brain.New(),
+		chatMem:       chatMem,
 		selfDeviceID:  selfID,
 		selfAddr:      selfAddr,
 		ticketManager: transfer.NewManager(time.Duration(bulkTTL) * time.Second),
@@ -1622,6 +1635,119 @@ func (s *OrchestratorServer) startBulkHTTP() {
 	if err := http.ListenAndServe(s.bulkHTTPAddr, mux); err != nil {
 		log.Fatalf("[FATAL] Bulk HTTP server failed: %v", err)
 	}
+}
+
+// SyncChatMemory synchronizes chat memory between devices.
+// If the sender's memory is newer, we update ours and return updated=true.
+// If our memory is newer, we return our memory for the sender to update.
+func (s *OrchestratorServer) SyncChatMemory(ctx context.Context, req *pb.ChatMemorySync) (*pb.ChatMemorySyncResponse, error) {
+	// If sender is pushing their memory
+	if req.MemoryJson != "" {
+		incoming, err := chatmem.ParseFromJSON(req.MemoryJson)
+		if err != nil {
+			log.Printf("[ERROR] SyncChatMemory: failed to parse incoming JSON: %v", err)
+			return nil, status.Error(codes.InvalidArgument, "invalid memory JSON")
+		}
+
+		// Merge if incoming is newer
+		if s.chatMem.Merge(incoming) {
+			if err := s.chatMem.SaveToFile(); err != nil {
+				log.Printf("[WARN] SyncChatMemory: failed to save memory: %v", err)
+			}
+			log.Printf("[INFO] SyncChatMemory: updated local memory from remote (ts=%d)", incoming.GetLastUpdated())
+
+			// Broadcast to all other registered devices
+			go s.broadcastChatMemory()
+
+			return &pb.ChatMemorySyncResponse{
+				Updated:    true,
+				MemoryJson: "",
+			}, nil
+		}
+	}
+
+	// Our memory is newer or same - return it
+	memJSON, err := s.chatMem.ToJSON()
+	if err != nil {
+		log.Printf("[ERROR] SyncChatMemory: failed to serialize memory: %v", err)
+		return nil, status.Error(codes.Internal, "failed to serialize memory")
+	}
+
+	return &pb.ChatMemorySyncResponse{
+		Updated:    false,
+		MemoryJson: memJSON,
+	}, nil
+}
+
+// GetChatMemory returns the current chat memory.
+func (s *OrchestratorServer) GetChatMemory(ctx context.Context, req *pb.Empty) (*pb.ChatMemoryData, error) {
+	memJSON, err := s.chatMem.ToJSON()
+	if err != nil {
+		log.Printf("[ERROR] GetChatMemory: failed to serialize memory: %v", err)
+		return nil, status.Error(codes.Internal, "failed to serialize memory")
+	}
+
+	log.Printf("[DEBUG] GetChatMemory: returning %d messages", len(s.chatMem.GetMessages()))
+
+	return &pb.ChatMemoryData{
+		MemoryJson: memJSON,
+	}, nil
+}
+
+// broadcastChatMemory pushes our chat memory to all registered devices.
+func (s *OrchestratorServer) broadcastChatMemory() {
+	devices := s.registry.List()
+	if len(devices) <= 1 {
+		return // Only self registered
+	}
+
+	memJSON, err := s.chatMem.ToJSON()
+	if err != nil {
+		log.Printf("[WARN] broadcastChatMemory: failed to serialize: %v", err)
+		return
+	}
+
+	for _, device := range devices {
+		if device.DeviceId == s.selfDeviceID {
+			continue
+		}
+
+		go func(d *pb.DeviceInfo) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			conn, err := grpc.DialContext(ctx, d.GrpcAddr,
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithBlock(),
+			)
+			if err != nil {
+				log.Printf("[WARN] broadcastChatMemory: failed to dial %s: %v", d.GrpcAddr, err)
+				return
+			}
+			defer conn.Close()
+
+			client := pb.NewOrchestratorServiceClient(conn)
+			_, err = client.SyncChatMemory(ctx, &pb.ChatMemorySync{
+				LastUpdatedMs: s.chatMem.GetLastUpdated(),
+				MemoryJson:    memJSON,
+			})
+			if err != nil {
+				log.Printf("[WARN] broadcastChatMemory: sync to %s failed: %v", d.DeviceName, err)
+			} else {
+				log.Printf("[INFO] broadcastChatMemory: synced to %s", d.DeviceName)
+			}
+		}(device)
+	}
+}
+
+// AddChatMessage adds a message to chat memory and broadcasts to all devices.
+// This is called by the web server after LLM responses.
+func (s *OrchestratorServer) AddChatMessage(role, content string) {
+	s.chatMem.AddMessage(role, content)
+	if err := s.chatMem.SaveToFile(); err != nil {
+		log.Printf("[WARN] AddChatMessage: failed to save: %v", err)
+	}
+	go s.broadcastChatMemory()
 }
 
 func main() {

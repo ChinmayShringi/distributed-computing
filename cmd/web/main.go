@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/edgecli/edgecli/internal/chatmem"
 	"github.com/edgecli/edgecli/internal/llm"
 	"github.com/edgecli/edgecli/internal/qaihub"
 	pb "github.com/edgecli/edgecli/proto"
@@ -42,6 +43,7 @@ type WebServer struct {
 	chat         llm.ChatProvider // nil if disabled
 	agent        *llm.AgentLoop   // LLM tool-calling agent (nil if disabled)
 	qaihubClient *qaihub.Client   // qai-hub CLI wrapper
+	chatMem      *chatmem.ChatMemory
 }
 
 // DeviceResponse is the JSON response for /api/devices
@@ -342,6 +344,14 @@ func main() {
 		log.Printf("[INFO] QAI Hub CLI: not available")
 	}
 
+	// Initialize Chat Memory
+	chatMemPath, _ := chatmem.DefaultFilePath()
+	chatMem, err := chatmem.LoadFromFile(chatMemPath)
+	if err != nil {
+		log.Printf("[WARN] Could not load chat memory from %s: %v", chatMemPath, err)
+		chatMem = chatmem.New()
+	}
+
 	server := &WebServer{
 		grpcClient:   client,
 		grpcConn:     conn,
@@ -350,7 +360,11 @@ func main() {
 		chat:         chatProvider,
 		agent:        agentLoop,
 		qaihubClient: qaihubCli,
+		chatMem:      chatMem,
 	}
+
+	// Initial sync with orchestrator
+	go server.syncChatToOrchestrator(true)
 
 	// Setup routes
 	http.HandleFunc("/", server.handleIndex)
@@ -376,6 +390,7 @@ func main() {
 	// Chat endpoints
 	http.HandleFunc("/api/chat", server.handleChat)
 	http.HandleFunc("/api/chat/health", server.handleChatHealth)
+	http.HandleFunc("/api/chat/memory", server.handleChatMemory)
 
 	// Agent endpoint (LLM tool-calling)
 	http.HandleFunc("/api/agent", server.handleAgent)
@@ -1672,7 +1687,84 @@ func (s *WebServer) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Update chat memory
+	// Add user message(s) - assuming last one is new
+	if len(req.Messages) > 0 {
+		lastMsg := req.Messages[len(req.Messages)-1]
+		if lastMsg.Role == "user" {
+			s.chatMem.AddMessage("user", lastMsg.Content)
+		}
+	}
+	// Add assistant reply
+	s.chatMem.AddMessage("assistant", reply)
+
+	// Sync to orchestrator
+	go s.syncChatToOrchestrator(false)
+	
+	// Trigger background summarization if needed
+	s.chatMem.SummarizeAsync(s.performSummarization, func() {
+		s.syncChatToOrchestrator(false)
+	})
+
 	s.writeJSON(w, http.StatusOK, ChatResponse{Reply: reply})
+}
+
+// handleChatMemory returns the current chat history
+func (s *WebServer) handleChatMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jsonStr, err := s.chatMem.ToJSON()
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to serialize memory")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(jsonStr))
+}
+
+// syncChatToOrchestrator pushes local chat memory to the orchestrator,
+// or pulls from it if pullFirst is true.
+func (s *WebServer) syncChatToOrchestrator(pullOnly bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var req *pb.ChatMemorySync
+	if pullOnly {
+		// Empty JSON means we want to pull
+		req = &pb.ChatMemorySync{
+			LastUpdatedMs: 0,
+			MemoryJson:    "",
+		}
+	} else {
+		// Push our memory
+		jsonStr, _ := s.chatMem.ToJSON()
+		req = &pb.ChatMemorySync{
+			LastUpdatedMs: s.chatMem.GetLastUpdated(),
+			MemoryJson:    jsonStr,
+		}
+	}
+
+	resp, err := s.grpcClient.SyncChatMemory(ctx, req)
+	if err != nil {
+		log.Printf("[WARN] SyncChatMemory failed: %v", err)
+		return
+	}
+
+	// If orchestrator sent back updates (either because we pulled, or because ours was older)
+	if resp.MemoryJson != "" {
+		incoming, err := chatmem.ParseFromJSON(resp.MemoryJson)
+		if err == nil {
+			if s.chatMem.Merge(incoming) {
+				log.Printf("[INFO] Chat memory updated from orchestrator (ts=%d)", incoming.GetLastUpdated())
+				// We don't save to file here to avoid conflict with orchestrator if on same machine
+				// syncChatToOrchestrator is enough
+			}
+		}
+	}
 }
 
 // handleChatHealth checks the chat runtime status
@@ -1737,12 +1829,43 @@ func (s *WebServer) handleAgent(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[INFO] handleAgent: processing message: %q", truncate(req.Message, 100))
 
-	resp, err := s.agent.Run(ctx, req.Message)
+	// Construct history from chat memory
+	var history []llm.ToolChatMessage
+	
+	// Add summary if available
+	summary := s.chatMem.GetSummary()
+	if summary != "" {
+		history = append(history, llm.ToolChatMessage{
+			Role:    "system",
+			Content: fmt.Sprintf("Summary of previous conversation:\n%s", summary),
+		})
+	}
+	
+	// Add recent messages
+	msgs := s.chatMem.GetMessages()
+	for _, m := range msgs {
+		history = append(history, llm.ToolChatMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
+
+	resp, err := s.agent.Run(ctx, req.Message, history)
 	if err != nil {
 		log.Printf("[ERROR] handleAgent: %v", err)
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Agent error: %v", err))
 		return
 	}
+
+	// Update chat memory and sync
+	s.chatMem.AddMessage("user", req.Message)
+	s.chatMem.AddMessage("assistant", resp.Reply)
+	go s.syncChatToOrchestrator(false)
+	
+	// Trigger background summarization if needed
+	s.chatMem.SummarizeAsync(s.performSummarization, func() {
+		s.syncChatToOrchestrator(false)
+	})
 
 	// Convert tool calls to response format
 	toolCalls := make([]AgentToolCallInfo, len(resp.ToolCalls))
@@ -1803,4 +1926,45 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// performSummarization is the callback for rolling summaries
+func (s *WebServer) performSummarization(currentSummary string, msgs []chatmem.ChatMessage) (string, error) {
+	if s.chat == nil {
+		log.Printf("[WARN] performSummarization: no chat provider available, skipping summary")
+		return "", fmt.Errorf("no chat provider available")
+	}
+
+	// Construct the prompt
+	var sb strings.Builder
+	sb.WriteString("Current summary of the conversation:\n\"\"\"\n")
+	if currentSummary != "" {
+		sb.WriteString(currentSummary)
+	} else {
+		sb.WriteString("(No previous summary)")
+	}
+	sb.WriteString("\n\"\"\"\n\nNew conversation lines to add:\n\"\"\"\n")
+	for _, msg := range msgs {
+		sb.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
+	}
+	sb.WriteString("\"\"\"\n\nPlease update the summary to include the new information, keeping it concise and preserving key details. Return ONLY the updated summary text.")
+
+	prompt := sb.String()
+	log.Printf("[INFO] performSummarization: summarizing %d new messages...", len(msgs))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// Use Chat provider
+	messages := []llm.ChatMessage{
+		{Role: "system", Content: "You are an expert conversation summarizer. You update summaries concisely."},
+		{Role: "user", Content: prompt},
+	}
+	summary, err := s.chat.Chat(ctx, messages)
+	if err != nil {
+		log.Printf("[ERROR] Summarization failed: %v", err)
+		return "", err
+	}
+	log.Printf("[INFO] performSummarization: completed successfully. New summary len: %d", len(summary))
+	return strings.TrimSpace(summary), nil
 }
