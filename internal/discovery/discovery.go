@@ -170,12 +170,38 @@ func (s *Service) listenLoop() {
 			continue
 		}
 
-		s.handleMessage(&msg)
+		s.handleMessage(&msg, addr)
 	}
 }
 
 // handleMessage processes a received discovery message
-func (s *Service) handleMessage(msg *DiscoveryMessage) {
+func (s *Service) handleMessage(msg *DiscoveryMessage, sourceAddr *net.UDPAddr) {
+	// Fix device addresses that use 0.0.0.0 or 127.0.0.1
+	// Replace with actual source IP from UDP packet
+	sourceIP := sourceAddr.IP.String()
+
+	// Fix GrpcAddr if it's using invalid/local addresses
+	if msg.Device.GrpcAddr != "" {
+		host, port, err := net.SplitHostPort(msg.Device.GrpcAddr)
+		if err == nil {
+			// Replace 0.0.0.0 or 127.0.0.1 with actual source IP
+			if host == "0.0.0.0" || host == "127.0.0.1" || host == "localhost" {
+				msg.Device.GrpcAddr = net.JoinHostPort(sourceIP, port)
+				log.Printf("[DEBUG] discovery: fixed GrpcAddr from %s to %s", host, msg.Device.GrpcAddr)
+			}
+		}
+	}
+
+	// Fix HttpAddr if it's using invalid/local addresses
+	if msg.Device.HttpAddr != "" {
+		host, port, err := net.SplitHostPort(msg.Device.HttpAddr)
+		if err == nil {
+			if host == "0.0.0.0" || host == "127.0.0.1" || host == "localhost" {
+				msg.Device.HttpAddr = net.JoinHostPort(sourceIP, port)
+			}
+		}
+	}
+
 	switch msg.Type {
 	case MessageTypeAnnounce:
 		s.mu.Lock()
