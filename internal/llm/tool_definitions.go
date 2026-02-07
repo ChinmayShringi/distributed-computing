@@ -4,8 +4,8 @@ import "encoding/json"
 
 // ToolDefinition represents an OpenAI-style tool definition for function calling
 type ToolDefinition struct {
-	Type     string         `json:"type"`
-	Function FunctionDef    `json:"function"`
+	Type     string      `json:"type"`
+	Function FunctionDef `json:"function"`
 }
 
 // FunctionDef defines a function that the LLM can call

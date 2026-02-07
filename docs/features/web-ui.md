@@ -29,6 +29,8 @@ go run ./cmd/web
   - **Best Available** - NPU > GPU > CPU preference
   - **Prefer Remote** - Route to non-local device
   - **Require NPU** - Only NPU-capable devices
+  - **Prefer Local Model** - Prefer device with Ollama/local LLM
+  - **Require Local Model** - Only devices with local LLM
   - **Force Device ID** - Select specific device from dropdown
 - View output with execution metadata (device, time, exit code)
 
@@ -77,7 +79,10 @@ Returns list of registered devices.
     "arch": "arm64",
     "capabilities": ["cpu"],
     "grpc_addr": "127.0.0.1:50051",
-    "can_screen_capture": true
+    "can_screen_capture": true,
+    "has_local_model": true,
+    "local_model_name": "llama3.2:3b",
+    "local_chat_endpoint": "http://localhost:11434"
   }
 ]
 ```
@@ -326,6 +331,38 @@ Send a chat message to the local LLM runtime.
 ```
 
 Supports multi-turn conversations by including the full message history.
+
+### POST /api/llm-task
+Route an LLM inference task to a device with a local model (Ollama). Uses `PREFER_LOCAL_MODEL` routing by default.
+
+**Request:**
+```json
+{
+  "prompt": "What is the capital of France?",
+  "model": "",
+  "device_id": ""
+}
+```
+
+**Response:**
+```json
+{
+  "output": "The capital of France is Paris.",
+  "model_used": "llama3.2:3b",
+  "tokens_generated": 8,
+  "device_id": "e452458d-...",
+  "device_name": "macbook-pro"
+}
+```
+
+**Request fields:**
+- `prompt` - The user prompt to send to the LLM
+- `model` - Optional: specific model name (uses device's default if empty)
+- `device_id` - Optional: target specific device (uses `PREFER_LOCAL_MODEL` if empty)
+
+**Errors:**
+- 404: "No device with local model available"
+- 502: Connection or RPC failure
 
 ### GET /api/qaihub/doctor
 Check the qai-hub CLI installation and configuration.

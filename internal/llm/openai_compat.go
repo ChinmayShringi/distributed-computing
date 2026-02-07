@@ -22,9 +22,11 @@ The JSON must have this exact structure:
       "tasks": [
         {
           "task_id": "<unique short id>",
-          "kind": "SYSINFO" or "ECHO",
-          "input": "<command input>",
-          "target_device_id": "<device_id or empty for auto-assign>"
+          "kind": "SYSINFO" or "ECHO" or "LLM_GENERATE",
+          "input": "<command input or prompt text>",
+          "target_device_id": "<device_id or empty for auto-assign>",
+          "prompt_tokens": 100,
+          "max_output_tokens": 500
         }
       ]
     }
@@ -37,12 +39,27 @@ The JSON must have this exact structure:
 Rules:
 - Groups execute sequentially (index 0 first, then 1, etc.)
 - Tasks within a group execute in parallel across devices
-- Valid task kinds: SYSINFO (gather system info), ECHO (echo input text back)
+- Valid task kinds:
+  * SYSINFO: gather system info from a device
+  * ECHO: echo input text back
+  * LLM_GENERATE: run LLM inference (summarize, generate text, answer questions, generate code)
+- For LLM_GENERATE tasks:
+  * input = the prompt text
+  * prompt_tokens = estimated input tokens (rough: ~4 chars per token)
+  * max_output_tokens = expected output length (summary=200, code=500, chat=300)
+  * Prefer NPU devices (Windows Snapdragon), then GPU, then CPU
+  * Prefer devices with more RAM for larger models
 - target_device_id: use a specific device_id from the devices list, or leave empty for auto-assignment
-- Prefer NPU devices for heavy tasks if available, then GPU, then CPU
 - File paths must be relative to ./shared, no absolute paths, no ".." traversal
 - reduce.kind must be "CONCAT"
-- task_id must be unique across all tasks`
+- task_id must be unique across all tasks
+
+Model/Task Mapping (use LLM_GENERATE for these):
+- User wants to summarize text → LLM_GENERATE on NPU device
+- User wants to generate code → LLM_GENERATE on NPU device  
+- User wants to chat/answer questions → LLM_GENERATE on NPU device
+- User wants system info → SYSINFO (not LLM)
+- User wants to test echo → ECHO (not LLM)`
 
 // OpenAICompat implements Provider by calling an OpenAI-compatible /v1/chat/completions endpoint.
 type OpenAICompat struct {

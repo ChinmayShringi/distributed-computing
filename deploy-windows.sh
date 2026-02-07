@@ -5,10 +5,10 @@
 set -e
 
 # Configuration
-WINDOWS_HOST="10.20.38.80"
-WINDOWS_USER="sshuser"
+WINDOWS_HOST="192.168.1.38"
+WINDOWS_USER="chinmay"
 WINDOWS_PASS="root"
-WINDOWS_PATH="C:/Users/sshuser.Batman"
+WINDOWS_PATH="C:/Users/chinmay/Desktop/edgecli"
 GRPC_PORT="50051"
 
 # Colors for output
@@ -19,9 +19,9 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}=== Windows Deployment Script ===${NC}"
 
-# Step 1: Build Windows binary
-echo -e "\n${YELLOW}[1/5] Building Windows binary...${NC}"
-GOOS=windows GOARCH=amd64 go build -o dist/server-windows.exe ./cmd/server
+# Step 1: Build Windows ARM64 binary (for Snapdragon)
+echo -e "\n${YELLOW}[1/5] Building Windows ARM64 binary...${NC}"
+GOOS=windows GOARCH=arm64 go build -o dist/server-windows.exe ./cmd/server
 echo -e "${GREEN}✓ Built dist/server-windows.exe${NC}"
 
 # Step 2: Stop existing server on Windows
@@ -42,8 +42,10 @@ echo -e "\n${YELLOW}[4/4] Uploading start script...${NC}"
 cat > /tmp/edgecli-start-server.bat << 'BATCHEOF'
 @echo off
 set "GRPC_ADDR=0.0.0.0:50051"
-set "SHARED_DIR=C:\Users\sshuser.Batman\shared"
-C:\Users\sshuser.Batman\server-windows.exe
+set "WEB_ADDR=0.0.0.0:8080"
+set "BULK_HTTP_ADDR=0.0.0.0:8081"
+set "SHARED_DIR=C:\Users\chinmay\Desktop\edgecli\shared"
+C:\Users\chinmay\Desktop\edgecli\server-windows.exe
 BATCHEOF
 perl -pi -e 's/\n/\r\n/' /tmp/edgecli-start-server.bat
 sshpass -p "$WINDOWS_PASS" scp -o StrictHostKeyChecking=no \

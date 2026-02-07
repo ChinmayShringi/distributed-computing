@@ -189,6 +189,12 @@ func (r *Registry) SelectDevice(policy *pb.RoutingPolicy, selfDeviceID string) *
 	case pb.RoutingPolicy_PREFER_REMOTE:
 		return r.selectPreferRemote(selfDeviceID)
 
+	case pb.RoutingPolicy_PREFER_LOCAL_MODEL:
+		return r.selectPreferLocalModel(selfDeviceID)
+
+	case pb.RoutingPolicy_REQUIRE_LOCAL_MODEL:
+		return r.selectRequireLocalModel(selfDeviceID)
+
 	case pb.RoutingPolicy_BEST_AVAILABLE:
 		fallthrough
 	default:
@@ -329,4 +335,86 @@ func (r *Registry) selectBestAvailable(selfDeviceID string) *SelectionResult {
 	return &SelectionResult{
 		Error: fmt.Errorf("no devices available"),
 	}
+}
+
+// selectPreferLocalModel prefers devices with local LLM model, falls back to best available
+func (r *Registry) selectPreferLocalModel(selfDeviceID string) *SelectionResult {
+	// First, try to find a device with a local model
+	for _, entry := range r.devices {
+		if entry.Info.HasLocalModel {
+			return &SelectionResult{
+				Device:          entry.Info,
+				ExecutedLocally: entry.Info.DeviceId == selfDeviceID,
+			}
+		}
+	}
+
+	// Fallback to best available if no device with local model
+	return r.selectBestAvailable(selfDeviceID)
+}
+
+// selectRequireLocalModel requires a device with local LLM model
+func (r *Registry) selectRequireLocalModel(selfDeviceID string) *SelectionResult {
+	for _, entry := range r.devices {
+		if entry.Info.HasLocalModel {
+			return &SelectionResult{
+				Device:          entry.Info,
+				ExecutedLocally: entry.Info.DeviceId == selfDeviceID,
+			}
+		}
+	}
+
+	return &SelectionResult{
+		Error: fmt.Errorf("no device with local LLM model available"),
+	}
+}
+
+// Remove deletes a device from the registry
+// Returns true if the device was found and removed
+func (r *Registry) Remove(deviceID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	_, exists := r.devices[deviceID]
+	if exists {
+		delete(r.devices, deviceID)
+	}
+	return exists
+}
+
+// UpsertFromDiscovery adds/updates a device from a discovery announcement
+// Returns true if this is a new device (not previously known)
+func (r *Registry) UpsertFromDiscovery(deviceID, deviceName, grpcAddr, httpAddr, platform, arch string, hasCPU, hasGPU, hasNPU, canScreenCapture bool, hasLocalModel bool, localModelName, localChatEndpoint string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	_, exists := r.devices[deviceID]
+
+	info := &pb.DeviceInfo{
+		DeviceId:          deviceID,
+		DeviceName:        deviceName,
+		Platform:          platform,
+		Arch:              arch,
+		HasCpu:            hasCPU,
+		HasGpu:            hasGPU,
+		HasNpu:            hasNPU,
+		GrpcAddr:          grpcAddr,
+		HttpAddr:          httpAddr,
+		CanScreenCapture:  canScreenCapture,
+		HasLocalModel:     hasLocalModel,
+		LocalModelName:    localModelName,
+		LocalChatEndpoint: localChatEndpoint,
+	}
+
+	r.devices[deviceID] = &DeviceEntry{
+		Info:     info,
+		LastSeen: now,
+		Status: &pb.DeviceStatus{
+			DeviceId: deviceID,
+			LastSeen: now.Unix(),
+		},
+	}
+
+	return !exists
 }
