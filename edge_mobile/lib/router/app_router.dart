@@ -60,55 +60,74 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _CircleIconButton(
-            icon: Icons.menu_rounded,
-            onTap: () => Scaffold.of(context).openDrawer(),
+          // Left Wing
+          SizedBox(
+            width: 90,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _CircleIconButton(
+                icon: Icons.menu_rounded,
+                onTap: () => Scaffold.of(context).openDrawer(),
+              ),
+            ),
           ),
-          const SizedBox(width: 10),
-
-          // Center pill selector like ChatGPT
+          
+          // Center Brand Pill (Flexible)
           Expanded(
-            child: GestureDetector(
-              onTap: () => _openModeSheet(context),
-              child: Container(
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF121B2B).withOpacity(0.55),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: const Color(0xFF233043).withOpacity(0.9)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.35),
-                      blurRadius: 18,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    EdgeMeshWordmark(fontSize: 16),
-                    SizedBox(width: 6),
-                    Icon(Icons.expand_more_rounded, color: Color(0xFFA7B1C2), size: 18),
-                  ],
+            child: Center(
+              child: GestureDetector(
+                onTap: () => _openModeSheet(context),
+                child: Container(
+                  height: 36,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF121B2B).withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0xFF233043).withOpacity(0.9)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.35),
+                        blurRadius: 18,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(child: const EdgeMeshWordmark(fontSize: 15)),
+                      const SizedBox(width: 6),
+                      Icon(Icons.expand_more_rounded, color: const Color(0xFFA7B1C2), size: 18),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
 
-          const SizedBox(width: 10),
-          _CircleIconButton(
-            icon: Icons.person_add_alt_1_rounded,
-            onTap: () => context.go('/devices'),
-          ),
-          const SizedBox(width: 8),
-          _CircleIconButton(
-            icon: Icons.chat_bubble_outline_rounded,
-            onTap: () => context.go('/chat'),
+          // Right Wing
+          SizedBox(
+            width: 90,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                 _CircleIconButton(
+                  icon: Icons.person_add_alt_1_rounded,
+                  onTap: () {},
+                ),
+                const SizedBox(width: 8),
+                _CircleIconButton(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  onTap: () {},
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -185,8 +204,8 @@ class _CircleIconButton extends StatelessWidget {
       borderRadius: BorderRadius.circular(999),
       onTap: onTap,
       child: Container(
-        width: 44,
-        height: 44,
+        width: 40,
+        height: 40,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: const Color(0xFF121B2B).withOpacity(0.55),
