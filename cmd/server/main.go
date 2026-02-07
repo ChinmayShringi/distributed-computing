@@ -78,7 +78,8 @@ type OrchestratorServer struct {
 	registry      *registry.Registry
 	jobManager    *jobs.Manager
 	webrtcManager *webrtcstream.Manager
-	brain         *brain.Brain
+	brain         *brain.Brain // Windows AI CLI planner (platform-specific)
+	llmProvider   llm.Provider // Cross-platform LLM planner (openai_compat, etc.)
 	chatMem       *chatmem.ChatMemory
 	selfDeviceID  string
 	selfAddr      string
@@ -1388,20 +1389,33 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 		return nil, status.Error(codes.FailedPrecondition, "no devices available")
 	}
 
-	// Try to generate plan using brain if available and no plan provided
+	// Try to generate plan using LLM provider or brain if available and no plan provided
 	plan := req.Plan
 	reduce := req.Reduce
-	if (plan == nil || len(plan.Groups) == 0) && s.brain != nil && s.brain.IsAvailable() {
-		result, err := s.brain.GeneratePlan(req.Text, devices, int(req.MaxWorkers))
-		if err == nil && result != nil && result.Plan != nil {
-			plan = result.Plan
-			if reduce == nil {
-				reduce = result.Reduce
+	if plan == nil || len(plan.Groups) == 0 {
+		// Prefer cross-platform LLM provider over Windows AI brain
+		if s.llmProvider != nil {
+			// Use LLM provider for planning
+			plan, reduce, err := s.generatePlanWithLLM(req.Text, devices, int(req.MaxWorkers))
+			if err == nil && plan != nil {
+				log.Printf("[INFO] SubmitJob: LLM plan generated, groups=%d", len(plan.Groups))
+			} else if err != nil {
+				log.Printf("[WARN] SubmitJob: LLM plan generation failed, using default: %v", err)
+				plan, reduce = nil, nil
 			}
-			log.Printf("[INFO] SubmitJob: brain plan used_ai=%v rationale=%q groups=%d",
-				result.UsedAi, result.Rationale, len(plan.Groups))
-		} else if err != nil {
-			log.Printf("[WARN] SubmitJob: brain plan generation failed, using default: %v", err)
+		} else if s.brain != nil && s.brain.IsAvailable() {
+			// Fallback to Windows AI brain
+			result, err := s.brain.GeneratePlan(req.Text, devices, int(req.MaxWorkers))
+			if err == nil && result != nil && result.Plan != nil {
+				plan = result.Plan
+				if reduce == nil {
+					reduce = result.Reduce
+				}
+				log.Printf("[INFO] SubmitJob: brain plan used_ai=%v rationale=%q groups=%d",
+					result.UsedAi, result.Rationale, len(plan.Groups))
+			} else if err != nil {
+				log.Printf("[WARN] SubmitJob: brain plan generation failed, using default: %v", err)
+			}
 		}
 	}
 
@@ -4076,9 +4090,21 @@ func main() {
 		log.Fatalf("Failed to listen on %s: %v", addr, err)
 	}
 
+	// Initialize LLM provider early (before orchestrator)
+	llmProvider, err := llm.NewFromEnv()
+	if err != nil {
+		log.Fatalf("[FATAL] LLM provider init failed: %v", err)
+	}
+	if llmProvider != nil {
+		log.Printf("[INFO] LLM provider: %s", llmProvider.Name())
+	} else {
+		log.Printf("[INFO] LLM provider: disabled")
+	}
+
 	// Create gRPC server
 	grpcServer := grpc.NewServer()
 	orchestrator := NewOrchestratorServer(addr)
+	orchestrator.llmProvider = llmProvider // Inject LLM provider
 
 	// Auto-register self so list-devices always shows this server
 	orchestrator.registerSelf()
@@ -4111,17 +4137,6 @@ func main() {
 
 	// Give gRPC server a moment to start before agent initialization
 	time.Sleep(1 * time.Second)
-
-	// Initialize LLM provider (optional)
-	llmProvider, err := llm.NewFromEnv()
-	if err != nil {
-		log.Fatalf("[FATAL] LLM provider init failed: %v", err)
-	}
-	if llmProvider != nil {
-		log.Printf("[INFO] LLM provider: %s", llmProvider.Name())
-	} else {
-		log.Printf("[INFO] LLM provider: disabled")
-	}
 
 	// Initialize Chat provider (optional, defaults to Ollama)
 	chatProvider, err := llm.NewChatFromEnv()
