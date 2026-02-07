@@ -1396,7 +1396,8 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 		// Prefer cross-platform LLM provider over Windows AI brain
 		if s.llmProvider != nil {
 			// Use LLM provider for planning
-			plan, reduce, err := s.generatePlanWithLLM(req.Text, devices, int(req.MaxWorkers))
+			var err error
+			plan, reduce, err = s.generatePlanWithLLM(req.Text, devices, int(req.MaxWorkers))
 			if err == nil && plan != nil {
 				log.Printf("[INFO] SubmitJob: LLM plan generated, groups=%d", len(plan.Groups))
 			} else if err != nil {
