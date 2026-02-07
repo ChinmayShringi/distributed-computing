@@ -32,6 +32,7 @@ type Service struct {
 	port       int
 	selfDevice *DeviceAnnounce
 	callback   Callback
+	seedPeers  []*net.UDPAddr // Known peers for cross-subnet discovery
 
 	conn      *net.UDPConn
 	broadcast *net.UDPAddr
@@ -52,10 +53,21 @@ func NewService(port int, selfDevice *DeviceAnnounce, callback Callback) *Servic
 		port:       port,
 		selfDevice: selfDevice,
 		callback:   callback,
+		seedPeers:  make([]*net.UDPAddr, 0),
 		lastSeen:   make(map[string]time.Time),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
+}
+
+// AddSeedPeer adds a known peer address for cross-subnet discovery
+func (s *Service) AddSeedPeer(addr string) error {
+	udpAddr, err := net.ResolveUDPAddr("udp4", addr)
+	if err != nil {
+		return fmt.Errorf("invalid seed peer address %s: %w", addr, err)
+	}
+	s.seedPeers = append(s.seedPeers, udpAddr)
+	return nil
 }
 
 // Start begins discovery (binds socket, starts goroutines)
@@ -214,10 +226,20 @@ func (s *Service) broadcastMessage(msgType MessageType) {
 		return
 	}
 
+	// Send to broadcast address (same subnet only)
 	if _, err := s.conn.WriteToUDP(data, s.broadcast); err != nil {
 		// Don't spam logs - broadcast failures are common on some networks
 		if s.ctx.Err() == nil {
 			log.Printf("[DEBUG] discovery: broadcast failed: %v", err)
+		}
+	}
+
+	// Also send directly to seed peers (cross-subnet)
+	for _, peer := range s.seedPeers {
+		if _, err := s.conn.WriteToUDP(data, peer); err != nil {
+			if s.ctx.Err() == nil {
+				log.Printf("[DEBUG] discovery: send to seed peer %s failed: %v", peer, err)
+			}
 		}
 	}
 }
