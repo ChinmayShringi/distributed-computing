@@ -8,7 +8,7 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X github.com/edgecli/edgecli/cmd/edgecli/commands.Version=$(VERSION) \
 	-X github.com/edgecli/edgecli/cmd/edgecli/commands.Commit=$(COMMIT)"
 
-.PHONY: all build install clean test lint fmt help proto server web qaihub-example qaihub-download-models
+.PHONY: all build install clean test lint fmt help proto server qaihub-example qaihub-download-models
 
 all: build
 
@@ -93,14 +93,10 @@ bump-version:
 show-version:
 	@echo "Current version: $$(cat VERSION)"
 
-## server: Run the gRPC server
-server:
-	go run ./cmd/server
-
-## web: Run the web UI server (requires gRPC server running)
+## server: Run the unified server (gRPC :50051 + HTTP Web UI :8080)
 ## Loads .env file if present for chat configuration
-web:
-	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && go run ./cmd/web
+server:
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && go run ./cmd/server
 
 ## qaihub-example: Run QAI Hub compile example (Windows only)
 qaihub-example:
@@ -120,13 +116,9 @@ else
 	@echo "Run directly: python scripts/qaihub_download_models.py --help"
 endif
 
-## build-server: Build the gRPC server binary
+## build-server: Build the unified server binary (gRPC + HTTP)
 build-server:
 	go build -o dist/edgecli-server ./cmd/server
-
-## build-web: Build the web UI server binary
-build-web:
-	go build -o dist/edgecli-web ./cmd/web
 
 ## help: Show this help
 help:
