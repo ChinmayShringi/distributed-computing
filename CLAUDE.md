@@ -224,7 +224,7 @@ When modifying `proto/orchestrator.proto`:
 ## Windows Machine
 
 ```
-Host: 10.206.87.35
+Host: 192.168.1.38
 User: chinmay
 Pass: root
 EdgeCLI dir: C:\Users\chinmay\Desktop\edgecli\

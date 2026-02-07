@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-WINDOWS_HOST="10.206.87.35"
+WINDOWS_HOST="192.168.1.38"
 WINDOWS_USER="chinmay"
 WINDOWS_PASS="root"
 WINDOWS_PATH="C:/Users/chinmay/Desktop/edgecli"
