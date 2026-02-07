@@ -83,19 +83,37 @@ func (r *Registry) GetStatus(deviceID string) *pb.DeviceStatus {
 
 	entry, ok := r.devices[deviceID]
 	if !ok {
-		// Return empty status for unknown device
+		// Return empty status for unknown device with -1 to indicate unavailable
 		return &pb.DeviceStatus{
 			DeviceId: deviceID,
 			LastSeen: 0,
+			CpuLoad:  -1,
+			GpuLoad:  -1,
+			NpuLoad:  -1,
+		}
+	}
+
+	// If no status data exists, return -1 for unavailable metrics
+	if entry.Status == nil || (entry.Status.CpuLoad == 0 && entry.Status.MemTotalMb == 0) {
+		return &pb.DeviceStatus{
+			DeviceId: deviceID,
+			LastSeen: entry.LastSeen.Unix(),
+			CpuLoad:  -1,
+			GpuLoad:  -1,
+			NpuLoad:  -1,
 		}
 	}
 
 	return &pb.DeviceStatus{
-		DeviceId:   deviceID,
-		LastSeen:   entry.LastSeen.Unix(),
-		CpuLoad:    entry.Status.CpuLoad,
-		MemUsedMb:  entry.Status.MemUsedMb,
-		MemTotalMb: entry.Status.MemTotalMb,
+		DeviceId:      deviceID,
+		LastSeen:      entry.LastSeen.Unix(),
+		CpuLoad:       entry.Status.CpuLoad,
+		MemUsedMb:     entry.Status.MemUsedMb,
+		MemTotalMb:    entry.Status.MemTotalMb,
+		GpuLoad:       entry.Status.GpuLoad,
+		GpuMemUsedMb:  entry.Status.GpuMemUsedMb,
+		GpuMemTotalMb: entry.Status.GpuMemTotalMb,
+		NpuLoad:       entry.Status.NpuLoad,
 	}
 }
 

@@ -29,16 +29,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _errorMessage;
   Timer? _refreshTimer;
 
+  // Connection status
+  bool _isConnected = false;
+  String _serverAddress = '';
+
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
     _startPeriodicRefresh();
+    _loadConnectionStatus();
+
+    // Listen for connection status changes
+    _grpcService.connectionStatus.addListener(_onConnectionStatusChanged);
+  }
+
+  void _onConnectionStatusChanged() {
+    final status = _grpcService.connectionStatus.value;
+    if (mounted) {
+      setState(() {
+        _isConnected = status.connected;
+        _serverAddress = status.connected
+            ? '${status.host}:${status.grpcPort}'
+            : '';
+      });
+    }
+  }
+
+  Future<void> _loadConnectionStatus() async {
+    try {
+      final status = await _grpcService.getConnectionStatus();
+      if (mounted) {
+        setState(() {
+          _isConnected = status.connected;
+          _serverAddress = status.connected
+              ? '${status.host}:${status.grpcPort}'
+              : '';
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load connection status: $e');
+    }
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _grpcService.connectionStatus.removeListener(_onConnectionStatusChanged);
     super.dispose();
   }
 
@@ -246,10 +283,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: CustomScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
                       slivers: [
-                        const SliverToBoxAdapter(
+                        SliverToBoxAdapter(
                           child: StatusStrip(
-                            isConnected: true,
-                            serverAddress: '192.168.1.195:50051',
+                            isConnected: _isConnected,
+                            serverAddress: _isConnected ? _serverAddress : null,
                             isDangerous: false,
                           ),
                         ),

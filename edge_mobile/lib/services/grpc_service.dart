@@ -1,9 +1,165 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+
+/// Connection status for the orchestrator server
+class ConnectionStatus {
+  final bool connected;
+  final String host;
+  final int grpcPort;
+  final int httpPort;
+  final String deviceName;
+  final int discoveredCount;
+
+  ConnectionStatus({
+    required this.connected,
+    this.host = '',
+    this.grpcPort = 50051,
+    this.httpPort = 8080,
+    this.deviceName = '',
+    this.discoveredCount = 0,
+  });
+
+  factory ConnectionStatus.fromMap(Map<String, dynamic> map) {
+    return ConnectionStatus(
+      connected: map['connected'] as bool? ?? false,
+      host: map['host'] as String? ?? '',
+      grpcPort: map['grpc_port'] as int? ?? 50051,
+      httpPort: map['http_port'] as int? ?? 8080,
+      deviceName: map['device_name'] as String? ?? '',
+      discoveredCount: map['discovered_count'] as int? ?? 0,
+    );
+  }
+}
+
+/// Discovered server information
+class DiscoveredServer {
+  final String deviceId;
+  final String deviceName;
+  final String grpcHost;
+  final int grpcPort;
+  final String httpHost;
+  final int httpPort;
+  final String platform;
+  final bool hasLocalModel;
+  final bool isActive;
+
+  DiscoveredServer({
+    required this.deviceId,
+    required this.deviceName,
+    required this.grpcHost,
+    required this.grpcPort,
+    required this.httpHost,
+    required this.httpPort,
+    required this.platform,
+    this.hasLocalModel = false,
+    this.isActive = false,
+  });
+
+  factory DiscoveredServer.fromMap(Map<String, dynamic> map) {
+    return DiscoveredServer(
+      deviceId: map['device_id'] as String? ?? '',
+      deviceName: map['device_name'] as String? ?? '',
+      grpcHost: map['grpc_host'] as String? ?? '',
+      grpcPort: map['grpc_port'] as int? ?? 50051,
+      httpHost: map['http_host'] as String? ?? '',
+      httpPort: map['http_port'] as int? ?? 8080,
+      platform: map['platform'] as String? ?? '',
+      hasLocalModel: map['has_local_model'] as bool? ?? false,
+      isActive: map['is_active'] as bool? ?? false,
+    );
+  }
+}
 
 /// GrpcService provides a Dart interface to communicate with the
 /// native Kotlin gRPC client via MethodChannel.
 class GrpcService {
   static const MethodChannel _channel = MethodChannel('com.example.edge_mobile/grpc');
+
+  // Connection status notifier
+  final ValueNotifier<ConnectionStatus> connectionStatus = ValueNotifier(
+    ConnectionStatus(connected: false),
+  );
+
+  // Discovered servers notifier
+  final ValueNotifier<List<DiscoveredServer>> discoveredServers = ValueNotifier([]);
+
+  GrpcService() {
+    // Set up method call handler for callbacks from native side
+    _channel.setMethodCallHandler(_handleMethodCall);
+  }
+
+  /// Handle callbacks from native side
+  Future<dynamic> _handleMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onConnectionChanged':
+        final args = Map<String, dynamic>.from(call.arguments as Map);
+        connectionStatus.value = ConnectionStatus.fromMap(args);
+        break;
+
+      case 'onServerDiscovered':
+        final args = Map<String, dynamic>.from(call.arguments as Map);
+        final server = DiscoveredServer.fromMap(args);
+        final current = List<DiscoveredServer>.from(discoveredServers.value);
+        // Update or add server
+        final index = current.indexWhere((s) => s.deviceId == server.deviceId);
+        if (index >= 0) {
+          current[index] = server;
+        } else {
+          current.add(server);
+        }
+        discoveredServers.value = current;
+        break;
+
+      case 'onServerLost':
+        final args = Map<String, dynamic>.from(call.arguments as Map);
+        final deviceId = args['device_id'] as String?;
+        if (deviceId != null) {
+          final current = List<DiscoveredServer>.from(discoveredServers.value);
+          current.removeWhere((s) => s.deviceId == deviceId);
+          discoveredServers.value = current;
+        }
+        break;
+    }
+    return null;
+  }
+
+  /// Get current connection status
+  Future<ConnectionStatus> getConnectionStatus() async {
+    try {
+      final result = await _channel.invokeMethod('getConnectionStatus');
+      final status = ConnectionStatus.fromMap(Map<String, dynamic>.from(result));
+      connectionStatus.value = status;
+      return status;
+    } on PlatformException catch (e) {
+      throw Exception('Failed to get connection status: ${e.message}');
+    }
+  }
+
+  /// Get list of discovered servers
+  Future<List<DiscoveredServer>> getDiscoveredServers() async {
+    try {
+      final result = await _channel.invokeMethod('getDiscoveredServers');
+      final servers = (result as List).map((s) {
+        return DiscoveredServer.fromMap(Map<String, dynamic>.from(s));
+      }).toList();
+      discoveredServers.value = servers;
+      return servers;
+    } on PlatformException catch (e) {
+      throw Exception('Failed to get discovered servers: ${e.message}');
+    }
+  }
+
+  /// Set active server by device ID
+  Future<bool> setActiveServer(String deviceId) async {
+    try {
+      final result = await _channel.invokeMethod('setActiveServer', {
+        'device_id': deviceId,
+      });
+      return result == true;
+    } on PlatformException catch (e) {
+      throw Exception('Failed to set active server: ${e.message}');
+    }
+  }
 
   /// List all registered devices from the orchestrator
   Future<List<Map<String, dynamic>>> listDevices() async {
