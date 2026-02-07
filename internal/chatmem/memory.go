@@ -22,7 +22,7 @@ const (
 
 // ChatMessage represents a single message in the chat history.
 type ChatMessage struct {
-	Role        string `json:"role"`         // "user", "assistant", or "system"
+	Role        string `json:"role"` // "user", "assistant", or "system"
 	Content     string `json:"content"`
 	TimestampMs int64  `json:"timestamp_ms"`
 }
@@ -144,7 +144,7 @@ func (m *ChatMemory) SummarizeAsync(summarizer SummarizerFunc, onComplete func()
 	// Or just summarize the excess?
 	// Strategy: Keep the last N messages (e.g. 10). Summarize everything before that.
 	// If MaxMessages = 10, and we have 12. We summarize the first 2.
-	
+
 	keepCount := MaxMessages / 2 // Keep at least half context
 	if keepCount < 2 {
 		keepCount = 2
@@ -152,23 +152,23 @@ func (m *ChatMemory) SummarizeAsync(summarizer SummarizerFunc, onComplete func()
 	// Or simpler: Keep MaxMessages. Summarize only if > MaxMessages.
 	// If we have 12, Max=10. Excess = 2.
 	// Summarize the first 2.
-	
+
 	excess := len(m.Messages) - MaxMessages
 	if excess <= 0 {
 		m.mu.Unlock()
 		return
 	}
-	
+
 	log.Printf("[DEBUG] SummarizeAsync: Triggering for %d excess messages (total %d)", excess, len(m.Messages))
-	
+
 	// Actually, we should summarize a chunk to avoid frequent small summarizations.
 	// E.g. trigger at 15, summarize down to 10?
 	// User said "exceed 10... keep on making the last messages as a summary".
 	// Let's summarize the oldest 'excess' messages.
-	
+
 	msgsToCompact := make([]ChatMessage, excess)
 	copy(msgsToCompact, m.Messages[:excess])
-	
+
 	// Create a temporary slice for the remaining messages to ensure we don't lose them if summarization fails?
 	// No, we can just grab copies and update state later.
 	// BUT, if we update state later, the "excess" messages might have changed indices if more messages were added?
@@ -176,19 +176,19 @@ func (m *ChatMemory) SummarizeAsync(summarizer SummarizerFunc, onComplete func()
 	// Since we only append, the head is stable.
 	// UNLESS another summarize happens.
 	// We need to prevent concurrent summarizations.
-	
+
 	// For simplicity in this demo:
-	// We will optimistically remove them from the "main" list? 
+	// We will optimistically remove them from the "main" list?
 	// No, user needs to see them until summary is ready.
 	// We'll mark them as "being summarized"? Too complex.
-	
+
 	// Block other summarizations?
 	// We can use a `isSummarizing` flag.
-	
-	// For this prototype: 
+
+	// For this prototype:
 	// We accept a small race condition where if multiple summarizations trigger, `summary` might get weird.
 	// But `SummarizeAsync` is called by `cmd/web` likely sequentially.
-	
+
 	currentSummary := m.Summary
 	m.mu.Unlock()
 
@@ -208,15 +208,15 @@ func (m *ChatMemory) SummarizeAsync(summarizer SummarizerFunc, onComplete func()
 		// We need to check if those messages are still at the head.
 		// We can check timestamps or IDs.
 		// Simple check: `len(m.Messages) >= excess` and `m.Messages[0].Timestamp == msgsToCompact[0].Timestamp`
-		
-		if len(m.Messages) >= len(msgsToCompact) && 
-		   m.Messages[0].TimestampMs == msgsToCompact[0].TimestampMs {
-			
+
+		if len(m.Messages) >= len(msgsToCompact) &&
+			m.Messages[0].TimestampMs == msgsToCompact[0].TimestampMs {
+
 			log.Printf("[DEBUG] SummarizeAsync: Updating memory. Old summary len: %d. New summary len: %d", len(m.Summary), len(newSummary))
 			m.Summary = newSummary
 			m.Messages = m.Messages[len(msgsToCompact):]
 			m.LastUpdatedMs = time.Now().UnixMilli() // Mark updated so file saves
-			
+
 			// Auto save?
 			// The caller `cmd/web` usually saves after `AddMessage`.
 			// Since this is async/background, we should probably trigger a save here.
@@ -227,7 +227,7 @@ func (m *ChatMemory) SummarizeAsync(summarizer SummarizerFunc, onComplete func()
 				log.Printf("[ERROR] SummarizeAsync: Failed to save to file: %v", err)
 			} else {
 				log.Printf("[DEBUG] SummarizeAsync: Saved to file %s", m.path)
-				
+
 				// Trigger completion callback (e.g., to sync to orchestrator)
 				if onComplete != nil {
 					go onComplete()

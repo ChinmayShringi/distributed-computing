@@ -526,11 +526,11 @@ except Exception as e:
 // findVenvPython returns the path to the Python binary in the qai-hub venv.
 func (c *Client) findVenvPython() string {
 	candidates := []string{
-		filepath.Join(".venv-qaihub", "bin", "python3"),         // Unix
-		filepath.Join(".venv-qaihub", "bin", "python"),          // Unix alt
-		filepath.Join(".venv-qaihub", "Scripts", "python.exe"),  // Windows
-		filepath.Join(".venv", "bin", "python3"),                // Generic Unix
-		filepath.Join(".venv", "Scripts", "python.exe"),         // Generic Windows
+		filepath.Join(".venv-qaihub", "bin", "python3"),        // Unix
+		filepath.Join(".venv-qaihub", "bin", "python"),         // Unix alt
+		filepath.Join(".venv-qaihub", "Scripts", "python.exe"), // Windows
+		filepath.Join(".venv", "bin", "python3"),               // Generic Unix
+		filepath.Join(".venv", "Scripts", "python.exe"),        // Generic Windows
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {

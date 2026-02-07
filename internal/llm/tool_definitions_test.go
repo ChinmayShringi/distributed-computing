@@ -87,9 +87,9 @@ func TestListToolNames(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"get_capabilities":   true,
-		"execute_shell_cmd":  true,
-		"get_file":           true,
+		"get_capabilities":  true,
+		"execute_shell_cmd": true,
+		"get_file":          true,
 	}
 
 	for _, name := range names {

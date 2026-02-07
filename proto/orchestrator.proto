@@ -51,6 +51,9 @@ service OrchestratorService {
   // Chat memory synchronization
   rpc SyncChatMemory (ChatMemorySync) returns (ChatMemorySyncResponse);
   rpc GetChatMemory (Empty) returns (ChatMemoryData);
+
+  // Remote LLM task execution
+  rpc RunLLMTask (LLMTaskRequest) returns (LLMTaskResponse);
 }
 
 message Empty {}
@@ -99,6 +102,10 @@ message DeviceInfo {
   double llm_prefill_toks_per_s = 11;  // 0 = use platform default
   double llm_decode_toks_per_s = 12;   // 0 = use platform default
   uint64 ram_free_mb = 13;              // free RAM in MB (0 = unknown)
+  // Local LLM model capability
+  bool has_local_model = 14;           // device has Ollama/chat running
+  string local_model_name = 15;        // loaded model (e.g., "llama3.2:3b")
+  string local_chat_endpoint = 16;     // URL to chat service (e.g., "http://192.168.1.38:11434")
 }
 
 message DeviceAck {
@@ -151,6 +158,8 @@ message RoutingPolicy {
     REQUIRE_NPU = 1;       // fail if no NPU device
     PREFER_REMOTE = 2;     // prefer not-self if possible
     FORCE_DEVICE_ID = 3;   // require specific device_id
+    PREFER_LOCAL_MODEL = 4;   // prefer device with local LLM model
+    REQUIRE_LOCAL_MODEL = 5;  // fail if no local LLM model available
   }
   Mode mode = 1;
   string device_id = 2;    // used if FORCE_DEVICE_ID
@@ -378,4 +387,19 @@ message ChatMemorySyncResponse {
 
 message ChatMemoryData {
   string memory_json = 1;       // full chat memory JSON
+}
+
+// Remote LLM task messages
+
+message LLMTaskRequest {
+  string prompt = 1;
+  string model = 2;        // optional: specific model name
+  int32 max_tokens = 3;    // optional: max tokens to generate
+}
+
+message LLMTaskResponse {
+  string output = 1;
+  string model_used = 2;
+  int64 tokens_generated = 3;
+  string error = 4;
 }

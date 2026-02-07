@@ -24,11 +24,11 @@ type ToolChatProvider interface {
 
 // ToolChatMessage represents a message in a tool-enabled conversation
 type ToolChatMessage struct {
-	Role       string     `json:"role"`                  // "system", "user", "assistant", "tool"
-	Content    string     `json:"content,omitempty"`     // Text content
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`  // For assistant messages with tool calls
+	Role       string     `json:"role"`                   // "system", "user", "assistant", "tool"
+	Content    string     `json:"content,omitempty"`      // Text content
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // For assistant messages with tool calls
 	ToolCallID string     `json:"tool_call_id,omitempty"` // For tool result messages
-	Name       string     `json:"name,omitempty"`        // Tool name for tool result messages
+	Name       string     `json:"name,omitempty"`         // Tool name for tool result messages
 }
 
 // ToolCall represents a function call requested by the LLM
