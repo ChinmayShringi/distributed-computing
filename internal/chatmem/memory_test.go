@@ -19,8 +19,8 @@ func TestNewMemory(t *testing.T) {
 func TestAddMessage(t *testing.T) {
 	m := New()
 
-	m.AddMessage("user", "Hello")
-	m.AddMessage("assistant", "Hi there!")
+	m.AddMessage("user", "Hello", "test-device")
+	m.AddMessage("assistant", "Hi there!", "test-device")
 
 	if len(m.Messages) != 2 {
 		t.Errorf("expected 2 messages, got %d", len(m.Messages))
@@ -42,12 +42,22 @@ func TestSummarization(t *testing.T) {
 	// Add more than MaxMessages
 	for i := 0; i < MaxMessages+4; i++ {
 		if i%2 == 0 {
-			m.AddMessage("user", "Question "+string(rune('A'+i/2)))
+			m.AddMessage("user", "Question "+string(rune('A'+i/2)), "test-device")
 		} else {
-			m.AddMessage("assistant", "Answer "+string(rune('A'+i/2)))
+			m.AddMessage("assistant", "Answer "+string(rune('A'+i/2)), "test-device")
 		}
 	}
 
+	// In the new async version, AddMessage doesn't summarize.
+	// We must trigger it manually.
+	done := make(chan bool)
+	m.SummarizeAsync(func(curr string, msgs []ChatMessage) (string, error) {
+		return "Mock summary", nil
+	}, func() {
+		done <- true
+	})
+
+	<-done
 	if len(m.Messages) > MaxMessages {
 		t.Errorf("expected at most %d messages, got %d", MaxMessages, len(m.Messages))
 	}
@@ -64,8 +74,8 @@ func TestSaveAndLoad(t *testing.T) {
 	// Create and save
 	m := New()
 	m.path = path
-	m.AddMessage("user", "Test question")
-	m.AddMessage("assistant", "Test answer")
+	m.AddMessage("user", "Test question", "test-device")
+	m.AddMessage("assistant", "Test answer", "test-device")
 
 	if err := m.SaveToFile(); err != nil {
 		t.Fatalf("failed to save: %v", err)
@@ -97,8 +107,8 @@ func TestLoadNonExistent(t *testing.T) {
 
 func TestToJSONAndParse(t *testing.T) {
 	m := New()
-	m.AddMessage("user", "Hello")
-	m.AddMessage("assistant", "World")
+	m.AddMessage("user", "Hello", "test-device")
+	m.AddMessage("assistant", "World", "test-device")
 
 	jsonStr, err := m.ToJSON()
 	if err != nil {
@@ -117,11 +127,11 @@ func TestToJSONAndParse(t *testing.T) {
 
 func TestMerge(t *testing.T) {
 	m1 := New()
-	m1.AddMessage("user", "Old message")
+	m1.AddMessage("user", "Old message", "device1")
 
 	m2 := New()
-	m2.AddMessage("user", "New message 1")
-	m2.AddMessage("assistant", "New message 2")
+	m2.AddMessage("user", "New message 1", "device2")
+	m2.AddMessage("assistant", "New message 2", "device2")
 	// Ensure m2 is newer
 	m2.LastUpdatedMs = m1.LastUpdatedMs + 1000
 
@@ -139,7 +149,7 @@ func TestMerge(t *testing.T) {
 
 func TestMergeOlder(t *testing.T) {
 	m1 := New()
-	m1.AddMessage("user", "New message")
+	m1.AddMessage("user", "New message", "device1")
 
 	m2 := New()
 	m2.LastUpdatedMs = m1.LastUpdatedMs - 1000 // Older
@@ -156,7 +166,7 @@ func TestCreateDirectoryOnSave(t *testing.T) {
 
 	m := New()
 	m.path = path
-	m.AddMessage("user", "Test")
+	m.AddMessage("user", "Test", "test-device")
 
 	if err := m.SaveToFile(); err != nil {
 		t.Fatalf("failed to save with nested dir: %v", err)

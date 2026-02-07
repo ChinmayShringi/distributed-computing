@@ -22,9 +22,10 @@ const (
 
 // ChatMessage represents a single message in the chat history.
 type ChatMessage struct {
-	Role        string `json:"role"` // "user", "assistant", or "system"
-	Content     string `json:"content"`
-	TimestampMs int64  `json:"timestamp_ms"`
+	Role           string `json:"role"` // "user", "assistant", or "system"
+	Content        string `json:"content"`
+	TimestampMs    int64  `json:"timestamp_ms"`
+	SenderDeviceID string `json:"sender_device_id,omitempty"`
 }
 
 // ChatMemory manages persistent chat history.
@@ -48,11 +49,50 @@ func New() *ChatMemory {
 
 // DefaultFilePath returns the default path for the chat memory file.
 func DefaultFilePath() (string, error) {
+	return DeviceSpecificFilePath("default")
+}
+
+// DeviceSpecificFilePath returns a device-scoped chat memory file path.
+func DeviceSpecificFilePath(deviceID string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, DefaultPath), nil
+	return filepath.Join(home, ".edgemesh", "chats", "chat_memory_"+deviceID+".json"), nil
+}
+
+// ListAllDeviceIDsWithMemory scans the chat memory directory and returns a list of device IDs
+// that have saved chat history.
+func ListAllDeviceIDsWithMemory() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	chatDir := filepath.Join(home, ".edgemesh", "chats")
+	
+	entries, err := os.ReadDir(chatDir)
+	if os.IsNotExist(err) {
+		return nil, nil // No history yet
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var deviceIDs []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// Matches chat_memory_<id>.json
+		if len(name) > 17 && name[:12] == "chat_memory_" && name[len(name)-5:] == ".json" {
+			id := name[12 : len(name)-5]
+			if id != "" {
+				deviceIDs = append(deviceIDs, id)
+			}
+		}
+	}
+	return deviceIDs, nil
 }
 
 // LoadFromFile loads chat memory from a JSON file.
@@ -109,14 +149,15 @@ func (m *ChatMemory) saveToFileUnsafe() error {
 // AddMessage adds a new message to the chat history.
 // Unlike the previous version, this does NOT auto-summarize synchronously.
 // The caller is responsible for checking len(m.Messages) and calling SummarizeAsync if needed.
-func (m *ChatMemory) AddMessage(role, content string) {
+func (m *ChatMemory) AddMessage(role, content, senderDeviceID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	msg := ChatMessage{
-		Role:        role,
-		Content:     content,
-		TimestampMs: time.Now().UnixMilli(),
+		Role:           role,
+		Content:        content,
+		TimestampMs:    time.Now().UnixMilli(),
+		SenderDeviceID: senderDeviceID,
 	}
 
 	m.Messages = append(m.Messages, msg)

@@ -96,7 +96,7 @@ show-version:
 ## build-web: Build the React web UI and copy to cmd/server/webui
 build-web:
 	@echo "Building edge_web..."
-	@cd edge_web && npm run build
+	@cd edge_web && npm install && npm run build
 	@echo "Copying build to cmd/server/webui..."
 	@rm -rf cmd/server/webui
 	@cp -r edge_web/dist cmd/server/webui

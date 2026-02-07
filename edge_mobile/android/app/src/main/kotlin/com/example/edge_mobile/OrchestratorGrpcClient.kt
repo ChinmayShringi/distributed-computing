@@ -90,11 +90,15 @@ class OrchestratorGrpcClient(
                     "capabilities" to capabilities,
                     "grpc_addr" to device.grpcAddr,
                     "can_screen_capture" to device.canScreenCapture,
+<<<<<<< HEAD
+                    "http_addr" to device.httpAddr
+=======
                     "http_addr" to device.httpAddr,
                     "has_local_model" to device.hasLocalModel,
                     "local_model_name" to device.localModelName,
                     "local_chat_endpoint" to device.localChatEndpoint,
                     "ram_free_mb" to device.ramFreeMb
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
                 )
             }
         } catch (e: Exception) {
@@ -304,6 +308,8 @@ class OrchestratorGrpcClient(
     }
 
     /**
+<<<<<<< HEAD
+=======
      * Submit a distributed job across devices
      */
     suspend fun submitJob(
@@ -432,6 +438,7 @@ class OrchestratorGrpcClient(
     }
 
     /**
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
      * Close the gRPC channel and clean up resources
      */
     fun close() {

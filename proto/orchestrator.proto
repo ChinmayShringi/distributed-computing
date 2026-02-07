@@ -387,8 +387,9 @@ message ReadFileResponse {
 // Chat memory synchronization messages
 
 message ChatMemorySync {
-  int64 last_updated_ms = 1;   // timestamp of sender's memory
-  string memory_json = 2;       // full JSON if pushing, empty if pulling
+  string device_id = 1;        // which device this memory belongs to
+  int64 last_updated_ms = 2;   // timestamp of sender's memory
+  string memory_json = 3;       // full JSON if pushing, empty if pulling
 }
 
 message ChatMemorySyncResponse {

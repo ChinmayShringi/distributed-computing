@@ -27,23 +27,6 @@ export function hasCapability(device: Device, cap: 'gpu' | 'npu' | 'cpu'): boole
   return device.capabilities?.includes(cap) ?? false;
 }
 
-export interface DeviceMetrics {
-  cpu_percent: number;
-  memory_percent: number;
-  gpu_percent: number;
-  npu_percent: number;
-}
-
-export interface DeviceMetricsHistory {
-  device_id: string;
-  samples: Array<{
-    timestamp: string;
-    cpu_percent: number;
-    memory_percent: number;
-    gpu_percent: number;
-    npu_percent: number;
-  }>;
-}
 
 // Command execution types
 export interface RoutedCommandRequest {
@@ -246,6 +229,8 @@ export interface DownloadTicketResponse {
 // Assistant types
 export interface AssistantRequest {
   message: string;
+  device_id?: string;
+  sender_device_id?: string;
 }
 
 export interface AssistantResponse {
@@ -258,6 +243,8 @@ export interface AssistantResponse {
 // Agent types
 export interface AgentRequest {
   message: string;
+  device_id?: string;
+  sender_device_id?: string;
 }
 
 export interface AgentResponse {
@@ -275,12 +262,16 @@ export interface AgentHealthResponse {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
+  timestamp_ms?: number;
+  sender_device_id?: string;
 }
 
 export interface ChatMemoryResponse {
   messages: ChatMessage[];
+  last_updated_ms: number;
+  summary?: string;
 }
 
 // QAI Hub types

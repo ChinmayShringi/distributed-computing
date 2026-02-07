@@ -36,10 +36,13 @@ class GrpcMethodChannelHandler(
             "requestScreenCapture" -> handleRequestScreenCapture(result)
             "sendAssistantMessage" -> handleSendAssistantMessage(call, result)
             "getActivity" -> handleGetActivity(call, result)
+<<<<<<< HEAD
+=======
             "submitJob" -> handleSubmitJob(call, result)
             "getJobDetail" -> handleGetJobDetail(call, result)
             "getDeviceMetrics" -> handleGetDeviceMetrics(call, result)
             "getConnectionStatus" -> handleGetConnectionStatus(result)
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
             else -> result.notImplemented()
         }
     }
@@ -251,6 +254,8 @@ class GrpcMethodChannelHandler(
             }
         }
     }
+<<<<<<< HEAD
+=======
 
     /**
      * Handle submitting a distributed job
@@ -327,4 +332,5 @@ class GrpcMethodChannelHandler(
             result.error("GET_CONNECTION_STATUS_ERROR", e.message, e.toString())
         }
     }
+>>>>>>> 503e1dd31dbd36139d1fe6ea28cd20576bd44620
 }
