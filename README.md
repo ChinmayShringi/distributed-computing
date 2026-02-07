@@ -772,6 +772,14 @@ edgecli/
 │   ├── client/            # gRPC CLI client
 │   └── web/               # Web UI server
 │       └── index.html     # Embedded web UI
+├── edge_mobile/           # Flutter mobile app
+│   ├── lib/               # Dart source (features, services, theme)
+│   │   ├── features/      # Screen modules (dashboard, devices, chat, jobs)
+│   │   ├── services/      # gRPC service layer
+│   │   └── router/        # GoRouter navigation
+│   ├── android/           # Kotlin gRPC integration
+│   │   └── .../kotlin/    # Native platform implementation
+│   └── ios/               # Swift implementation
 ├── internal/
 │   ├── allowlist/         # Command allowlist for safe execution
 │   ├── approval/          # Tool approval workflows
