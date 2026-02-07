@@ -187,15 +187,34 @@ EdgeMesh Discovery - UDP inbound 50050 (for P2P mode)
 
 Automatic peer discovery via UDP broadcast on LAN. No coordinator needed - devices find each other automatically.
 
-**Just start the server:**
+**Configuration via .env file:**
+
+Both server and web load `.env` from the current directory automatically.
+
+```bash
+# .env (copy to C:\Users\chinmay\Desktop\edgecli\ on Windows)
+GRPC_ADDR=:50051
+WEB_ADDR=:8080
+CHAT_PROVIDER=ollama
+CHAT_BASE_URL=http://localhost:11434
+CHAT_MODEL=llama3.2:3b
+CHAT_TIMEOUT_SECONDS=120
+AGENT_MAX_ITERATIONS=8
+```
+
+**Just start the servers:**
 ```powershell
-# Windows
-server-windows.exe
+# Windows - cd to folder with .env
+cd C:\Users\chinmay\Desktop\edgecli
+ollama serve              # Terminal 1
+.\server-windows.exe      # Terminal 2
+.\web-windows.exe         # Terminal 3
 ```
 
 ```bash
-# Mac/Linux
+# Mac/Linux - from project root (uses .env automatically)
 go run ./cmd/server
+go run ./cmd/web
 ```
 
 **To disable P2P discovery:**
@@ -256,21 +275,14 @@ curl http://localhost:11434
 ```
 
 **Starting EdgeCLI with Ollama:**
-```powershell
-# Terminal 1 - gRPC Server
-cd C:\Users\chinmay\Desktop\edgecli
-set GRPC_ADDR=:50051
-set CHAT_PROVIDER=ollama
-set CHAT_MODEL=llama3.2:3b
-server-windows.exe
 
-# Terminal 2 - Web UI
+The `.env` file is pre-configured for Ollama. Just run:
+
+```powershell
 cd C:\Users\chinmay\Desktop\edgecli
-set WEB_ADDR=0.0.0.0:8080
-set GRPC_ADDR=localhost:50051
-set CHAT_PROVIDER=ollama
-set CHAT_MODEL=llama3.2:3b
-web-windows.exe
+ollama serve              # Terminal 1
+.\server-windows.exe      # Terminal 2 (loads .env automatically)
+.\web-windows.exe         # Terminal 3 (loads .env automatically)
 ```
 
 **Verify Chat & Agent:**
