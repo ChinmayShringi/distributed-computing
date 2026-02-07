@@ -1236,37 +1236,31 @@ func (s *OrchestratorServer) RunTask(ctx context.Context, req *pb.TaskRequest) (
 	}
 }
 
-// runLLMGenerate sends a prompt to an OpenAI-compatible endpoint running on
-// this device (Ollama, LM Studio, vLLM, or any /v1/chat/completions server).
-// Configure via LLM_ENDPOINT and LLM_MODEL env vars on each device.
+// runLLMGenerate sends a prompt to this device's /api/assistant HTTP endpoint,
+// which wraps the local LLM (Ollama, LM Studio, etc.) configured via CHAT_PROVIDER.
+// This ensures each device uses its own local model for task execution.
 func (s *OrchestratorServer) runLLMGenerate(ctx context.Context, prompt string) (string, error) {
-	endpoint := os.Getenv("LLM_ENDPOINT")
-	if endpoint == "" {
-		endpoint = "http://127.0.0.1:11434" // Ollama default
+	// Use device's own /api/assistant endpoint
+	// This device's HTTP server is at http://localhost:<WEB_PORT>/api/assistant
+	webPort := os.Getenv("WEB_ADDR")
+	if webPort == "" {
+		webPort = ":8080"
 	}
-	model := os.Getenv("LLM_MODEL")
-	if model == "" {
-		model = "qwen3:8b" // Default model
+	// Strip leading : if present
+	if strings.HasPrefix(webPort, ":") {
+		webPort = "localhost" + webPort
 	}
 
-	// Build OpenAI-compatible chat completions request
+	url := fmt.Sprintf("http://%s/api/assistant", webPort)
+
 	reqBody := map[string]interface{}{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"temperature": 0.7,
-		"max_tokens":  1024,
-		"stream":      false,
+		"text": prompt,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
-
-	// Try OpenAI-compatible endpoint first (/v1/chat/completions)
-	url := strings.TrimRight(endpoint, "/") + "/v1/chat/completions"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -1277,36 +1271,34 @@ func (s *OrchestratorServer) runLLMGenerate(ctx context.Context, prompt string) 
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		// Fallback: try Ollama native /api/chat endpoint
-		return s.runLLMGenerateOllama(ctx, endpoint, model, prompt)
+		return "", fmt.Errorf("HTTP request to %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Fallback to Ollama
-		return s.runLLMGenerateOllama(ctx, endpoint, model, prompt)
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, url, string(respBody[:min(200, len(respBody))]))
 	}
 
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+	var assistantResp struct {
+		Text string `json:"text"`
 	}
 
-	respBody, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	if err := json.Unmarshal(respBody, &assistantResp); err != nil {
 		return "", fmt.Errorf("parse response: %w (body: %s)", err, string(respBody[:min(200, len(respBody))]))
 	}
 
-	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("LLM returned 0 choices")
+	if assistantResp.Text == "" {
+		return "", fmt.Errorf("assistant returned empty response")
 	}
 
-	result := chatResp.Choices[0].Message.Content
-	log.Printf("[INFO] LLM_GENERATE completed: model=%s prompt_len=%d result_len=%d", model, len(prompt), len(result))
-	return result, nil
+	log.Printf("[INFO] LLM_GENERATE completed via /api/assistant: prompt_len=%d result_len=%d", len(prompt), len(assistantResp.Text))
+	return assistantResp.Text, nil
 }
 
 // runLLMGenerateOllama is a fallback that uses Ollama's native /api/chat endpoint.
