@@ -19,7 +19,7 @@ make build-all      # Cross-platform builds (darwin/linux/windows)
 
 **Deploy to Windows:**
 ```bash
-./deploy-windows.sh  # Build, copy, and start server on Windows machine (10.20.38.80)
+./deploy-windows.sh  # Build, copy, and start server on Windows machine (10.206.87.35)
 ```
 
 This script:
@@ -205,10 +205,13 @@ When modifying `proto/orchestrator.proto`:
 | `SHARED_DIR` | `./shared` | Directory served for bulk file downloads |
 | `CHAT_PROVIDER` | `ollama` | Chat provider: `ollama`, `openai`, or `echo` |
 | `CHAT_BASE_URL` | `http://localhost:11434` | Chat API base URL (Ollama default) |
-| `CHAT_MODEL` | `llama2` | Model name for chat |
+| `CHAT_MODEL` | `llama3.2:3b` | Model name for chat (use tool-capable model for agent) |
 | `CHAT_API_KEY` | (empty) | API key (optional, for OpenAI-compatible) |
 | `CHAT_TIMEOUT_SECONDS` | `60` | Chat request timeout |
 | `AGENT_MAX_ITERATIONS` | `8` | Max tool calling iterations for agent |
+| `P2P_DISCOVERY` | `true` | UDP broadcast peer discovery (set `false` to disable) |
+| `DISCOVERY_PORT` | `50051` | UDP port for P2P discovery broadcasts |
+| `SEED_PEERS` | (empty) | Comma-separated IPs for cross-subnet discovery |
 
 ## Multi-Device Setup
 
@@ -220,12 +223,14 @@ When modifying `proto/orchestrator.proto`:
 ## Windows Machine
 
 ```
-Host: 10.20.38.80
-User: sshuser
+Host: 10.206.87.35
+User: chinmay
 Pass: root
+EdgeCLI dir: C:\Users\chinmay\Desktop\edgecli\
+Ollama: Installed (llama3.2:3b, phi3:mini)
 ```
 
-See `docs/connection.md` for full details.
+See `docs/connection.md` for full details (including Ollama setup).
 
 ## Execution Modes
 

@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -29,6 +31,7 @@ import (
 	"github.com/edgecli/edgecli/internal/allowlist"
 	"github.com/edgecli/edgecli/internal/brain"
 	"github.com/edgecli/edgecli/internal/chatmem"
+	"github.com/edgecli/edgecli/internal/discovery"
 	"github.com/edgecli/edgecli/internal/cost"
 	"github.com/edgecli/edgecli/internal/deviceid"
 	"github.com/edgecli/edgecli/internal/exec"
@@ -45,7 +48,7 @@ const (
 	defaultBulkHTTPAddr = ":8081"
 	defaultSharedDir    = "./shared"
 	defaultBulkTTL      = 60
-	remoteDialTimeout   = 2 * time.Second
+	remoteDialTimeout   = 15 * time.Second
 )
 
 // Session represents an authenticated client session
@@ -484,6 +487,78 @@ func (s *OrchestratorServer) syncDevicesFromCoordinator(coordinatorAddr string) 
 	}
 }
 
+// runImageGenerate calls a Stable Diffusion API endpoint to generate an image.
+// Configure via IMAGE_API_ENDPOINT env var (defaults to Automatic1111 WebUI format).
+// Returns the path to the generated image in the shared directory.
+func (s *OrchestratorServer) runImageGenerate(ctx context.Context, prompt string) (string, error) {
+	endpoint := os.Getenv("IMAGE_API_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:7860" // Automatic1111 WebUI default
+	}
+
+	// Build Stable Diffusion txt2img request
+	reqBody := map[string]interface{}{
+		"prompt":  prompt,
+		"steps":   20,
+		"width":   512,
+		"height":  512,
+		"sampler_name": "Euler a",
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := strings.TrimRight(endpoint, "/") + "/sdapi/v1/txt2img"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 180 * time.Second} // 3 min for image gen
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("Image API unreachable at %s: %w (set IMAGE_API_ENDPOINT env var)", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Image API returned %d: %s", resp.StatusCode, string(respBody[:min(200, len(respBody))]))
+	}
+
+	var sdResp struct {
+		Images []string `json:"images"` // base64 encoded images
+	}
+	if err := json.Unmarshal(respBody, &sdResp); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	if len(sdResp.Images) == 0 {
+		return "", fmt.Errorf("no images generated")
+	}
+
+	// Save first image to shared directory
+	imageData := sdResp.Images[0]
+	decoded, err := base64.StdEncoding.DecodeString(imageData)
+	if err != nil {
+		return "", fmt.Errorf("decode image: %w", err)
+	}
+
+	// Generate filename
+	filename := fmt.Sprintf("image_%d.png", time.Now().Unix())
+	imagePath := filepath.Join(s.sharedRoot, filename)
+	
+	if err := os.WriteFile(imagePath, decoded, 0644); err != nil {
+		return "", fmt.Errorf("save image: %w", err)
+	}
+
+	log.Printf("[INFO] IMAGE_GENERATE completed: prompt_len=%d image_saved=%s", len(prompt), imagePath)
+	return imagePath, nil
+}
+
 // detectLANIP finds the first non-loopback IPv4 address on this machine.
 func detectLANIP() string {
 	addrs, err := net.InterfaceAddrs()
@@ -655,6 +730,23 @@ func (s *OrchestratorServer) RunTask(ctx context.Context, req *pb.TaskRequest) (
 			TaskId: req.TaskId,
 			Ok:     true,
 			Output: output,
+			TimeMs: float64(time.Since(start).Milliseconds()),
+		}, nil
+
+	case "IMAGE_GENERATE":
+		imagePath, err := s.runImageGenerate(ctx, req.Input)
+		if err != nil {
+			return &pb.TaskResult{
+				TaskId: req.TaskId,
+				Ok:     false,
+				Error:  fmt.Sprintf("IMAGE_GENERATE failed: %v", err),
+				TimeMs: float64(time.Since(start).Milliseconds()),
+			}, nil
+		}
+		return &pb.TaskResult{
+			TaskId: req.TaskId,
+			Ok:     true,
+			Output: imagePath, // Return path to generated image
 			TimeMs: float64(time.Since(start).Milliseconds()),
 		}, nil
 
@@ -838,8 +930,8 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 		}
 	}
 
-	// Create job with tasks (plan and reduce will use defaults if nil)
-	job, err := s.jobManager.CreateJob(devices, int(req.MaxWorkers), plan, reduce)
+	// Create job with tasks (plan and reduce will use smart defaults if nil)
+	job, err := s.jobManager.CreateJob(req.Text, devices, int(req.MaxWorkers), plan, reduce)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create job: %v", err)
 	}
@@ -1065,12 +1157,22 @@ func (s *OrchestratorServer) PreviewPlan(ctx context.Context, req *pb.PlanPrevie
 		}
 	}
 
-	// Fall back to default plan
+	// Fall back to smart plan based on user text
 	if plan == nil {
-		plan = s.jobManager.GenerateDefaultPlan(selectedDevices)
+		plan = s.jobManager.GenerateSmartPlan(req.Text, selectedDevices)
 		reduce = &pb.ReduceSpec{Kind: "CONCAT"}
 		notes = "Brain not available (non-Windows or disabled)"
-		rationale = fmt.Sprintf("Default: 1 SYSINFO per device, %d of %d devices selected", len(selectedDevices), len(devices))
+		
+		// Determine rationale based on what kind of plan was generated
+		isLLMTask := false
+		if len(plan.Groups) > 0 && len(plan.Groups[0].Tasks) > 0 {
+			isLLMTask = plan.Groups[0].Tasks[0].Kind == "LLM_GENERATE"
+		}
+		if isLLMTask {
+			rationale = fmt.Sprintf("Smart: detected LLM request, routing to best NPU device")
+		} else {
+			rationale = fmt.Sprintf("Default: 1 SYSINFO per device, %d of %d devices selected", len(selectedDevices), len(devices))
+		}
 	}
 
 	return &pb.PlanPreviewResponse{
@@ -1649,6 +1751,11 @@ func (s *OrchestratorServer) AddChatMessage(role, content string) {
 }
 
 func main() {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Printf("[INFO] No .env file found: %v", err)
+	}
+
 	// Get address from environment or use default
 	addr := os.Getenv("GRPC_ADDR")
 	if addr == "" {
@@ -1681,9 +1788,60 @@ func main() {
 	// Start bulk HTTP server in a goroutine
 	go orchestrator.startBulkHTTP()
 
-	// Auto-register with coordinator if COORDINATOR_ADDR is set.
-	// This lets any device join the mesh automatically on startup.
-	if coordinatorAddr := os.Getenv("COORDINATOR_ADDR"); coordinatorAddr != "" {
+	// P2P Discovery: enabled by default, use UDP broadcast to find peers on LAN
+	// Set P2P_DISCOVERY=false to disable
+	if os.Getenv("P2P_DISCOVERY") != "false" {
+		discoveryPort := discovery.DefaultPort
+		if portStr := os.Getenv("DISCOVERY_PORT"); portStr != "" {
+			if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
+				discoveryPort = p
+			}
+		}
+
+		// Get self device info and convert to discovery format
+		selfInfo := orchestrator.getSelfDeviceInfo()
+		selfDevice := &discovery.DeviceAnnounce{
+			DeviceID:         selfInfo.DeviceId,
+			DeviceName:       selfInfo.DeviceName,
+			GrpcAddr:         selfInfo.GrpcAddr,
+			HttpAddr:         selfInfo.HttpAddr,
+			Platform:         selfInfo.Platform,
+			Arch:             selfInfo.Arch,
+			HasCPU:           selfInfo.HasCpu,
+			HasGPU:           selfInfo.HasGpu,
+			HasNPU:           selfInfo.HasNpu || (runtime.GOOS == "windows" && runtime.GOARCH == "arm64"),
+			CanScreenCapture: selfInfo.CanScreenCapture,
+		}
+
+		discoverySvc := discovery.NewService(discoveryPort, selfDevice, &discoveryCallback{registry: orchestrator.registry})
+
+		// Add seed peers for cross-subnet discovery
+		if seedPeers := os.Getenv("SEED_PEERS"); seedPeers != "" {
+			for _, peer := range strings.Split(seedPeers, ",") {
+				peer = strings.TrimSpace(peer)
+				if peer == "" {
+					continue
+				}
+				// Add discovery port if not specified
+				if !strings.Contains(peer, ":") {
+					peer = peer + ":" + strconv.Itoa(discoveryPort)
+				}
+				if err := discoverySvc.AddSeedPeer(peer); err != nil {
+					log.Printf("[WARN] Invalid seed peer %s: %v", peer, err)
+				} else {
+					log.Printf("[INFO] Added seed peer: %s", peer)
+				}
+			}
+		}
+
+		if err := discoverySvc.Start(); err != nil {
+			log.Printf("[WARN] Failed to start P2P discovery: %v", err)
+		} else {
+			log.Printf("[INFO] P2P discovery enabled on UDP port %d", discoveryPort)
+			defer discoverySvc.Stop()
+		}
+	} else if coordinatorAddr := os.Getenv("COORDINATOR_ADDR"); coordinatorAddr != "" {
+		// Legacy: Auto-register with coordinator if COORDINATOR_ADDR is set.
 		go orchestrator.autoRegisterWithCoordinator(coordinatorAddr)
 	}
 
@@ -1691,4 +1849,28 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}
+}
+
+// discoveryCallback bridges discovery events to the device registry
+type discoveryCallback struct {
+	registry *registry.Registry
+}
+
+func (dc *discoveryCallback) OnDeviceDiscovered(device *discovery.DeviceAnnounce) {
+	dc.registry.UpsertFromDiscovery(
+		device.DeviceID,
+		device.DeviceName,
+		device.GrpcAddr,
+		device.HttpAddr,
+		device.Platform,
+		device.Arch,
+		device.HasCPU,
+		device.HasGPU,
+		device.HasNPU,
+		device.CanScreenCapture,
+	)
+}
+
+func (dc *discoveryCallback) OnDeviceLeft(deviceID string) {
+	dc.registry.Remove(deviceID)
 }

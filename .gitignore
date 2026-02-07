@@ -23,11 +23,6 @@ Dockerfile.test*
 # Go
 vendor/
 
-# Environment files
-.env
-*.env
-server/.env
-
 credentials*
 test/
 tests/

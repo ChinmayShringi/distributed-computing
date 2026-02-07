@@ -29,27 +29,45 @@ This echoes back user messages without requiring any external LLM. Useful for:
 
 [Ollama](https://ollama.ai/) is a lightweight LLM runtime for Mac/Linux/Windows.
 
-**Installation on Mac:**
+**Installation:**
 
 ```bash
-# Install via Homebrew
+# Mac
 brew install ollama
 
-# Or download from https://ollama.ai/download
+# Windows
+winget install Ollama.Ollama
 
+# Or download from https://ollama.ai/download
+```
+
+**Start Ollama and pull a model:**
+
+```bash
 # Start Ollama service
 ollama serve
 
-# Pull a model
-ollama pull llama2
+# Pull a model (see recommendations below)
+ollama pull llama3.2:3b
 ```
+
+**Recommended Models:**
+
+| Model | Size | Chat | Tool Calling | Notes |
+|-------|------|------|--------------|-------|
+| `llama3.2:3b` | 2.0GB | Good | Yes | Best for agent use |
+| `phi3:mini` | 2.2GB | Good | No | Fast, but no tool support |
+| `mistral:7b` | 4.1GB | Excellent | Yes | Higher quality |
+| `qwen2.5:7b` | 4.7GB | Excellent | Yes | Strong reasoning |
+
+**Important:** For agent functionality (tool calling), use `llama3.2:3b`, `mistral:7b`, or `qwen2.5:7b`. Models like `phi3:mini` do not support tool calling.
 
 **Environment variables:**
 
 ```bash
 export CHAT_PROVIDER=ollama
 export CHAT_BASE_URL=http://localhost:11434
-export CHAT_MODEL=llama2
+export CHAT_MODEL=llama3.2:3b  # Use a model with tool support for agent
 ```
 
 ### OpenAI-Compatible (LM Studio)
@@ -198,8 +216,22 @@ The agent endpoint (`/api/agent`) provides an LLM that can call tools to interac
 
 ### Agent Configuration
 
+The agent requires a model that supports tool/function calling.
+
+**Option 1: Ollama (Recommended)**
+
 ```bash
-# Required: Use OpenAI-compatible provider (LM Studio)
+export CHAT_PROVIDER=ollama
+export CHAT_BASE_URL=http://localhost:11434
+export CHAT_MODEL=llama3.2:3b  # or mistral:7b, qwen2.5:7b
+
+# Optional
+export AGENT_MAX_ITERATIONS=8  # Max tool calling iterations
+```
+
+**Option 2: LM Studio (OpenAI-compatible)**
+
+```bash
 export CHAT_PROVIDER=openai
 export CHAT_BASE_URL=http://localhost:1234
 export CHAT_MODEL=qwen3-vl-8b
@@ -207,6 +239,8 @@ export CHAT_MODEL=qwen3-vl-8b
 # Optional
 export AGENT_MAX_ITERATIONS=8  # Max tool calling iterations
 ```
+
+**Note:** Not all models support tool calling. See the model table above for compatible models.
 
 ### REST API
 
