@@ -34,9 +34,9 @@ type reduceJSON struct {
 
 // validKinds are the allowed task kinds.
 var validKinds = map[string]bool{
-	"SYSINFO":       true,
-	"ECHO":          true,
-	"LLM_GENERATE":  true,
+	"SYSINFO":        true,
+	"ECHO":           true,
+	"LLM_GENERATE":   true,
 	"IMAGE_GENERATE": true,
 }
 

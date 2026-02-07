@@ -87,6 +87,8 @@ Commands can be routed to devices using policies:
 - `BEST_AVAILABLE` - NPU > GPU > CPU preference
 - `PREFER_REMOTE` - Prefer non-local devices
 - `REQUIRE_NPU` - Fail if no NPU device
+- `PREFER_LOCAL_MODEL` - Prefer device with local LLM model (Ollama)
+- `REQUIRE_LOCAL_MODEL` - Fail if no device has local LLM model
 - `FORCE_DEVICE_ID` - Target specific device
 
 ### Job Execution Model
@@ -144,7 +146,7 @@ When modifying `proto/orchestrator.proto`:
 5. Update `cmd/server/index.html` if new UI needed
 6. Update `docs/features/grpc.md`
 
-### Current gRPC RPCs (16 total)
+### Current gRPC RPCs (17 total)
 
 | RPC | Purpose |
 |-----|---------|
@@ -161,17 +163,18 @@ When modifying `proto/orchestrator.proto`:
 | `PreviewPlan` | Preview execution plan without creating a job |
 | `PreviewPlanCost` | Estimate execution cost for a plan before running |
 | `RunTask` | Execute a task locally (worker RPC) |
+| `RunLLMTask` | Execute LLM inference on device's local model (Ollama) |
 | `CreateDownloadTicket` | Create one-time-use file download token |
 | `ReadFile` | Read file from device (for LLM tool calling) |
 | `StartWebRTC` / `CompleteWebRTC` / `StopWebRTC` | Screen streaming via WebRTC |
 | `HealthCheck` | Server health status |
 
-### Current REST Endpoints (18 total)
+### Current REST Endpoints (19 total)
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/` | GET | Serve embedded web UI |
-| `/api/devices` | GET | List devices (includes `can_screen_capture`) |
+| `/api/devices` | GET | List devices (includes `can_screen_capture`, `has_local_model`) |
 | `/api/routed-cmd` | POST | Execute routed command |
 | `/api/submit-job` | POST | Submit distributed job |
 | `/api/job?id=` | GET | Get job status |
@@ -184,6 +187,7 @@ When modifying `proto/orchestrator.proto`:
 | `/api/stream/stop` | POST | Stop stream |
 | `/api/chat/health` | GET | Chat runtime health check |
 | `/api/chat` | POST | Send chat message (local LLM) |
+| `/api/llm-task` | POST | Route LLM task to device with local model |
 | `/api/agent` | POST | LLM agent with tool calling |
 | `/api/agent/health` | GET | Agent health check |
 | `/api/qaihub/doctor` | GET | QAI Hub CLI health check |

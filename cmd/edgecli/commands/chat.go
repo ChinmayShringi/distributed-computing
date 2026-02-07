@@ -25,11 +25,11 @@ var (
 to interact with devices in the mesh.`,
 		RunE: runChat,
 	}
-	
-	chatWebAddr     string
+
+	chatWebAddr      string
 	lastMessageCount int
-	isChatting      atomic.Bool
-	printMutex      sync.Mutex
+	isChatting       atomic.Bool
+	printMutex       sync.Mutex
 )
 
 func init() {
@@ -57,8 +57,8 @@ type chatResponse struct {
 
 // chatMemoryResponse matches the JSON structure from /api/chat/memory
 type chatMemoryResponse struct {
-	Version       int `json:"version"`
-	LastUpdatedMs int64 `json:"last_updated_ms"`
+	Version       int    `json:"version"`
+	LastUpdatedMs int64  `json:"last_updated_ms"`
 	Summary       string `json:"summary"`
 	Messages      []struct {
 		Role        string `json:"role"`
@@ -133,7 +133,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		isChatting.Store(true)
 		reply, err := sendChatMessageWithReply(input, true)
 		isChatting.Store(false)
-		
+
 		if err != nil {
 			fmt.Println(ui.RenderError(err))
 		} else {
@@ -145,7 +145,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 			// Sync and skip our own message and reply
 			syncAndPrintNew(input, reply)
 		}
-		fmt.Println() 
+		fmt.Println()
 	}
 
 	return scanner.Err()
@@ -260,10 +260,10 @@ func syncAndPrintNew(skipUser, skipAgent string) {
 	if err != nil {
 		return
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	
+
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
 	if err != nil {
 		return
@@ -293,24 +293,23 @@ func syncAndPrintNew(skipUser, skipAgent string) {
 			// Print new message
 			// We need to clear current line to avoid mess with prompt?
 			// Ideally yes, but tricky. We'll just print newline.
-			fmt.Println() 
+			fmt.Println()
 			if msg.Role == "user" {
 				fmt.Print(ui.RenderUserPrompt() + msg.Content + "\n")
 			} else {
 				fmt.Print(ui.RenderAssistantPrefix() + msg.Content + "\n")
 			}
 		}
-		
-		// If we printed something via background polling, prompt might be buried. 
+
+		// If we printed something via background polling, prompt might be buried.
 		// Ideally we reprint prompt.
 		if skipUser == "" && skipAgent == "" && len(newMsgs) > 0 {
-			fmt.Print(ui.RenderUserPrompt()) 
+			fmt.Print(ui.RenderUserPrompt())
 		}
 
 		lastMessageCount = len(mem.Messages)
 	}
 }
-
 
 func printChatHelp() {
 	fmt.Println()
