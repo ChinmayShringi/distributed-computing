@@ -38,6 +38,7 @@ import (
 	"github.com/edgecli/edgecli/internal/exec"
 	"github.com/edgecli/edgecli/internal/jobs"
 	"github.com/edgecli/edgecli/internal/llm"
+	"github.com/edgecli/edgecli/internal/metrics"
 	"github.com/edgecli/edgecli/internal/qaihub"
 	"github.com/edgecli/edgecli/internal/registry"
 	"github.com/edgecli/edgecli/internal/sysinfo"
@@ -84,6 +85,7 @@ type OrchestratorServer struct {
 	ticketManager *transfer.Manager
 	sharedRoot    string
 	bulkHTTPAddr  string
+	metricsStore  *metrics.MetricsStore
 }
 
 // WebHandler handles HTTP requests using in-process calls to OrchestratorServer
@@ -398,6 +400,7 @@ func NewOrchestratorServer(addr string) *OrchestratorServer {
 		ticketManager: transfer.NewManager(time.Duration(bulkTTL) * time.Second),
 		sharedRoot:    sharedRootAbs,
 		bulkHTTPAddr:  bulkHTTPAddr,
+		metricsStore:  metrics.NewMetricsStore(),
 	}
 }
 
@@ -544,11 +547,16 @@ func (s *OrchestratorServer) GetDeviceStatus(ctx context.Context, req *pb.Device
 	if req.DeviceId == s.selfDeviceID {
 		hostStatus := sysinfo.GetHostStatus()
 		return &pb.DeviceStatus{
-			DeviceId:   s.selfDeviceID,
-			LastSeen:   time.Now().Unix(),
-			CpuLoad:    hostStatus.CPULoad,
-			MemUsedMb:  hostStatus.MemUsedMB,
-			MemTotalMb: hostStatus.MemTotalMB,
+			DeviceId:      s.selfDeviceID,
+			LastSeen:      time.Now().Unix(),
+			CpuLoad:       hostStatus.CPULoad,
+			MemUsedMb:     hostStatus.MemUsedMB,
+			MemTotalMb:    hostStatus.MemTotalMB,
+			GpuLoad:       hostStatus.GPULoad,
+			GpuMemUsedMb:  hostStatus.GPUMemUsedMB,
+			GpuMemTotalMb: hostStatus.GPUMemTotalMB,
+			NpuLoad:       hostStatus.NPULoad,
+			TimestampMs:   hostStatus.Timestamp,
 		}, nil
 	}
 
@@ -558,6 +566,149 @@ func (s *OrchestratorServer) GetDeviceStatus(ctx context.Context, req *pb.Device
 	log.Printf("[DEBUG] GetDeviceStatus: device=%s last_seen=%d", req.DeviceId, deviceStatus.LastSeen)
 
 	return deviceStatus, nil
+}
+
+// GetActivity returns current activity data (running tasks, device activities, metrics)
+func (s *OrchestratorServer) GetActivity(ctx context.Context, req *pb.GetActivityRequest) (*pb.GetActivityResponse, error) {
+	now := time.Now().UnixMilli()
+
+	// Get running tasks from job manager
+	runningTasks := s.jobManager.GetRunningTasks()
+	pbRunningTasks := make([]*pb.RunningTask, 0, len(runningTasks))
+	for _, task := range runningTasks {
+		elapsed := now - task.StartedAt
+		if task.StartedAt == 0 {
+			elapsed = 0
+		}
+		pbRunningTasks = append(pbRunningTasks, &pb.RunningTask{
+			TaskId:      task.ID,
+			JobId:       task.JobID,
+			Kind:        task.Kind,
+			Input:       task.Input,
+			DeviceId:    task.DeviceID,
+			DeviceName:  task.DeviceName,
+			StartedAtMs: task.StartedAt,
+			ElapsedMs:   elapsed,
+		})
+	}
+
+	// Get running task counts per device
+	taskCounts := s.jobManager.GetRunningTaskCountByDevice()
+
+	// Build device activities
+	devices := s.registry.List()
+	deviceActivities := make([]*pb.DeviceActivity, 0, len(devices))
+	for _, d := range devices {
+		count := taskCounts[d.DeviceId]
+		status, _ := s.GetDeviceStatus(ctx, &pb.DeviceId{DeviceId: d.DeviceId})
+		deviceActivities = append(deviceActivities, &pb.DeviceActivity{
+			DeviceId:         d.DeviceId,
+			DeviceName:       d.DeviceName,
+			RunningTaskCount: int32(count),
+			CurrentStatus:    status,
+		})
+	}
+
+	resp := &pb.GetActivityResponse{
+		Activity: &pb.ActivityData{
+			RunningTasks:     pbRunningTasks,
+			DeviceActivities: deviceActivities,
+		},
+	}
+
+	// Include metrics history if requested
+	if req.IncludeMetricsHistory {
+		sinceMs := req.MetricsSinceMs
+		allHistory := s.metricsStore.GetAllHistory(sinceMs)
+		resp.DeviceMetrics = make(map[string]*pb.MetricsHistoryResponse)
+		for deviceID, samples := range allHistory {
+			deviceName, _ := s.metricsStore.GetDeviceInfo(deviceID)
+			pbSamples := make([]*pb.MetricsSample, len(samples))
+			for i, sample := range samples {
+				pbSamples[i] = &pb.MetricsSample{
+					TimestampMs:   sample.Timestamp,
+					CpuLoad:       sample.CPULoad,
+					MemUsedMb:     sample.MemUsedMB,
+					MemTotalMb:    sample.MemTotalMB,
+					GpuLoad:       sample.GPULoad,
+					GpuMemUsedMb:  sample.GPUMemUsedMB,
+					GpuMemTotalMb: sample.GPUMemTotalMB,
+					NpuLoad:       sample.NPULoad,
+				}
+			}
+			resp.DeviceMetrics[deviceID] = &pb.MetricsHistoryResponse{
+				DeviceId:   deviceID,
+				DeviceName: deviceName,
+				Samples:    pbSamples,
+			}
+		}
+	}
+
+	return resp, nil
+}
+
+// GetDeviceMetrics returns metrics history for a specific device
+func (s *OrchestratorServer) GetDeviceMetrics(ctx context.Context, req *pb.DeviceId) (*pb.MetricsHistoryResponse, error) {
+	samples := s.metricsStore.GetHistory(req.DeviceId, 0)
+	deviceName, _ := s.metricsStore.GetDeviceInfo(req.DeviceId)
+
+	pbSamples := make([]*pb.MetricsSample, len(samples))
+	for i, sample := range samples {
+		pbSamples[i] = &pb.MetricsSample{
+			TimestampMs:   sample.Timestamp,
+			CpuLoad:       sample.CPULoad,
+			MemUsedMb:     sample.MemUsedMB,
+			MemTotalMb:    sample.MemTotalMB,
+			GpuLoad:       sample.GPULoad,
+			GpuMemUsedMb:  sample.GPUMemUsedMB,
+			GpuMemTotalMb: sample.GPUMemTotalMB,
+			NpuLoad:       sample.NPULoad,
+		}
+	}
+
+	return &pb.MetricsHistoryResponse{
+		DeviceId:   req.DeviceId,
+		DeviceName: deviceName,
+		Samples:    pbSamples,
+	}, nil
+}
+
+// GetJobDetail returns enhanced job details for visualization
+func (s *OrchestratorServer) GetJobDetail(ctx context.Context, req *pb.JobId) (*pb.JobDetailResponse, error) {
+	job, ok := s.jobManager.Get(req.JobId)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "job not found: %s", req.JobId)
+	}
+
+	tasks := make([]*pb.TaskStatusEnhanced, len(job.Tasks))
+	for i, task := range job.Tasks {
+		tasks[i] = &pb.TaskStatusEnhanced{
+			TaskId:             task.ID,
+			JobId:              task.JobID,
+			AssignedDeviceId:   task.DeviceID,
+			AssignedDeviceName: task.DeviceName,
+			Kind:               task.Kind,
+			Input:              task.Input,
+			State:              string(task.State),
+			Result:             task.Result,
+			Error:              task.Error,
+			GroupIndex:         int32(task.GroupIndex),
+			StartedAtMs:        task.StartedAt,
+			EndedAtMs:          task.EndedAt,
+		}
+	}
+
+	return &pb.JobDetailResponse{
+		JobId:        job.ID,
+		State:        string(job.State),
+		Tasks:        tasks,
+		FinalResult:  job.FinalResult,
+		CurrentGroup: int32(job.CurrentGroup),
+		TotalGroups:  int32(job.TotalGroups),
+		CreatedAtMs:  job.CreatedAt.UnixMilli(),
+		StartedAtMs:  job.StartedAt.UnixMilli(),
+		EndedAtMs:    job.EndedAt.UnixMilli(),
+	}, nil
 }
 
 // RunAITask routes an AI task to the best available device (stub implementation)
@@ -1277,6 +1428,11 @@ func (s *OrchestratorServer) SubmitJob(ctx context.Context, req *pb.JobRequest) 
 func (s *OrchestratorServer) executeJobGroups(job *jobs.Job) {
 	s.jobManager.SetJobRunning(job.ID)
 
+	// Start metrics polling for active devices
+	metricsCtx, cancelMetrics := context.WithCancel(context.Background())
+	go s.pollDeviceMetrics(metricsCtx, job)
+	defer cancelMetrics()
+
 	var allResults []string
 	var totalFailed int
 
@@ -1313,6 +1469,60 @@ func (s *OrchestratorServer) executeJobGroups(job *jobs.Job) {
 		job.ID, len(allResults), totalFailed)
 }
 
+// pollDeviceMetrics polls metrics from active devices during job execution
+func (s *OrchestratorServer) pollDeviceMetrics(ctx context.Context, job *jobs.Job) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Get devices that have running tasks
+			activeDeviceIDs := s.jobManager.GetActiveDeviceIDs()
+			if len(activeDeviceIDs) == 0 {
+				continue
+			}
+
+			// Poll each active device
+			for _, deviceID := range activeDeviceIDs {
+				go s.fetchAndStoreDeviceMetrics(ctx, deviceID)
+			}
+		}
+	}
+}
+
+// fetchAndStoreDeviceMetrics fetches metrics from a device and stores them
+func (s *OrchestratorServer) fetchAndStoreDeviceMetrics(ctx context.Context, deviceID string) {
+	// Get device info
+	device, ok := s.registry.Get(deviceID)
+	if !ok || device == nil {
+		return
+	}
+
+	// Get device status
+	status, err := s.GetDeviceStatus(ctx, &pb.DeviceId{DeviceId: deviceID})
+	if err != nil {
+		log.Printf("[WARN] Failed to get device metrics: %v", err)
+		return
+	}
+
+	// Convert to metrics sample and store
+	sample := metrics.MetricsSample{
+		Timestamp:     time.Now().UnixMilli(),
+		CPULoad:       status.CpuLoad,
+		MemUsedMB:     status.MemUsedMb,
+		MemTotalMB:    status.MemTotalMb,
+		GPULoad:       status.GpuLoad,
+		GPUMemUsedMB:  status.GpuMemUsedMb,
+		GPUMemTotalMB: status.GpuMemTotalMb,
+		NPULoad:       status.NpuLoad,
+	}
+
+	s.metricsStore.AddSample(deviceID, device.Info.DeviceName, sample)
+}
+
 // executeTaskGroup runs all tasks in a group in parallel
 func (s *OrchestratorServer) executeTaskGroup(job *jobs.Job, tasks []*jobs.Task) ([]string, int) {
 	var wg sync.WaitGroup
@@ -1327,6 +1537,9 @@ func (s *OrchestratorServer) executeTaskGroup(job *jobs.Job, tasks []*jobs.Task)
 
 			log.Printf("[INFO] executeTaskGroup: executing task=%s on device=%s addr=%s",
 				t.ID, t.DeviceName, t.DeviceAddr)
+
+			// Mark task as running
+			s.jobManager.SetTaskRunning(job.ID, t.ID)
 
 			// Create context with timeout
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2575,6 +2788,99 @@ func (h *WebHandler) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		CurrentGroup: jobResp.CurrentGroup,
 		TotalGroups:  jobResp.TotalGroups,
 	})
+}
+
+// handleActivity returns current activity data for the Activity Panel
+func (h *WebHandler) handleActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	includeHistory := r.URL.Query().Get("include_metrics_history") == "true"
+	sinceMs := int64(0)
+	if sinceStr := r.URL.Query().Get("since_ms"); sinceStr != "" {
+		sinceMs, _ = strconv.ParseInt(sinceStr, 10, 64)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	resp, err := h.orchestrator.GetActivity(ctx, &pb.GetActivityRequest{
+		IncludeMetricsHistory: includeHistory,
+		MetricsSinceMs:        sinceMs,
+	})
+	if err != nil {
+		log.Printf("[ERROR] GetActivity failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Activity error: %v", err))
+		return
+	}
+
+	// Convert to JSON-friendly format
+	result := map[string]interface{}{
+		"activity": map[string]interface{}{
+			"running_tasks":     resp.Activity.RunningTasks,
+			"device_activities": resp.Activity.DeviceActivities,
+		},
+	}
+
+	if includeHistory && resp.DeviceMetrics != nil {
+		result["device_metrics"] = resp.DeviceMetrics
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// handleDeviceMetrics returns metrics history for a specific device
+func (h *WebHandler) handleDeviceMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	deviceID := r.URL.Query().Get("device_id")
+	if deviceID == "" {
+		h.writeError(w, http.StatusBadRequest, "device_id parameter is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	resp, err := h.orchestrator.GetDeviceMetrics(ctx, &pb.DeviceId{DeviceId: deviceID})
+	if err != nil {
+		log.Printf("[ERROR] GetDeviceMetrics failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Metrics error: %v", err))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleJobDetail returns enhanced job details for visualization
+func (h *WebHandler) handleJobDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.URL.Query().Get("id")
+	if jobID == "" {
+		h.writeError(w, http.StatusBadRequest, "id parameter is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), webRequestTimeout)
+	defer cancel()
+
+	resp, err := h.orchestrator.GetJobDetail(ctx, &pb.JobId{JobId: jobID})
+	if err != nil {
+		log.Printf("[ERROR] GetJobDetail failed: %v", err)
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Job detail error: %v", err))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
 }
 
 // handlePreviewPlan generates a plan preview without creating a job
@@ -3869,6 +4175,9 @@ func main() {
 	httpMux.HandleFunc("/api/assistant", webHandler.handleAssistant)
 	httpMux.HandleFunc("/api/submit-job", webHandler.handleSubmitJob)
 	httpMux.HandleFunc("/api/job", webHandler.handleGetJob)
+	httpMux.HandleFunc("/api/job-detail", webHandler.handleJobDetail)
+	httpMux.HandleFunc("/api/activity", webHandler.handleActivity)
+	httpMux.HandleFunc("/api/device-metrics", webHandler.handleDeviceMetrics)
 	httpMux.HandleFunc("/api/plan", webHandler.handlePreviewPlan)
 	httpMux.HandleFunc("/api/plan-cost", webHandler.handlePlanCost)
 	httpMux.HandleFunc("/api/stream/start", webHandler.handleStreamStart)
