@@ -172,6 +172,53 @@ GOOS=windows GOARCH=arm64 go build -o dist/client-windows-arm64.exe ./cmd/client
 ```
 EdgeMesh gRPC  - TCP inbound 50051
 EdgeMesh HTTP  - TCP inbound 8081
+EdgeMesh Discovery - UDP inbound 50050 (for P2P mode)
+```
+
+### P2P Discovery (Automatic Mesh) - Enabled by Default
+
+Automatic peer discovery via UDP broadcast on LAN. No coordinator needed - devices find each other automatically.
+
+**Just start the server:**
+```powershell
+# Windows
+server-windows.exe
+```
+
+```bash
+# Mac/Linux
+go run ./cmd/server
+```
+
+**To disable P2P discovery:**
+```bash
+P2P_DISCOVERY=false go run ./cmd/server
+```
+
+**How it works:**
+1. Each device broadcasts presence on UDP port 50050 every 5 seconds
+2. Other devices receive broadcasts and add to their local registry
+3. Devices removed after 30s of no broadcasts (stale timeout)
+4. Graceful shutdown sends LEAVE message
+
+**Environment Variables:**
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `P2P_DISCOVERY` | `true` | UDP broadcast discovery (set `false` to disable) |
+| `DISCOVERY_PORT` | `50050` | UDP port for broadcasts |
+
+**Windows Firewall (PowerShell Admin):**
+```powershell
+New-NetFirewallRule -DisplayName "EdgeCLI Discovery" -Direction Inbound -Protocol UDP -LocalPort 50050 -Action Allow
+```
+
+**Verify Discovery:**
+```bash
+# Start 2 servers on different ports
+P2P_DISCOVERY=true GRPC_ADDR=:50051 go run ./cmd/server &
+P2P_DISCOVERY=true GRPC_ADDR=:50052 go run ./cmd/server &
+
+# Each should show "[INFO] discovery: found new device..."
 ```
 
 ### Full Setup Guide
