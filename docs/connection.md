@@ -290,3 +290,89 @@ curl -X POST http://10.206.87.35:8080/api/agent \
 ### Full Setup Guide
 
 See [docs/setup-guide-qai.md](setup-guide-qai.md) for step-by-step instructions.
+
+---
+
+## Arduino UNO Q (Dragonwing) — EdgeMeshArduino
+
+Added 2026-02-06 for multi-device image-generation demo.
+
+### Board Details
+
+| Setting | Value |
+|---------|-------|
+| **Board name** | EdgeMeshArduino |
+| **IP address** | `10.206.56.57` |
+| **WiFi password** | edgemesh |
+| **Board model** | Arduino UNO Q (Qualcomm Dragonwing QRB2210) |
+| **gRPC port** | 50051 (same as all mesh devices) |
+| **Status** | WiFi connected, software updated |
+
+### Finding the Arduino's IP Address
+
+The Arduino runs Linux (Dragonwing). With shell access (`arduino@EdgeMeshArduino`), run:
+
+```bash
+ip addr
+# or: hostname -I
+```
+
+Look for the `inet` address on `wlan0`.
+
+### Deploy and Run EdgeMesh Server on Arduino
+
+All devices on the mesh run the gRPC server on port 50051.
+
+**Step 1: Build the Linux ARM64 binary** (on Mac):
+
+```bash
+cd /path/to/distributed-computing
+GOOS=linux GOARCH=arm64 go build -o dist/edgemesh-server-linux-arm64 ./cmd/server
+```
+
+**Step 2: Copy the binary to the Arduino** (requires SSH):
+
+```bash
+scp dist/edgemesh-server-linux-arm64 arduino@10.206.56.57:/tmp/edgemesh-server
+```
+
+**Step 3: Start the server on the Arduino** (via SSH or Arduino shell):
+
+```bash
+ssh arduino@10.206.56.57
+chmod +x /tmp/edgemesh-server
+GRPC_ADDR=0.0.0.0:50051 /tmp/edgemesh-server
+```
+
+Or run in background:
+
+```bash
+GRPC_ADDR=0.0.0.0:50051 nohup /tmp/edgemesh-server > /tmp/edgemesh.log 2>&1 &
+```
+
+**One-liner script** (from project root):
+
+```bash
+./scripts/deploy-arduino.sh
+# Uses ARDUINO_IP=10.206.56.57, ARDUINO_USER=arduino by default
+# Override: ARDUINO_IP=10.206.56.57 ARDUINO_USER=arduino ./scripts/deploy-arduino.sh
+```
+
+**SSH prerequisite:** Ensure you can `ssh arduino@10.206.56.57` (password or key-based). If you use the Arduino IDE / USB shell instead, copy the binary manually (e.g. via USB storage or serial file transfer) and run the server commands in that shell.
+
+### Register Arduino on the Mesh
+
+From your Mac (with coordinator running and Arduino server started):
+
+```bash
+go run ./cmd/client register \
+  --id "edgemesh-arduino" \
+  --name "EdgeMeshArduino" \
+  --self-addr "10.206.56.57:50051" \
+  --platform "arduino" \
+  --arch "arm64"
+```
+
+### Arduino HTTP Endpoint (TinyML — Optional)
+
+For IMAGE_GENERATE tasks with a TinyML model, the Arduino can expose an HTTP endpoint. See [docs/IMAGE-GEN-SETUP.md](IMAGE-GEN-SETUP.md) for the sketch pattern.

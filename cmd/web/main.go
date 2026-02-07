@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -262,6 +263,11 @@ type AgentResponseJSON struct {
 }
 
 func main() {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Printf("[INFO] No .env file found or error loading it: %v", err)
+	}
+
 	// Get configuration from environment
 	httpAddr := os.Getenv("WEB_ADDR")
 	if httpAddr == "" {

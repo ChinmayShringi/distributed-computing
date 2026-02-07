@@ -47,6 +47,9 @@
 | Manav-MacBook | Manav | CPU | `10.206.227.186:50051` | 📝 Registered (server not running) |
 | Sariya-MacBook | Sariya | CPU | `10.206.8.90:50051` | 📝 Registered (server not running) |
 | Chinmay-MacBook | Chinmay | CPU | `10.206.66.173:50051` | 📝 Registered (server not running) |
+| **EdgeMeshArduino** | Shared | TinyML | `10.206.56.57:50051` | 🟡 WiFi ready, register when server running |
+
+**Arduino details**: Board name `EdgeMeshArduino`, IP `10.206.56.57`, WiFi password `edgemesh`. See [connection.md](connection.md) for registration.
 
 ---
 
