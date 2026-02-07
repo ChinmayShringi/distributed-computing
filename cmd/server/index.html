@@ -1406,9 +1406,15 @@
 
         // ===== Chat Polling Logic =====
         let lastMessageCount = 0;
+        let lastUpdatedTimestamp = 0;
         let isChatting = false;
+        let isPolling = false;
 
         async function pollChatHistory(force = false) {
+            // Only allow one regular loop at a time
+            if (isPolling && !force) return;
+            if (!force) isPolling = true;
+
             // Don't poll if we are currently sending a message (except when forced)
             if (isChatting && !force) {
                 setTimeout(pollChatHistory, 2000);
@@ -1421,9 +1427,10 @@
 
                 const data = await response.json();
                 const messages = data.messages || [];
+                const ts = data.last_updated_ms || 0;
 
-                // If we have new messages or are forced
-                if (messages.length !== lastMessageCount || force) {
+                // Sync UI if timestamp changed or if forced
+                if (ts !== lastUpdatedTimestamp || force) {
                     const log = document.getElementById('slm-chat-log');
 
                     // Rebuild the whole log to ensure perfect sync
@@ -1450,6 +1457,7 @@
 
                     log.innerHTML = newHtml;
                     log.scrollTop = log.scrollHeight;
+                    lastUpdatedTimestamp = ts;
                     lastMessageCount = messages.length;
                 }
             } catch (err) {
