@@ -103,16 +103,12 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 10),
           _CircleIconButton(
             icon: Icons.person_add_alt_1_rounded,
-            onTap: () {
-              // Custom action
-            },
+            onTap: () => context.go('/devices'),
           ),
           const SizedBox(width: 8),
           _CircleIconButton(
             icon: Icons.chat_bubble_outline_rounded,
-            onTap: () {
-              // History action
-            },
+            onTap: () => context.go('/chat'),
           ),
         ],
       ),
@@ -276,6 +272,9 @@ final appRouter = GoRouter(
                 GoRoute(
                     path: 'download',
                     builder: (context, state) => const DownloadScreen()),
+                GoRoute(
+                    path: 'settings',
+                    builder: (context, state) => const SettingsScreen()),
               ],
             ),
           ],

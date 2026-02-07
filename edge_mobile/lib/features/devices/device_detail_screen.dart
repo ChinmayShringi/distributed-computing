@@ -9,21 +9,149 @@ import '../../shared/widgets/edge_mesh_wordmark.dart';
 import '../../shared/widgets/glass_container.dart';
 import '../../shared/widgets/capability_chip.dart';
 import '../../shared/widgets/three_d_badge_icon.dart';
-import '../../data/mock_data.dart';
+import '../../services/grpc_service.dart';
+import 'dart:async';
 
-class DeviceDetailScreen extends StatelessWidget {
+class DeviceDetailScreen extends StatefulWidget {
   final String deviceId;
 
   const DeviceDetailScreen({super.key, required this.deviceId});
 
   @override
-  Widget build(BuildContext context) {
-    final device = MockData.devices.firstWhere(
-      (d) => d['id'] == deviceId,
-      orElse: () => MockData.devices.first,
-    );
+  State<DeviceDetailScreen> createState() => _DeviceDetailScreenState();
+}
 
-    final isOnline = device['status'] == 'online';
+class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
+  final _grpcService = GrpcService();
+  Map<String, dynamic>? _device;
+  Map<String, dynamic>? _deviceStatus;
+  bool _isLoading = true;
+  String? _errorMessage;
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeviceData();
+    _startPeriodicRefresh();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startPeriodicRefresh() {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) _loadDeviceStatus();
+    });
+  }
+
+  Future<void> _loadDeviceData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final devices = await _grpcService.listDevices();
+      final device = devices.firstWhere(
+        (d) => d['device_id'] == widget.deviceId,
+        orElse: () => throw Exception('Device not found'),
+      );
+
+      final status = await _grpcService.getDeviceStatus(widget.deviceId);
+
+      if (mounted) {
+        setState(() {
+          _device = device;
+          _deviceStatus = status;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to load device: $e';
+        });
+      }
+    }
+  }
+
+  String _truncateMeshId(dynamic val) {
+    final s = val?.toString() ?? 'N/A';
+    return s.length >= 8 ? s.substring(0, 8).toUpperCase() : s.toUpperCase();
+  }
+
+  Future<void> _loadDeviceStatus() async {
+    if (_device == null) return;
+
+    try {
+      final status = await _grpcService.getDeviceStatus(widget.deviceId);
+      if (mounted) {
+        setState(() {
+          _deviceStatus = status;
+        });
+      }
+    } catch (e) {
+      // Silent fail for periodic refresh
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: AppColors.backgroundDark,
+        body: const Center(
+          child: CircularProgressIndicator(color: AppColors.safeGreen),
+        ),
+      );
+    }
+
+    if (_errorMessage != null || _device == null) {
+      return Scaffold(
+        backgroundColor: AppColors.backgroundDark,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.alertCircle, size: 48, color: AppColors.primaryRed),
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage ?? 'Device not found',
+                  style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () => context.pop(),
+                  icon: const Icon(LucideIcons.arrowLeft, size: 16),
+                  label: const Text('GO BACK'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.safeGreen,
+                    foregroundColor: Colors.black,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final device = _device!;
+    final isOnline = _deviceStatus != null;
+    
+    // Calculate stats from device status
+    final cpuLoad = isOnline ? ((_deviceStatus!['cpu_load'] as num).toDouble() * 100).clamp(0, 100) : 0.0;
+    final memUsedMb = isOnline ? (_deviceStatus!['mem_used_mb'] as num).toDouble() : 0.0;
+    final memTotalMb = isOnline ? (_deviceStatus!['mem_total_mb'] as num).toDouble() : 1.0;
+    final memoryPercent = isOnline ? ((memUsedMb / memTotalMb) * 100).clamp(0, 100) : 0.0;
 
     return Scaffold(
       backgroundColor: AppColors.backgroundDark,
@@ -56,8 +184,8 @@ class DeviceDetailScreen extends StatelessWidget {
                     _buildDeviceHeader(device, isOnline),
                     const SizedBox(height: 32),
 
-                    // Remote Viewport
-                    if (isOnline) ...[
+                    // Remote Viewport (only if device supports screen capture)
+                    if (isOnline && device['can_screen_capture'] == true) ...[
                       _SectionHeader(label: 'ENCRYPTED REMOTE VIEWPORT'),
                       const SizedBox(height: 12),
                       _RemoteViewport(device: device),
@@ -73,7 +201,7 @@ class DeviceDetailScreen extends StatelessWidget {
                           Expanded(
                             child: _LargeDonut(
                               label: 'CPU LOAD',
-                              value: (device['cpu'] as num).toDouble(),
+                              value: cpuLoad.toDouble(),
                               color: AppColors.safeGreen,
                             ),
                           ),
@@ -81,7 +209,7 @@ class DeviceDetailScreen extends StatelessWidget {
                           Expanded(
                             child: _LargeDonut(
                               label: 'MEM USAGE',
-                              value: (device['memory'] as num).toDouble(),
+                              value: memoryPercent.toDouble(),
                               color: AppColors.infoBlue,
                             ),
                           ),
@@ -132,10 +260,14 @@ class DeviceDetailScreen extends StatelessWidget {
                       crossAxisSpacing: 12,
                       childAspectRatio: 1.4,
                       children: [
-                        _ActionCard(icon: LucideIcons.terminal, label: 'REMOTE SHELL', color: AppColors.primaryRed, onTap: () {}),
-                        _ActionCard(icon: LucideIcons.zap, label: 'MANUAL SYNC', color: AppColors.infoBlue, onTap: () {}),
-                        _ActionCard(icon: LucideIcons.refreshCw, label: 'REBOOT NODE', color: AppColors.warningAmber, onTap: () {}),
-                        _ActionCard(icon: LucideIcons.power, label: 'TERMINATE', color: AppColors.dangerPink, onTap: () {}),
+                        _ActionCard(icon: LucideIcons.terminal, label: 'REMOTE SHELL', color: AppColors.primaryRed, onTap: () => context.push('/run')),
+                        _ActionCard(icon: LucideIcons.zap, label: 'MANUAL SYNC', color: AppColors.infoBlue, onTap: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Manual sync triggered'), backgroundColor: AppColors.infoBlue),
+                          );
+                        }),
+                        _ActionCard(icon: LucideIcons.refreshCw, label: 'REFRESH', color: AppColors.warningAmber, onTap: _loadDeviceData),
+                        _ActionCard(icon: LucideIcons.activity, label: 'TELEMETRY', color: AppColors.safeGreen, onTap: _loadDeviceStatus),
                       ],
                     ),
                     
@@ -146,10 +278,10 @@ class DeviceDetailScreen extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                       child: Column(
                         children: [
-                           _ManifestRow(label: 'ARCHITECTURE', value: 'arm64-v8a'),
-                           _ManifestRow(label: 'KERNEL', value: '6.1.23-EM-CORE'),
-                           _ManifestRow(label: 'MESH ID', value: device['id'].toString().toUpperCase()),
-                           _ManifestRow(label: 'UPTIME', value: '14D 06H 22M'),
+                           _ManifestRow(label: 'ARCHITECTURE', value: device['arch']?.toString().toUpperCase() ?? 'N/A'),
+                           _ManifestRow(label: 'PLATFORM', value: device['platform']?.toString().toUpperCase() ?? 'N/A'),
+                           _ManifestRow(label: 'MESH ID', value: _truncateMeshId(device['device_id'])),
+                           _ManifestRow(label: 'gRPC ADDRESS', value: device['grpc_addr']?.toString() ?? 'N/A'),
                         ],
                       ),
                     ),
@@ -166,9 +298,11 @@ class DeviceDetailScreen extends StatelessWidget {
 
   Widget _buildDeviceHeader(Map<String, dynamic> device, bool isOnline) {
     IconData icon = LucideIcons.laptop;
-    final os = device['os'].toString().toLowerCase();
-    if (os.contains('android')) icon = LucideIcons.smartphone;
-    if (os.contains('mac')) icon = LucideIcons.command;
+    final platform = device['platform']?.toString().toLowerCase() ?? '';
+    if (platform.contains('android')) icon = LucideIcons.smartphone;
+    if (platform.contains('mac')) icon = LucideIcons.command;
+    if (platform.contains('linux')) icon = LucideIcons.terminal;
+    if (platform.contains('windows')) icon = LucideIcons.monitor;
 
     return GlassContainer(
       padding: const EdgeInsets.all(20),
@@ -185,17 +319,17 @@ class DeviceDetailScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  device['name'].toString().toUpperCase(),
+                  device['device_name']?.toString().toUpperCase() ?? 'UNKNOWN',
                   style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 0.5),
                 ),
                 Text(
-                  device['os'].toString().toUpperCase(),
+                  '${device['platform']?.toString().toUpperCase() ?? 'N/A'} ${device['arch']?.toString().toUpperCase() ?? ''}',
                   style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1),
                 ),
               ],
             ),
           ),
-          _StatusBadge(isOnline: device['status'] == 'online'),
+          _StatusBadge(isOnline: isOnline),
         ],
       ),
     );

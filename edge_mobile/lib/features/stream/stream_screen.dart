@@ -4,9 +4,93 @@ import '../../theme/app_colors.dart';
 import '../../shared/widgets/edge_mesh_wordmark.dart';
 import '../../shared/widgets/status_strip.dart';
 import '../../shared/widgets/glass_container.dart';
+import '../../services/grpc_service.dart';
 
-class StreamScreen extends StatelessWidget {
+class StreamScreen extends StatefulWidget {
   const StreamScreen({super.key});
+
+  @override
+  State<StreamScreen> createState() => _StreamScreenState();
+}
+
+class _StreamScreenState extends State<StreamScreen> {
+  final _grpcService = GrpcService();
+  List<Map<String, dynamic>> _devices = [];
+  Map<String, dynamic>? _selectedDevice;
+  bool _isLoading = true;
+  bool _isStreaming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+  }
+
+  Future<void> _loadDevices() async {
+    try {
+      final devices = await _grpcService.listDevices();
+      if (mounted) {
+        setState(() {
+          _devices = devices;
+          _isLoading = false;
+          if (_selectedDevice == null && devices.isNotEmpty) {
+            _selectedDevice = devices.first;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _devices = []; _isLoading = false; });
+    }
+  }
+
+  void _showDevicePicker() {
+    if (_devices.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => ListView.builder(
+        shrinkWrap: true,
+        itemCount: _devices.length,
+        itemBuilder: (_, i) {
+          final d = _devices[i];
+          final isSelected = _selectedDevice?['device_id'] == d['device_id'];
+          return ListTile(
+            leading: Icon(
+              (d['platform']?.toString().toLowerCase().contains('android') ?? false) ? LucideIcons.smartphone : LucideIcons.laptop,
+              color: isSelected ? AppColors.safeGreen : AppColors.textSecondary,
+            ),
+            title: Text(d['device_name']?.toString() ?? 'Unknown'),
+            subtitle: Text('${d['platform']} ${d['arch']}'),
+            trailing: isSelected ? const Icon(LucideIcons.check, color: AppColors.safeGreen) : null,
+            onTap: () {
+              setState(() => _selectedDevice = d);
+              Navigator.pop(ctx);
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _initializeStream() {
+    if (_selectedDevice == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a source device first')),
+      );
+      return;
+    }
+    setState(() => _isStreaming = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Stream from ${_selectedDevice!['device_name']} - Start stream from the orchestrator on your laptop to view.'),
+        backgroundColor: AppColors.infoBlue,
+      ),
+    );
+    setState(() => _isStreaming = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,8 +188,8 @@ class StreamScreen extends StatelessWidget {
                       const SizedBox(height: 16),
                       FilledButton.icon(
                         onPressed: () {},
-                        icon: const Icon(LucideIcons.play, size: 16),
-                        label: const Text('INITIALIZE STREAM'),
+                        icon: _isStreaming ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(LucideIcons.play, size: 16),
+                        label: Text(_isStreaming ? 'INITIALIZING...' : 'INITIALIZE STREAM'),
                         style: FilledButton.styleFrom(
                           backgroundColor: AppColors.primaryRed,
                           foregroundColor: Colors.white,

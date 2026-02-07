@@ -1,5 +1,7 @@
 package com.example.edge_mobile
 
+import android.content.Intent
+import android.os.Build
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
@@ -11,7 +13,8 @@ import kotlinx.coroutines.launch
  * and delegates them to the OrchestratorGrpcClient
  */
 class GrpcMethodChannelHandler(
-    private val grpcClient: OrchestratorGrpcClient
+    private val grpcClient: OrchestratorGrpcClient,
+    private val mainActivity: MainActivity
 ) : MethodChannel.MethodCallHandler {
 
     private val scope = CoroutineScope(Dispatchers.Main)
@@ -25,6 +28,11 @@ class GrpcMethodChannelHandler(
             "executeRoutedCommand" -> handleExecuteRoutedCommand(call, result)
             "configureHost" -> handleConfigureHost(call, result)
             "closeConnection" -> handleCloseConnection(result)
+            "startWorker" -> handleStartWorker(result)
+            "stopWorker" -> handleStopWorker(result)
+            "isWorkerRunning" -> handleIsWorkerRunning(result)
+            "getJob" -> handleGetJob(call, result)
+            "requestScreenCapture" -> handleRequestScreenCapture(result)
             else -> result.notImplemented()
         }
     }
@@ -132,6 +140,71 @@ class GrpcMethodChannelHandler(
             result.success(mapOf("closed" to true))
         } catch (e: Exception) {
             result.error("CLOSE_CONNECTION_ERROR", e.message, e.toString())
+        }
+    }
+
+    private fun handleStartWorker(result: MethodChannel.Result) {
+        try {
+            val intent = Intent(mainActivity, WorkerService::class.java)
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                mainActivity.startForegroundService(intent)
+            } else {
+                mainActivity.startService(intent)
+            }
+            
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("START_WORKER_ERROR", e.message, e.toString())
+        }
+    }
+
+    private fun handleStopWorker(result: MethodChannel.Result) {
+        try {
+            val intent = Intent(mainActivity, WorkerService::class.java)
+            mainActivity.stopService(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("STOP_WORKER_ERROR", e.message, e.toString())
+        }
+    }
+
+    private fun handleIsWorkerRunning(result: MethodChannel.Result) {
+        try {
+            // Check if WorkerService is running
+            val manager = mainActivity.getSystemService(android.app.ActivityManager::class.java)
+            val isRunning = manager.getRunningServices(Integer.MAX_VALUE)
+                .any { it.service.className == WorkerService::class.java.name }
+            
+            result.success(isRunning)
+        } catch (e: Exception) {
+            result.error("IS_WORKER_RUNNING_ERROR", e.message, e.toString())
+        }
+    }
+
+    private fun handleGetJob(call: MethodCall, result: MethodChannel.Result) {
+        scope.launch {
+            try {
+                val jobId = call.argument<String>("job_id")
+                if (jobId == null) {
+                    result.error("INVALID_ARGUMENT", "job_id is required", null)
+                    return@launch
+                }
+                
+                val jobStatus = grpcClient.getJob(jobId)
+                result.success(jobStatus)
+            } catch (e: Exception) {
+                result.error("GET_JOB_ERROR", e.message, e.toString())
+            }
+        }
+    }
+
+    private fun handleRequestScreenCapture(result: MethodChannel.Result) {
+        try {
+            // Request screen capture permission from MainActivity
+            mainActivity.requestScreenCapture(result)
+        } catch (e: Exception) {
+            result.error("SCREEN_CAPTURE_ERROR", e.message, e.toString())
         }
     }
 }

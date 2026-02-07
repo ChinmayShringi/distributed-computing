@@ -8,8 +8,30 @@ import '../../shared/widgets/risk_badge.dart';
 import '../../shared/widgets/glass_container.dart';
 import '../../shared/widgets/three_d_badge_icon.dart';
 
-class ApprovalsScreen extends StatelessWidget {
+class ApprovalsScreen extends StatefulWidget {
   const ApprovalsScreen({super.key});
+
+  @override
+  State<ApprovalsScreen> createState() => _ApprovalsScreenState();
+}
+
+class _ApprovalsScreenState extends State<ApprovalsScreen> {
+  final List<_ApprovalItem> _pendingApprovals = [
+    _ApprovalItem(title: 'Root FS Write Access', description: 'Requesting permission to modify /etc/network/interfaces', risk: RiskLevel.high, device: 'Node-Alpha-01'),
+    _ApprovalItem(title: 'Log Directory Read', description: 'Analytic gathering from /var/log/edge/*', risk: RiskLevel.medium, device: 'Samsung-S24-Mesh'),
+    _ApprovalItem(title: 'Service Restart', description: 'Restarting edge-daemon service', risk: RiskLevel.low, device: 'Node-Zeta-09'),
+  ];
+
+  void _handleAction(int index, bool approved) {
+    final item = _pendingApprovals[index];
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(approved ? 'Authorized: ${item.title}' : 'Rejected: ${item.title}'),
+        backgroundColor: approved ? AppColors.safeGreen : AppColors.primaryRed,
+      ),
+    );
+    setState(() => _pendingApprovals.removeAt(index));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,26 +83,37 @@ class ApprovalsScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const _ApprovalCard(
-                      title: 'Root FS Write Access',
-                      description: 'Requesting permission to modify /etc/network/interfaces',
-                      risk: RiskLevel.high,
-                      device: 'Node-Alpha-01',
-                    ),
-                    const SizedBox(height: 12),
-                    const _ApprovalCard(
-                      title: 'Log Directory Read',
-                      description: 'Analytic gathering from /var/log/edge/*',
-                      risk: RiskLevel.medium,
-                      device: 'Samsung-S24-Mesh',
-                    ),
-                    const SizedBox(height: 12),
-                    const _ApprovalCard(
-                      title: 'Service Restart',
-                      description: 'Restarting edge-daemon service',
-                      risk: RiskLevel.low,
-                      device: 'Node-Zeta-09',
-                    ),
+                    if (_pendingApprovals.isEmpty)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Column(
+                            children: [
+                              const Icon(LucideIcons.checkCircle, size: 48, color: AppColors.safeGreen),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No pending approvals',
+                                style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ...List.generate(_pendingApprovals.length, (i) {
+                        final item = _pendingApprovals[i];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _ApprovalCard(
+                            title: item.title,
+                            description: item.description,
+                            risk: item.risk,
+                            device: item.device,
+                            onReject: () => _handleAction(i, false),
+                            onAuthorize: () => _handleAction(i, true),
+                          ),
+                        );
+                      }),
                   ],
                 ),
               ),
@@ -92,17 +125,29 @@ class ApprovalsScreen extends StatelessWidget {
   }
 }
 
+class _ApprovalItem {
+  final String title;
+  final String description;
+  final RiskLevel risk;
+  final String device;
+  _ApprovalItem({required this.title, required this.description, required this.risk, required this.device});
+}
+
 class _ApprovalCard extends StatelessWidget {
   final String title;
   final String description;
   final RiskLevel risk;
   final String device;
+  final VoidCallback onReject;
+  final VoidCallback onAuthorize;
 
   const _ApprovalCard({
     required this.title,
     required this.description,
     required this.risk,
     required this.device,
+    required this.onReject,
+    required this.onAuthorize,
   });
 
   @override
@@ -141,7 +186,7 @@ class _ApprovalCard extends StatelessWidget {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () {},
+                  onPressed: onReject,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textPrimary,
                     side: BorderSide(color: Colors.white.withOpacity(0.1)),
@@ -153,7 +198,7 @@ class _ApprovalCard extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                  onPressed: () {},
+                  onPressed: onAuthorize,
                   style: FilledButton.styleFrom(
                     backgroundColor: risk == RiskLevel.high ? AppColors.primaryRed : Colors.white,
                     foregroundColor: risk == RiskLevel.high ? Colors.white : Colors.black,

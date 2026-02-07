@@ -25,7 +25,8 @@ android {
         applicationId = "com.example.edge_mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // flutter_webrtc requires minSdk 23+
+        minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -45,14 +46,25 @@ flutter {
 }
 
 dependencies {
-    // gRPC dependencies for Android
+    // gRPC client dependencies for Android
     implementation("io.grpc:grpc-okhttp:1.62.2")
     implementation("io.grpc:grpc-protobuf-lite:1.62.2")
     implementation("io.grpc:grpc-stub:1.62.2")
     implementation("javax.annotation:javax.annotation-api:1.3.2")
     
+    // gRPC server dependencies
+    implementation("io.grpc:grpc-netty-shaded:1.62.2") {
+        exclude(group = "com.google.protobuf", module = "protobuf-java")
+    }
+    implementation("io.grpc:grpc-services:1.62.2") {
+        exclude(group = "com.google.protobuf", module = "protobuf-java")
+    }
+    
     // Kotlin coroutines for async gRPC
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+    
+    // JSON for discovery messages
+    implementation("org.json:json:20231013")
 }
 
 protobuf {
@@ -76,14 +88,6 @@ protobuf {
                     option("lite")
                 }
             }
-        }
-    }
-}
-
-sourceSets {
-    getByName("main") {
-        proto {
-            srcDir("../../../proto")
         }
     }
 }
