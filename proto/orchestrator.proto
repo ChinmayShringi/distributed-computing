@@ -54,6 +54,11 @@ service OrchestratorService {
 
   // Remote LLM task execution
   rpc RunLLMTask (LLMTaskRequest) returns (LLMTaskResponse);
+
+  // Activity tracking and metrics
+  rpc GetActivity (GetActivityRequest) returns (GetActivityResponse);
+  rpc GetDeviceMetrics (DeviceId) returns (MetricsHistoryResponse);
+  rpc GetJobDetail (JobId) returns (JobDetailResponse);
 }
 
 message Empty {}
@@ -119,6 +124,12 @@ message DeviceStatus {
   double cpu_load = 3;      // 0..1, or -1 if unavailable
   uint64 mem_used_mb = 4;
   uint64 mem_total_mb = 5;
+  // GPU/NPU metrics for activity tracking
+  double gpu_load = 6;            // 0..1, or -1 if unavailable
+  uint64 gpu_mem_used_mb = 7;
+  uint64 gpu_mem_total_mb = 8;
+  double npu_load = 9;            // 0..1, or -1 if unavailable
+  int64 timestamp_ms = 10;        // sample timestamp (unix milliseconds)
 }
 
 message ListDevicesRequest {}
@@ -402,4 +413,84 @@ message LLMTaskResponse {
   string model_used = 2;
   int64 tokens_generated = 3;
   string error = 4;
+}
+
+// Activity tracking messages
+
+message MetricsSample {
+  int64 timestamp_ms = 1;
+  double cpu_load = 2;
+  uint64 mem_used_mb = 3;
+  uint64 mem_total_mb = 4;
+  double gpu_load = 5;
+  uint64 gpu_mem_used_mb = 6;
+  uint64 gpu_mem_total_mb = 7;
+  double npu_load = 8;
+}
+
+message RunningTask {
+  string task_id = 1;
+  string job_id = 2;
+  string kind = 3;
+  string input = 4;
+  string device_id = 5;
+  string device_name = 6;
+  int64 started_at_ms = 7;
+  int64 elapsed_ms = 8;
+}
+
+message DeviceActivity {
+  string device_id = 1;
+  string device_name = 2;
+  int32 running_task_count = 3;
+  DeviceStatus current_status = 4;
+}
+
+message ActivityData {
+  repeated RunningTask running_tasks = 1;
+  repeated DeviceActivity device_activities = 2;
+}
+
+message GetActivityRequest {
+  bool include_metrics_history = 1;
+  int64 metrics_since_ms = 2;
+}
+
+message MetricsHistoryResponse {
+  string device_id = 1;
+  string device_name = 2;
+  repeated MetricsSample samples = 3;
+}
+
+message GetActivityResponse {
+  ActivityData activity = 1;
+  map<string, MetricsHistoryResponse> device_metrics = 2;
+}
+
+// Enhanced task status for visualization
+message TaskStatusEnhanced {
+  string task_id = 1;
+  string job_id = 2;
+  string assigned_device_id = 3;
+  string assigned_device_name = 4;
+  string kind = 5;
+  string input = 6;
+  string state = 7;
+  string result = 8;
+  string error = 9;
+  int32 group_index = 10;
+  int64 started_at_ms = 11;
+  int64 ended_at_ms = 12;
+}
+
+message JobDetailResponse {
+  string job_id = 1;
+  string state = 2;
+  repeated TaskStatusEnhanced tasks = 3;
+  string final_result = 4;
+  int32 current_group = 5;
+  int32 total_groups = 6;
+  int64 created_at_ms = 7;
+  int64 started_at_ms = 8;
+  int64 ended_at_ms = 9;
 }
