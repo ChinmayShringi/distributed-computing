@@ -83,11 +83,19 @@ func (s *Service) Start() error {
 	}
 	s.conn = conn
 
-	// Setup broadcast address (255.255.255.255:port)
+	// Setup broadcast address
+	// Try to find a specific subnet broadcast address first (e.g. 192.168.1.255)
+	// identifying the interface we are likely using.
+	bcastIP := detectBroadcastAddress()
+	if bcastIP == nil {
+		bcastIP = net.IPv4bcast // Fallback to 255.255.255.255
+	}
+
 	s.broadcast = &net.UDPAddr{
-		IP:   net.IPv4bcast,
+		IP:   bcastIP,
 		Port: s.port,
 	}
+	log.Printf("[INFO] Using broadcast address: %s:%d", s.broadcast.IP, s.broadcast.Port)
 
 	// Set buffer sizes
 	if err := conn.SetWriteBuffer(MaxMessageSize * 10); err != nil {
@@ -282,4 +290,49 @@ func (s *Service) purgeStaleDevices() {
 // GetPort returns the discovery port
 func (s *Service) GetPort() int {
 	return s.port
+}
+
+// detectBroadcastAddress attempts to find a suitable broadcast address for the main interface
+func detectBroadcastAddress() net.IP {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+
+	for _, i := range ifaces {
+		// Skip loopback and down interfaces
+		if i.Flags&net.FlagLoopback != 0 || i.Flags&net.FlagUp == 0 {
+			continue
+		}
+		// Must support broadcast
+		if i.Flags&net.FlagBroadcast == 0 {
+			continue
+		}
+
+		addrs, err := i.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+
+			ip := ipNet.IP.To4()
+			if ip == nil {
+				continue // Skip IPv6
+			}
+
+			// Calculate broadcast address: IP | ^Mask
+			mask := ipNet.Mask
+			broadcast := make(net.IP, len(ip))
+			for j := 0; j < len(ip); j++ {
+				broadcast[j] = ip[j] | ^mask[j]
+			}
+			return broadcast
+		}
+	}
+	return nil
 }
