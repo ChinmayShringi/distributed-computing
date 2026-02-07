@@ -14,6 +14,7 @@ class MainActivity : FlutterActivity() {
     private val SCREEN_CAPTURE_REQUEST = 1001
     
     private lateinit var grpcClient: OrchestratorGrpcClient
+    private lateinit var assistantClient: AssistantClient
     private lateinit var methodChannel: MethodChannel
     private var pendingScreenCaptureResult: MethodChannel.Result? = null
 
@@ -40,13 +41,18 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         val host = getGrpcHost()
+
+        // Initialize gRPC client for orchestrator (port 50051)
         grpcClient = OrchestratorGrpcClient(host = host, port = 50051)
+
+        // Initialize REST client for assistant (port 8080)
+        assistantClient = AssistantClient(host = host, port = 8080)
 
         // Set up Method Channel
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-        
-        // Set the handler with reference to this activity
-        val handler = GrpcMethodChannelHandler(grpcClient, this)
+
+        // Set the handler with both clients
+        val handler = GrpcMethodChannelHandler(grpcClient, assistantClient, this)
         methodChannel.setMethodCallHandler(handler)
     }
 
