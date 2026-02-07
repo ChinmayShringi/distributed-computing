@@ -100,14 +100,17 @@ type WebHandler struct {
 
 // DeviceResponse is the JSON response for /api/devices
 type DeviceResponse struct {
-	DeviceID         string   `json:"device_id"`
-	DeviceName       string   `json:"device_name"`
-	Platform         string   `json:"platform"`
-	Arch             string   `json:"arch"`
-	Capabilities     []string `json:"capabilities"`
-	GRPCAddr         string   `json:"grpc_addr"`
-	CanScreenCapture bool     `json:"can_screen_capture"`
-	HttpAddr         string   `json:"http_addr"`
+	DeviceID          string   `json:"device_id"`
+	DeviceName        string   `json:"device_name"`
+	Platform          string   `json:"platform"`
+	Arch              string   `json:"arch"`
+	Capabilities      []string `json:"capabilities"`
+	GRPCAddr          string   `json:"grpc_addr"`
+	CanScreenCapture  bool     `json:"can_screen_capture"`
+	HttpAddr          string   `json:"http_addr"`
+	HasLocalModel     bool     `json:"has_local_model"`
+	LocalModelName    string   `json:"local_model_name,omitempty"`
+	LocalChatEndpoint string   `json:"local_chat_endpoint,omitempty"`
 }
 
 // RoutedCmdRequest is the JSON request for /api/routed-cmd
@@ -605,17 +608,24 @@ func (s *OrchestratorServer) RunAITask(ctx context.Context, req *pb.AITaskReques
 // getSelfDeviceInfo returns device info for this server
 func (s *OrchestratorServer) getSelfDeviceInfo() *pb.DeviceInfo {
 	hostname, _ := os.Hostname()
+
+	// Detect local Ollama/LLM availability
+	hasLocalModel, localModelName, localChatEndpoint := detectLocalModel()
+
 	return &pb.DeviceInfo{
-		DeviceId:         s.selfDeviceID,
-		DeviceName:       hostname,
-		Platform:         runtime.GOOS,
-		Arch:             runtime.GOARCH,
-		HasCpu:           true,
-		HasGpu:           false,
-		HasNpu:           false,
-		GrpcAddr:         s.selfAddr,
-		CanScreenCapture: detectScreenCapture(),
-		HttpAddr:         s.deriveBulkHTTPAddr(),
+		DeviceId:          s.selfDeviceID,
+		DeviceName:        hostname,
+		Platform:          runtime.GOOS,
+		Arch:              runtime.GOARCH,
+		HasCpu:            true,
+		HasGpu:            false,
+		HasNpu:            false,
+		GrpcAddr:          s.selfAddr,
+		CanScreenCapture:  detectScreenCapture(),
+		HttpAddr:          s.deriveBulkHTTPAddr(),
+		HasLocalModel:     hasLocalModel,
+		LocalModelName:    localModelName,
+		LocalChatEndpoint: localChatEndpoint,
 	}
 }
 
@@ -641,6 +651,69 @@ func detectScreenCapture() bool {
 	bounds := screenshot.GetDisplayBounds(0)
 	_, err := screenshot.CaptureRect(bounds)
 	return err == nil
+}
+
+// detectLocalModel checks if Ollama or other local LLM is available
+// Returns (hasLocalModel, modelName, chatEndpoint)
+func detectLocalModel() (bool, string, string) {
+	// Check CHAT_BASE_URL first (configured Ollama endpoint)
+	baseURL := os.Getenv("CHAT_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+
+	// Try to hit Ollama API
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(baseURL)
+	if err != nil {
+		return false, "", ""
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return false, "", ""
+	}
+
+	// Ollama is running, get loaded model
+	modelName := getOllamaModel(client, baseURL)
+	if modelName == "" {
+		// Use configured model as fallback
+		modelName = os.Getenv("CHAT_MODEL")
+		if modelName == "" {
+			modelName = "llama3.2:3b"
+		}
+	}
+
+	return true, modelName, baseURL
+}
+
+// getOllamaModel queries Ollama /api/tags to get available models
+func getOllamaModel(client *http.Client, baseURL string) string {
+	resp, err := client.Get(baseURL + "/api/tags")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return ""
+	}
+
+	var result struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ""
+	}
+
+	if len(result.Models) > 0 {
+		return result.Models[0].Name
+	}
+
+	return ""
 }
 
 // autoRegisterWithCoordinator registers this device with a remote coordinator.
@@ -749,10 +822,10 @@ func (s *OrchestratorServer) runImageGenerate(ctx context.Context, prompt string
 
 	// Build Stable Diffusion txt2img request
 	reqBody := map[string]interface{}{
-		"prompt":  prompt,
-		"steps":   20,
-		"width":   512,
-		"height":  512,
+		"prompt":       prompt,
+		"steps":        20,
+		"width":        512,
+		"height":       512,
 		"sampler_name": "Euler a",
 	}
 
@@ -801,7 +874,7 @@ func (s *OrchestratorServer) runImageGenerate(ctx context.Context, prompt string
 	// Generate filename
 	filename := fmt.Sprintf("image_%d.png", time.Now().Unix())
 	imagePath := filepath.Join(s.sharedRoot, filename)
-	
+
 	if err := os.WriteFile(imagePath, decoded, 0644); err != nil {
 		return "", fmt.Errorf("save image: %w", err)
 	}
@@ -1413,7 +1486,7 @@ func (s *OrchestratorServer) PreviewPlan(ctx context.Context, req *pb.PlanPrevie
 		plan = s.jobManager.GenerateSmartPlan(req.Text, selectedDevices)
 		reduce = &pb.ReduceSpec{Kind: "CONCAT"}
 		notes = "Brain not available (non-Windows or disabled)"
-		
+
 		// Determine rationale based on what kind of plan was generated
 		isLLMTask := false
 		if len(plan.Groups) > 0 && len(plan.Groups[0].Tasks) > 0 {
@@ -1945,6 +2018,97 @@ func (s *OrchestratorServer) GetChatMemory(ctx context.Context, req *pb.Empty) (
 	}, nil
 }
 
+// RunLLMTask executes an LLM inference task on this device's local model
+func (s *OrchestratorServer) RunLLMTask(ctx context.Context, req *pb.LLMTaskRequest) (*pb.LLMTaskResponse, error) {
+	// Check if this device has a local model
+	selfInfo := s.getSelfDeviceInfo()
+	if !selfInfo.HasLocalModel {
+		return &pb.LLMTaskResponse{
+			Error: "no local LLM model available on this device",
+		}, nil
+	}
+
+	log.Printf("[INFO] RunLLMTask: processing prompt (%d chars) with model %s", len(req.Prompt), selfInfo.LocalModelName)
+
+	// Call Ollama directly
+	model := req.Model
+	if model == "" {
+		model = selfInfo.LocalModelName
+	}
+
+	result, err := callOllamaChat(ctx, selfInfo.LocalChatEndpoint, model, req.Prompt)
+	if err != nil {
+		log.Printf("[ERROR] RunLLMTask: chat failed: %v", err)
+		return &pb.LLMTaskResponse{
+			Error: err.Error(),
+		}, nil
+	}
+
+	log.Printf("[INFO] RunLLMTask: completed, output %d chars", len(result))
+
+	return &pb.LLMTaskResponse{
+		Output:          result,
+		ModelUsed:       model,
+		TokensGenerated: int64(len(result) / 4), // rough estimate: ~4 chars per token
+	}, nil
+}
+
+// callOllamaChat calls the Ollama API directly for LLM inference
+func callOllamaChat(ctx context.Context, baseURL, model, prompt string) (string, error) {
+	reqBody := struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+		Stream bool `json:"stream"`
+	}{
+		Model: model,
+		Messages: []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{
+			{Role: "user", Content: prompt},
+		},
+		Stream: false,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/chat", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.Message.Content, nil
+}
+
 // broadcastChatMemory pushes our chat memory to all registered devices.
 func (s *OrchestratorServer) broadcastChatMemory() {
 	devices := s.registry.List()
@@ -2063,14 +2227,17 @@ func (h *WebHandler) handleDevices(w http.ResponseWriter, r *http.Request) {
 		}
 
 		devices = append(devices, DeviceResponse{
-			DeviceID:         d.DeviceId,
-			DeviceName:       d.DeviceName,
-			Platform:         d.Platform,
-			Arch:             d.Arch,
-			Capabilities:     caps,
-			GRPCAddr:         d.GrpcAddr,
-			CanScreenCapture: d.CanScreenCapture,
-			HttpAddr:         d.HttpAddr,
+			DeviceID:          d.DeviceId,
+			DeviceName:        d.DeviceName,
+			Platform:          d.Platform,
+			Arch:              d.Arch,
+			Capabilities:      caps,
+			GRPCAddr:          d.GrpcAddr,
+			CanScreenCapture:  d.CanScreenCapture,
+			HttpAddr:          d.HttpAddr,
+			HasLocalModel:     d.HasLocalModel,
+			LocalModelName:    d.LocalModelName,
+			LocalChatEndpoint: d.LocalChatEndpoint,
 		})
 	}
 
@@ -3425,6 +3592,107 @@ func (h *WebHandler) handleAgentHealth(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, result)
 }
 
+// handleLLMTask routes an LLM task to a device with a local model
+func (h *WebHandler) handleLLMTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Prompt   string `json:"prompt"`
+		Model    string `json:"model,omitempty"`
+		DeviceID string `json:"device_id,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.Prompt == "" {
+		h.writeError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+
+	// Select device with local model
+	var policy *pb.RoutingPolicy
+	if req.DeviceID != "" {
+		policy = &pb.RoutingPolicy{
+			Mode:     pb.RoutingPolicy_FORCE_DEVICE_ID,
+			DeviceId: req.DeviceID,
+		}
+	} else {
+		policy = &pb.RoutingPolicy{Mode: pb.RoutingPolicy_PREFER_LOCAL_MODEL}
+	}
+
+	result := h.orchestrator.registry.SelectDevice(policy, h.orchestrator.selfDeviceID)
+	if result.Error != nil {
+		h.writeError(w, http.StatusNotFound, result.Error.Error())
+		return
+	}
+
+	if result.Device == nil || !result.Device.HasLocalModel {
+		h.writeError(w, http.StatusNotFound, "No device with local model available")
+		return
+	}
+
+	log.Printf("[INFO] handleLLMTask: routing to device %s (%s)", result.Device.DeviceName, result.Device.DeviceId[:8])
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	var resp *pb.LLMTaskResponse
+
+	if result.ExecutedLocally {
+		// Execute locally
+		var err error
+		resp, err = h.orchestrator.RunLLMTask(ctx, &pb.LLMTaskRequest{
+			Prompt:    req.Prompt,
+			Model:     req.Model,
+			MaxTokens: 2048,
+		})
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		// Dial remote device and call RunLLMTask
+		conn, err := grpc.DialContext(ctx, result.Device.GrpcAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock(),
+		)
+		if err != nil {
+			h.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to device: %v", err))
+			return
+		}
+		defer conn.Close()
+
+		client := pb.NewOrchestratorServiceClient(conn)
+		resp, err = client.RunLLMTask(ctx, &pb.LLMTaskRequest{
+			Prompt:    req.Prompt,
+			Model:     req.Model,
+			MaxTokens: 2048,
+		})
+		if err != nil {
+			h.writeError(w, http.StatusBadGateway, fmt.Sprintf("RPC failed: %v", err))
+			return
+		}
+	}
+
+	if resp.Error != "" {
+		h.writeError(w, http.StatusInternalServerError, resp.Error)
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"output":           resp.Output,
+		"model_used":       resp.ModelUsed,
+		"tokens_generated": resp.TokensGenerated,
+		"device_id":        result.Device.DeviceId,
+		"device_name":      result.Device.DeviceName,
+	})
+}
+
 // performSummarization is the callback for rolling summaries
 func (h *WebHandler) performSummarization(currentSummary string, msgs []chatmem.ChatMessage) (string, error) {
 	if h.chat == nil {
@@ -3624,6 +3892,9 @@ func main() {
 	httpMux.HandleFunc("/api/agent", webHandler.handleAgent)
 	httpMux.HandleFunc("/api/agent/health", webHandler.handleAgentHealth)
 
+	// LLM task routing endpoint
+	httpMux.HandleFunc("/api/llm-task", webHandler.handleLLMTask)
+
 	// Start HTTP Web UI server in goroutine
 	webAddr := os.Getenv("WEB_ADDR")
 	if webAddr == "" {
@@ -3643,16 +3914,19 @@ func main() {
 		// Get self device info and convert to discovery format
 		selfInfo := orchestrator.getSelfDeviceInfo()
 		selfDevice := &discovery.DeviceAnnounce{
-			DeviceID:         selfInfo.DeviceId,
-			DeviceName:       selfInfo.DeviceName,
-			GrpcAddr:         selfInfo.GrpcAddr,
-			HttpAddr:         selfInfo.HttpAddr,
-			Platform:         selfInfo.Platform,
-			Arch:             selfInfo.Arch,
-			HasCPU:           selfInfo.HasCpu,
-			HasGPU:           selfInfo.HasGpu,
-			HasNPU:           selfInfo.HasNpu || (runtime.GOOS == "windows" && runtime.GOARCH == "arm64"),
-			CanScreenCapture: selfInfo.CanScreenCapture,
+			DeviceID:          selfInfo.DeviceId,
+			DeviceName:        selfInfo.DeviceName,
+			GrpcAddr:          selfInfo.GrpcAddr,
+			HttpAddr:          selfInfo.HttpAddr,
+			Platform:          selfInfo.Platform,
+			Arch:              selfInfo.Arch,
+			HasCPU:            selfInfo.HasCpu,
+			HasGPU:            selfInfo.HasGpu,
+			HasNPU:            selfInfo.HasNpu || (runtime.GOOS == "windows" && runtime.GOARCH == "arm64"),
+			CanScreenCapture:  selfInfo.CanScreenCapture,
+			HasLocalModel:     selfInfo.HasLocalModel,
+			LocalModelName:    selfInfo.LocalModelName,
+			LocalChatEndpoint: selfInfo.LocalChatEndpoint,
 		}
 
 		discoverySvc := discovery.NewService(discoveryPort, selfDevice, &discoveryCallback{registry: orchestrator.registry})
@@ -3717,6 +3991,9 @@ func (dc *discoveryCallback) OnDeviceDiscovered(device *discovery.DeviceAnnounce
 		device.HasGPU,
 		device.HasNPU,
 		device.CanScreenCapture,
+		device.HasLocalModel,
+		device.LocalModelName,
+		device.LocalChatEndpoint,
 	)
 }
 

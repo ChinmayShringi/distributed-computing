@@ -60,6 +60,8 @@ func (s *OrchestratorServer) registerSelf() {
 | `BEST_AVAILABLE` | Prefers NPU > GPU > CPU |
 | `REQUIRE_NPU` | Only selects NPU-capable devices, fails if none |
 | `PREFER_REMOTE` | Selects non-local device if available |
+| `PREFER_LOCAL_MODEL` | Prefers device with local LLM model (Ollama) |
+| `REQUIRE_LOCAL_MODEL` | Only selects devices with local LLM, fails if none |
 | `FORCE_DEVICE_ID` | Selects specific device by ID |
 
 ### Selection Algorithm
@@ -122,7 +124,10 @@ curl http://localhost:8080/api/devices
     "arch": "arm64",
     "capabilities": ["cpu"],
     "grpc_addr": "127.0.0.1:50051",
-    "can_screen_capture": true
+    "can_screen_capture": true,
+    "has_local_model": true,
+    "local_model_name": "llama3.2:3b",
+    "local_chat_endpoint": "http://localhost:11434"
   },
   {
     "device_id": "f66a8dc8-2a81-4f30-a664-c0727359c7c5",
@@ -131,7 +136,8 @@ curl http://localhost:8080/api/devices
     "arch": "amd64",
     "capabilities": ["cpu"],
     "grpc_addr": "10.20.38.80:50051",
-    "can_screen_capture": true
+    "can_screen_capture": true,
+    "has_local_model": false
   }
 ]
 ```
@@ -150,6 +156,10 @@ message DeviceInfo {
   string grpc_addr = 8;          // Reachable address
   bool can_screen_capture = 9;   // True if device can capture screen
   string http_addr = 10;         // Bulk HTTP server address (e.g., "10.0.0.5:8081")
+  // ... fields 11-13 for LLM throughput and RAM ...
+  bool has_local_model = 14;        // True if Ollama/local LLM is running
+  string local_model_name = 15;     // Loaded model name (e.g., "llama3.2:3b")
+  string local_chat_endpoint = 16;  // Chat endpoint URL
 }
 ```
 
