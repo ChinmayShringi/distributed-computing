@@ -2651,14 +2651,16 @@ func (h *WebHandler) handleStreamStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "PREFER_REMOTE":
+		// Select non-local device by comparing device IDs
 		for _, d := range devicesResp.Devices {
-			if d.GrpcAddr != "" && d.GrpcAddr != "localhost:50051" && d.GrpcAddr != "127.0.0.1:50051" {
+			if d.DeviceId != h.orchestrator.selfDeviceID {
 				selectedDevice = d
 				break
 			}
 		}
 		if selectedDevice == nil {
-			selectedDevice = devicesResp.Devices[0]
+			h.writeError(w, http.StatusNotFound, "No remote device available")
+			return
 		}
 	default:
 		for _, d := range devicesResp.Devices {
