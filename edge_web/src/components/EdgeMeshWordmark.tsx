@@ -21,7 +21,7 @@ export const EdgeMeshWordmark = ({ size = 'md', animated = false }: EdgeMeshWord
   } : {};
 
   return (
-    <Wrapper 
+    <Wrapper
       className={`font-orbitron font-bold tracking-wider ${sizeClasses[size]}`}
       {...animationProps}
     >

@@ -7,7 +7,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const navLinks = [
   { name: 'Features', href: '/features' },
-  { name: 'Pricing', href: '/pricing' },
   { name: 'About', href: '/about' },
 ];
 
@@ -29,9 +28,8 @@ export const PublicNavbar = () => {
               <Link
                 key={link.name}
                 to={link.href}
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  location.pathname === link.href ? 'text-primary' : 'text-muted-foreground'
-                }`}
+                className={`text-sm font-medium transition-colors hover:text-primary ${location.pathname === link.href ? 'text-primary' : 'text-muted-foreground'
+                  }`}
               >
                 {link.name}
               </Link>

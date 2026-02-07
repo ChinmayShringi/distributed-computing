@@ -26,10 +26,11 @@ const values = [
 ];
 
 const team = [
-  { name: 'Alex Chen', role: 'Co-Founder & CEO', avatar: 'AC' },
-  { name: 'Sarah Kim', role: 'Co-Founder & CTO', avatar: 'SK' },
-  { name: 'Marcus Johnson', role: 'Head of Engineering', avatar: 'MJ' },
-  { name: 'Emily Rodriguez', role: 'Head of Product', avatar: 'ER' },
+  { name: 'Manav Parikh', avatar: 'MP' },
+  { name: 'Chinmay Shringi', avatar: 'CS' },
+  { name: 'Bharath Gera', avatar: 'BG' },
+  { name: 'Rahil Singhi', avatar: 'RS' },
+  { name: 'Sariya Rizwan', avatar: 'SR' },
 ];
 
 export const AboutPage = () => {
@@ -61,17 +62,17 @@ export const AboutPage = () => {
             <h2 className="text-2xl font-bold mb-4">Our Story</h2>
             <div className="space-y-4 text-muted-foreground">
               <p>
-                Edge Mesh started with a simple observation: the world's computing power is 
+                Edge Mesh started with a simple observation: the world's computing power is
                 increasingly distributed, yet our tools for managing it remain centralized.
               </p>
               <p>
-                We set out to build a platform that treats every device—from powerful 
-                workstations to tiny IoT sensors—as a first-class compute node. Our mesh 
-                network approach enables seamless workload distribution, real-time monitoring, 
+                We set out to build a platform that treats every device—from powerful
+                workstations to tiny IoT sensors—as a first-class compute node. Our mesh
+                network approach enables seamless workload distribution, real-time monitoring,
                 and enterprise-grade security across any device fleet.
               </p>
               <p>
-                Today, Edge Mesh powers distributed computing for teams ranging from indie 
+                Today, Edge Mesh powers distributed computing for teams ranging from indie
                 developers to Fortune 500 companies. We're just getting started.
               </p>
             </div>
@@ -130,7 +131,6 @@ export const AboutPage = () => {
                   {member.avatar}
                 </div>
                 <h3 className="font-semibold text-sm">{member.name}</h3>
-                <p className="text-xs text-muted-foreground">{member.role}</p>
               </motion.div>
             ))}
           </div>
