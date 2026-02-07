@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const systemPrompt = `You are a task planner for a distributed orchestration system.
+const systemPrompt = `You are a task planner for a distributed AI orchestration system.
 You must output ONLY valid JSON — no markdown, no commentary, no explanation.
 
 The JSON must have this exact structure:
@@ -22,7 +22,7 @@ The JSON must have this exact structure:
       "tasks": [
         {
           "task_id": "<unique short id>",
-          "kind": "SYSINFO" or "ECHO" or "LLM_GENERATE",
+          "kind": "SYSINFO" or "ECHO" or "LLM_GENERATE" or "IMAGE_GENERATE",
           "input": "<command input or prompt text>",
           "target_device_id": "<device_id or empty for auto-assign>",
           "prompt_tokens": 100,
@@ -42,24 +42,66 @@ Rules:
 - Valid task kinds:
   * SYSINFO: gather system info from a device
   * ECHO: echo input text back
-  * LLM_GENERATE: run LLM inference (summarize, generate text, answer questions, generate code)
-- For LLM_GENERATE tasks:
-  * input = the prompt text
-  * prompt_tokens = estimated input tokens (rough: ~4 chars per token)
-  * max_output_tokens = expected output length (summary=200, code=500, chat=300)
-  * Prefer NPU devices (Windows Snapdragon), then GPU, then CPU
-  * Prefer devices with more RAM for larger models
-- target_device_id: use a specific device_id from the devices list, or leave empty for auto-assignment
+  * LLM_GENERATE: run LLM inference (summarize, generate text, answer questions, code)
+  * IMAGE_GENERATE: generate images
+
+**CRITICAL: LLM Device Selection**
+- Each device has "has_local_model" field - if true, the device can run LLM tasks
+- Only assign LLM_GENERATE tasks to devices with "has_local_model": true
+- Check "local_model_name" to understand model capabilities:
+  * Vision models (qwen3-vl*, gpt-4-vision): Can handle text + image tasks
+  * Chat models (llama*, qwen3-4b, mistral*): Text generation, code, Q&A
+- Prefer NPU devices for LLM tasks, then GPU, then CPU
+
+**Multi-Device Task Distribution Strategy**
+When user request is complex with multiple independent parts:
+1. Identify distinct sub-tasks that can run in parallel
+2. Create multiple LLM_GENERATE tasks in the SAME group (group 0)
+3. Assign each task to a DIFFERENT LLM-capable device
+4. Maximize parallelism: use as many LLM devices as you have sub-tasks
+
+Examples of complex requests to decompose:
+- "Analyze X, Y, and Z" → 3 LLM tasks (X, Y, Z) to different devices
+- "Compare A vs B" → 2 LLM tasks (analyze A, analyze B) to different devices  
+- "Create 3 summaries of different aspects" → 3 LLM tasks to different devices
+
+**Task Decomposition Examples:**
+
+User: "Perform analysis across 3 dimensions: (1) Technical architecture (2) AI capabilities (3) Business value"
+→ Output:
+{
+  "groups": [{
+    "index": 0,
+    "tasks": [
+      {"task_id": "tech", "kind": "LLM_GENERATE", "input": "Analyze the technical architecture in detail", "target_device_id": "device-A-with-llm", "prompt_tokens": 100, "max_output_tokens": 400},
+      {"task_id": "ai", "kind": "LLM_GENERATE", "input": "Evaluate AI/ML capabilities comprehensively", "target_device_id": "device-B-with-llm", "prompt_tokens": 100, "max_output_tokens": 400},
+      {"task_id": "biz", "kind": "LLM_GENERATE", "input": "Assess business value and use cases", "target_device_id": "device-C-with-llm", "prompt_tokens": 100, "max_output_tokens": 400}
+    ]
+  }],
+  "reduce": {"kind": "CONCAT"}
+}
+
+User: "What is EdgeMesh in 2 sentences?"
+→ Output (single task, simple request):
+{
+  "groups": [{
+    "index": 0,
+    "tasks": [
+      {"task_id": "sum", "kind": "LLM_GENERATE", "input": "Explain EdgeMesh in exactly 2 sentences", "target_device_id": "device-with-best-llm", "prompt_tokens": 50, "max_output_tokens": 100}
+    ]
+  }],
+  "reduce": {"kind": "CONCAT"}
+}
+
+**Additional Rules:**
+- target_device_id: use a specific device_id from the devices list with has_local_model=true
+- If multiple LLM devices available, DISTRIBUTE tasks across them for parallel execution
+- prompt_tokens: estimate ~4 chars per token
+- max_output_tokens: summary=200, detailed=500, code=800
 - File paths must be relative to ./shared, no absolute paths, no ".." traversal
 - reduce.kind must be "CONCAT"
 - task_id must be unique across all tasks
-
-Model/Task Mapping (use LLM_GENERATE for these):
-- User wants to summarize text → LLM_GENERATE on NPU device
-- User wants to generate code → LLM_GENERATE on NPU device  
-- User wants to chat/answer questions → LLM_GENERATE on NPU device
-- User wants system info → SYSINFO (not LLM)
-- User wants to test echo → ECHO (not LLM)`
+- For non-LLM tasks (SYSINFO, ECHO): target_device_id can be empty for auto-assignment`
 
 // OpenAICompat implements Provider by calling an OpenAI-compatible /v1/chat/completions endpoint.
 type OpenAICompat struct {
