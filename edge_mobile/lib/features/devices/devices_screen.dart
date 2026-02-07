@@ -10,10 +10,142 @@ import '../../shared/widgets/status_strip.dart';
 import '../../shared/widgets/capability_chip.dart';
 import '../../shared/widgets/glass_container.dart';
 import '../../shared/widgets/three_d_badge_icon.dart';
-import '../../data/mock_data.dart';
+import '../../services/grpc_service.dart';
+import 'dart:async';
 
-class DevicesScreen extends StatelessWidget {
+class DevicesScreen extends StatefulWidget {
   const DevicesScreen({super.key});
+
+  @override
+  State<DevicesScreen> createState() => _DevicesScreenState();
+}
+
+class _DevicesScreenState extends State<DevicesScreen> {
+  final _grpcService = GrpcService();
+  List<Map<String, dynamic>> _devices = [];
+  List<Map<String, dynamic>> _filteredDevices = [];
+  bool _isLoading = true;
+  String? _errorMessage;
+  Timer? _refreshTimer;
+  String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+    _startPeriodicRefresh();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startPeriodicRefresh() {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) _loadDevices(silent: true);
+    });
+  }
+
+  Future<void> _loadDevices({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final devices = await _grpcService.listDevices();
+      
+      // Enrich devices with status info
+      final enrichedDevices = await Future.wait(
+        devices.map((device) async {
+          try {
+            final status = await _grpcService.getDeviceStatus(device['device_id'] as String);
+            
+            // Map backend data to UI format
+            final cpuLoad = (status['cpu_load'] as num).toDouble();
+            final memUsedMb = (status['mem_used_mb'] as num).toDouble();
+            final memTotalMb = (status['mem_total_mb'] as num).toDouble();
+            
+            return {
+              'id': device['device_id'],
+              'name': device['device_name'],
+              'os': '${device['platform']} ${device['arch']}',
+              'type': _deriveDeviceType(device['platform'] as String),
+              'status': 'online', // If we got status, it's online
+              'cpu': (cpuLoad * 100).clamp(0, 100).toInt(),
+              'memory': ((memUsedMb / memTotalMb) * 100).clamp(0, 100).toInt(),
+              'isLocal': device['grpc_addr'].toString().contains('127.0.0.1') || 
+                         device['grpc_addr'].toString().contains('localhost'),
+              'capabilities': device['capabilities'] as List,
+              'grpc_addr': device['grpc_addr'],
+            };
+          } catch (e) {
+            // Device is offline or unreachable
+            return {
+              'id': device['device_id'],
+              'name': device['device_name'],
+              'os': '${device['platform']} ${device['arch']}',
+              'type': _deriveDeviceType(device['platform'] as String),
+              'status': 'offline',
+              'cpu': 0,
+              'memory': 0,
+              'isLocal': false,
+              'capabilities': device['capabilities'] as List,
+              'grpc_addr': device['grpc_addr'],
+            };
+          }
+        })
+      );
+
+      if (mounted) {
+        setState(() {
+          _devices = enrichedDevices;
+          _filteredDevices = enrichedDevices;
+          _isLoading = false;
+          _errorMessage = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to load devices: $e';
+        });
+      }
+    }
+  }
+
+  String _deriveDeviceType(String platform) {
+    switch (platform.toLowerCase()) {
+      case 'android':
+      case 'ios':
+        return 'mobile';
+      case 'linux':
+        return 'server';
+      default:
+        return 'desktop';
+    }
+  }
+
+  void _filterDevices(String query) {
+    setState(() {
+      _searchQuery = query;
+      if (query.isEmpty) {
+        _filteredDevices = _devices;
+      } else {
+        _filteredDevices = _devices.where((device) {
+          final name = device['name'].toString().toLowerCase();
+          final os = device['os'].toString().toLowerCase();
+          final searchLower = query.toLowerCase();
+          return name.contains(searchLower) || os.contains(searchLower);
+        }).toList();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +157,7 @@ class DevicesScreen extends StatelessWidget {
             
             const StatusStrip(
               isConnected: true,
-              serverAddress: '192.168.1.10:50051',
+              serverAddress: '192.168.1.195:50051',
               isDangerous: false,
             ),
 
@@ -40,6 +172,7 @@ class DevicesScreen extends StatelessWidget {
                       borderRadius: 12,
                       child: TextField(
                         style: GoogleFonts.inter(fontSize: 14),
+                        onChanged: _filterDevices,
                         decoration: InputDecoration(
                           hintText: 'Search secure nodes...',
                           hintStyle: GoogleFonts.inter(color: AppColors.mutedIcon, fontSize: 13),
@@ -57,8 +190,8 @@ class DevicesScreen extends StatelessWidget {
                     padding: EdgeInsets.zero,
                     borderRadius: 12,
                     child: IconButton(
-                      onPressed: () {},
-                      icon: const Icon(LucideIcons.sliders, size: 16, color: AppColors.mutedIcon),
+                      onPressed: _loadDevices,
+                      icon: const Icon(LucideIcons.refreshCw, size: 16, color: AppColors.mutedIcon),
                     ),
                   ),
                 ],
@@ -67,19 +200,76 @@ class DevicesScreen extends StatelessWidget {
             
             // Device List
             Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: MockData.devices.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                physics: const BouncingScrollPhysics(),
-                itemBuilder: (context, index) {
-                  final device = MockData.devices[index];
-                  return _DeviceCard(device: device)
-                      .animate()
-                      .fadeIn(delay: (40 * index).ms)
-                      .slideY(begin: 0.1, end: 0);
-                },
-              ),
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: AppColors.safeGreen,
+                      ),
+                    )
+                  : _errorMessage != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(LucideIcons.alertCircle, size: 48, color: AppColors.primaryRed),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _errorMessage!,
+                                  style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 14),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 24),
+                                ElevatedButton.icon(
+                                  onPressed: _loadDevices,
+                                  icon: const Icon(LucideIcons.refreshCw, size: 16),
+                                  label: const Text('RETRY'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.safeGreen,
+                                    foregroundColor: Colors.black,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : _filteredDevices.isEmpty
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(32),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(LucideIcons.server, size: 48, color: AppColors.mutedIcon),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      _searchQuery.isEmpty
+                                          ? 'No devices registered'
+                                          : 'No devices found',
+                                      style: GoogleFonts.inter(color: AppColors.textSecondary, fontSize: 14),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _loadDevices,
+                              color: AppColors.safeGreen,
+                              child: ListView.separated(
+                                padding: const EdgeInsets.symmetric(horizontal: 20),
+                                itemCount: _filteredDevices.length,
+                                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                itemBuilder: (context, index) {
+                                  final device = _filteredDevices[index];
+                                  return _DeviceCard(device: device)
+                                      .animate()
+                                      .fadeIn(delay: (40 * index).ms)
+                                      .slideY(begin: 0.1, end: 0);
+                                },
+                              ),
+                            ),
             ),
           ],
         ),
